@@ -1,83 +1,215 @@
-// helpers/helper.js
-
-const UAParser = require("ua-parser-js");
+const UserSession = require("../models/UserSession");
+const Option = require("../models/Option");
+const crypto = require("crypto");
+const path = require("path");
 const geoip = require("geoip-lite");
-const crypto = require("crypto"); 
-const BCRYPT_ROUNDS = 12;  
-// -----------------------------------------------------------------------------
-// 1) Get client IP (works with direct, proxy, Cloudflare)
-// -----------------------------------------------------------------------------
-function getRealIp(req) {
-  const headers = req && req.headers ? req.headers : {};
+const maxmind = require("maxmind");
+const { Op } = require("sequelize");
+const { transporter } = require("../config/mail");
 
-  // Cloudflare
-  const cfIp = headers["cf-connecting-ip"];
-  if (cfIp) return cfIp;
+const { returnMailTemplate } = require("./helpers/mailUIHelper");
+const UAParser = require("ua-parser-js");
 
-  // Proxy / Nginx
-  const xff = headers["x-forwarded-for"];
-  if (xff) {
-    // can be: "client, proxy1, proxy2"
-    const first = xff.split(",")[0].trim();
-    if (first) return first;
+// global variables
+let lookup;
+const dbPath = path.join(__dirname, "/ip-db/GeoLite2-City.mmdb");
+
+async function handleSessionCreate(req, user_id, transaction = null) {
+  const ip = getRealIp(req);
+  const locationData = await getLocation(ip);
+  const userAgentData = await getUserAgentData(req);
+  const maxUserSessionDurationDays = parseInt(
+    await getOption("max_user_session_duration_days", 7)
+  );
+  const maxUserSessionDurationSeconds = maxUserSessionDurationDays * 24 * 3600;
+
+  const token = crypto.randomBytes(32).toString("base64url");
+  const now = new Date();
+  const expires_at = new Date(
+    now.getTime() + maxUserSessionDurationSeconds * 1000
+  );
+
+  // Mark already-expired active sessions as inactive (status: 2=inactive 1=active)
+  await UserSession.update(
+    { status: 2 },
+    {
+      where: {
+        user_id,
+        status: 1,
+        expires_at: { [Op.lt]: now },
+      },
+      transaction,
+    }
+  );
+
+  // Count current ACTIVE sessions
+  const activeCount = await UserSession.count({
+    where: { user_id, status: 1 },
+    transaction,
+  });
+
+  const maxUserSessions = parseInt(await getOption("max_user_sessions", 4));
+
+  if (activeCount < maxUserSessions) {
+    // CREATE new active session
+    await UserSession.create(
+      {
+        user_id,
+        session_token: token,
+        ip: ip,
+        userAgent: userAgentData.userAgent,
+        country: locationData.countryCode,
+        os: userAgentData.os,
+        browser: userAgentData.browser,
+        status: 1, // active
+        expires_at: expires_at,
+      },
+      { transaction }
+    );
+    return { token, expires_at };
   }
 
-  // Express
-  if (req && req.ip) return req.ip;
+  // Get the oldest active session
+  const oldestActive = await UserSession.findOne({
+    where: { user_id },
+    order: [["expires_at", "ASC"]],
+    transaction,
+  });
 
-  // Node fallback
-  const conn = req && req.connection;
-  if (conn && conn.remoteAddress) return conn.remoteAddress;
+  if (!oldestActive) {
+    // fallback: create if none found
+    await UserSession.create(
+      {
+        user_id,
+        session_token: token,
+        ip: ip,
+        user_agent: userAgentData.userAgent,
+        country: locationData.countryCode,
+        os: userAgentData.os,
+        browser: userAgentData.browser,
+        status: 1, // active
+        expires_at: expires_at,
+      },
+      { transaction }
+    );
+    return { token, expires_at };
+  }
 
-  const socket = req && req.socket;
-  if (socket && socket.remoteAddress) return socket.remoteAddress;
+  await oldestActive.update(
+    {
+      user_id,
+      session_token: token,
+      ip: ip,
+      user_agent: userAgentData.userAgent,
+      country: locationData.countryCode,
+      os: userAgentData.os,
+      browser: userAgentData.browser,
+      status: 1, // active
+      expires_at: expires_at,
+    },
+    { transaction }
+  );
 
-  return "Unknown";
+  return { token, expires_at };
 }
 
-function getUserAgentData(req) {
-  const headers = req && req.headers ? req.headers : {};
-  const ua = headers["user-agent"] || "";
-  const parsed = new UAParser(ua).getResult();
+async function sendOtpMail(user, otpObj, title, action) {
+  // Destructure otp and expiry from otpObj
+  const { otp, expiry } = otpObj;
 
-  return {
-    os: parsed.os?.name
-      ? `${parsed.os.name} ${parsed.os.version || ""}`.trim()
-      : "unknown",
-    browser: parsed.browser?.name
-      ? `${parsed.browser.name} ${parsed.browser.version || ""}`.trim()
-      : "unknown",
-    userAgent: ua,
-  };
+  // Ensure that OTP and expiry are correctly destructured
+  if (!otp || !expiry) {
+    console.error("Invalid OTP object:", otpObj); // Log invalid OTP object
+    throw new Error("OTP object is missing required properties");
+  }
+
+  const htmlContent = returnMailTemplate(user, otpObj, action);
+
+  return transporter.sendMail({
+    from: `Mighty Games <no-reply@gplinks.org>`,
+    // from: `"Mighty Games" <no-reply@mightygames.com>`,
+    to: user.email,
+    subject: title,
+    text: `Your OTP is: ${otp} (valid for 5 minutes)`,
+    html: htmlContent,
+  });
+}
+
+function generateOtp() {
+  // Generate a random 6-digit OTP
+  const otp = crypto.randomInt(100000, 1000000); // Generates a number between 100000 and 999999
+  return otp.toString(); // Return the OTP as a string
+}
+
+async function generateUniqueUsername(base) {
+  const cleaned = (base || "user").toLowerCase().replace(/[^a-z0-9_.]/g, "");
+  let candidate =
+    cleaned.length >= 3
+      ? cleaned.slice(0, 30)
+      : `user${crypto.randomInt(1000, 9999)}`;
+  let i = 0;
+
+  while (true) {
+    const exists = await User.findOne({ where: { username: candidate } });
+    if (!exists) return candidate;
+    i += 1;
+    candidate = (cleaned || "user").slice(0, 24) + i;
+  }
+}
+
+async function getOption(optionName, dValue = null) {
+  try {
+    const option = await Option.findOne({ where: { name: optionName } });
+    if (option) {
+      option.dValue = dValue;
+    }
+
+    return dValue; // Return default value if option is not found
+  } catch (error) {
+    console.error("Error fetching option:", error);
+    return dValue; // Return default value in case of error
+  }
+}
+
+function getRealIp(req) {
+  // Check for Cloudflare's header first
+  const cfIp = req.headers["cf-connecting-ip"];
+  if (cfIp) return cfIp;
+
+  // Check for X-Forwarded-For header (usually used by proxies)
+  const forwardedIps = req.headers["x-forwarded-for"];
+  if (forwardedIps) {
+    const ips = forwardedIps.split(",");
+    return ips[0].trim(); // Return the first IP in the list
+  }
+
+  // Fallback to req.ip, which is the IP of the client directly connected to the server
+  return req.ip || req.connection.remoteAddress;
 }
 
 async function getLocation(ip) {
+  if (!lookup) {
+    try {
+      lookup = await maxmind.open(dbPath);
+      // console.log("GeoLite2 database loaded successfully.");
+    } catch (err) {
+      console.error("Error loading GeoLite2 database:", err);
+      return {
+        city: "Unknown",
+        state: "Unknown",
+        country: "Unknown",
+        countryCode: "Unk",
+      };
+    }
+  }
+
   try {
-    if (!ip || ip === "Unknown") {
-      return {
-        city: "Unknown",
-        state: "Unknown",
-        country: "Unknown",
-        countryCode: "Unk",
-      };
-    }
-
-    const geo = geoip.lookup(ip);
-
-    if (!geo) {
-      return {
-        city: "Unknown",
-        state: "Unknown",
-        country: "Unknown",
-        countryCode: "Unk",
-      };
-    }
-
+    const locationData = lookup.get(ip) || {};
     return {
-      city: geo.city || "Unknown",
-      state: Array.isArray(geo.region) ? geo.region[0] : geo.region || "Unknown",
-      country: geo.country || "Unknown",
-      countryCode: geo.country || "Unk",
+      city: locationData.city?.names?.en || "Unknown",
+      state: locationData.subdivisions?.[0]?.names?.en || "Unknown",
+      country: locationData.country?.names?.en || "Unknown",
+      countryCode: locationData.country?.iso_code || "Unk", // ISO code for the country
     };
   } catch (err) {
     console.error("Error looking up IP:", err);
@@ -90,27 +222,78 @@ async function getLocation(ip) {
   }
 }
 
-// -----------------------------------------------------------------------------
-// 4) getOption – in this project we just return default value
-//    (no Option model / DB dependency for now)
-// -----------------------------------------------------------------------------
-async function getOption(optionName, dValue = null) {
-  // In future you can connect this with an "options" table.
-  // For now, always return the provided default.
-  return dValue;
+function getUserAgentData(req) {
+  const ua = req.headers["user-agent"] || "";
+  const parsed = new UAParser(ua).getResult();
+
+  return {
+    os: parsed.os?.name
+      ? `${parsed.os.name} ${parsed.os.version || ""}`.trim()
+      : "unknown",
+    browser: parsed.browser?.name
+      ? `${parsed.browser.name} ${parsed.browser.version || ""}`.trim()
+      : null,
+    userAgent: ua,
+  };
 }
-function generateOtp() {
-  const otp = crypto.randomInt(100000, 1000000); // 100000–999999
-  return otp.toString();
+function generateRandomUsername() {
+  const prefix = "user";
+  const randomNum = Math.floor(100000 + Math.random() * 900000); // 6-digit random number
+  return `${prefix}${randomNum}`;
 }
-// -----------------------------------------------------------------------------
-// Exports – ONLY what login/session actually needs
-// -----------------------------------------------------------------------------
+
+function generateRandomPassword(length = 10) {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$!&";
+  let pass = "";
+  for (let i = 0; i < length; i++) {
+    pass += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return pass;
+}
+
+function isValidEmail(email) {
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  return emailRegex.test(email); // Returns true if it's a valid email, false otherwise
+}
+function isValidPhone(phone) {
+  const phoneRegex = /^[0-9]{8,15}$/;
+  return phoneRegex.test(phone);
+}
+
+async function sendOtpMail(user, otpObj, title, action) {
+  // Destructure otp and expiry from otpObj
+  const { otp, expiry } = otpObj;
+
+  // Ensure that OTP and expiry are correctly destructured
+  if (!otp || !expiry) {
+    console.error("Invalid OTP object:", otpObj); // Log invalid OTP object
+    throw new Error("OTP object is missing required properties");
+  }
+
+  const htmlContent = returnMailTemplate(user, otpObj, action);
+
+  return transporter.sendMail({
+    from: `Mighty Games <no-reply@gplinks.org>`,
+    // from: `"Mighty Games" <no-reply@mightygames.com>`,
+    to: user.email,
+    subject: title,
+    text: `Your OTP is: ${otp} (valid for 5 minutes)`,
+    html: htmlContent,
+  });
+}
+
 module.exports = {
   getRealIp,
-  getUserAgentData,
-  getLocation,
   getOption,
+  generateUniqueUsername,
   generateOtp,
-    BCRYPT_ROUNDS, 
+  handleSessionCreate,
+  getLocation,
+  getUserAgentData,
+  generateRandomUsername,
+  generateRandomPassword,
+  isValidEmail,
+  isValidPhone,
+  sendOtpMail,
 };

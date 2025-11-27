@@ -1,113 +1,151 @@
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/db');
+const { DataTypes } = require("sequelize");
+const sequelize = require("../config/db"); // <-- update path as per project
 
 const User = sequelize.define(
-  'User',
+  "User",
   {
     id: {
       type: DataTypes.INTEGER,
-      autoIncrement: true,
       primaryKey: true,
+      autoIncrement: true,
     },
+
     username: {
       type: DataTypes.STRING(50),
       allowNull: false,
       unique: true,
     },
+
     email: {
       type: DataTypes.STRING(100),
-      allowNull: true,
+      allowNull: false,
       unique: true,
+      validate: { isEmail: true },
     },
+
     phone: {
       type: DataTypes.STRING(100),
       allowNull: true,
-      unique: true,
+    },
+
+    register_type: {
+      type: DataTypes.ENUM("gmail", "manual"),
+      allowNull: false,
+      defaultValue: "manual",
     },
     password: {
-      type: DataTypes.STRING(255), // hashed password
-      allowNull: true,             // NULL for Google-only users
+      type: DataTypes.STRING(255),
+      allowNull: false,
     },
+
     type: {
-      type: DataTypes.ENUM('bot', 'real'),
-      defaultValue: 'real',
+      type: DataTypes.ENUM("bot", "real"),
+      allowNull: false,
+      defaultValue: "real",
     },
+
     gender: {
-      type: DataTypes.ENUM('male', 'female', 'other', 'prefer_not_to_say'),
+      type: DataTypes.ENUM("male", "female", "other", "prefer_not_to_say"),
       allowNull: true,
     },
+
     city: {
       type: DataTypes.STRING(100),
-      allowNull: true,
     },
+
     state: {
       type: DataTypes.STRING(100),
-      allowNull: true,
     },
+
     country: {
       type: DataTypes.STRING(100),
-      allowNull: true,
     },
+
     address: {
       type: DataTypes.TEXT,
-      allowNull: true,
     },
+
     avatar: {
       type: DataTypes.STRING(255),
-      allowNull: true,
     },
+
     dob: {
       type: DataTypes.DATEONLY,
-      allowNull: true,
     },
+
     bio: {
       type: DataTypes.TEXT,
-      allowNull: true,
     },
+
     coins: {
       type: DataTypes.INTEGER,
       defaultValue: 0,
     },
+
     total_likes: {
       type: DataTypes.INTEGER,
       defaultValue: 0,
     },
+
     total_matches: {
       type: DataTypes.INTEGER,
       defaultValue: 0,
     },
+
     total_rejects: {
       type: DataTypes.INTEGER,
       defaultValue: 0,
     },
+
     total_spent: {
       type: DataTypes.DECIMAL(10, 2),
+      defaultValue: 0.0,
+    },
+
+    initial_coins: {
+      type: DataTypes.INTEGER,
       defaultValue: 0,
     },
 
-    // Auth / flow control
-    auth_provider: {
-      type: DataTypes.ENUM('password', 'google'),
-      allowNull: false,
-      defaultValue: 'password',
+    ip_address: {
+      type: DataTypes.STRING(45),
     },
-    status: {
-      type: DataTypes.ENUM('active', 'blocked', 'deleted', 'pending'),
-      allowNull: false,
-      defaultValue: 'active',
+
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true,
     },
-    email_verified: {
+
+    is_verified: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
     },
-    phone_verified: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
+
+    last_active: {
+      type: DataTypes.DATE,
+    },
+
+    created_at: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
+    },
+
+    updated_at: {
+      type: DataTypes.DATE,
+      defaultValue: DataTypes.NOW,
     },
   },
   {
-    tableName: 'users',
-    timestamps: true,
+    tableName: "pb_users",
+    timestamps: false,
+    underscored: true,
+    indexes: [
+      { fields: ["email"] },
+      { fields: ["username"] },
+      { fields: ["type"] },
+      { fields: ["is_active"] },
+      { fields: ["created_at"] },
+    ],
   }
 );
 

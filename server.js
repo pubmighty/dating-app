@@ -1,39 +1,31 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const sequelize = require('./config/db');
+const express = require("express");
+const sequelize = require("./config/db");
 
-const authRoutes = require('./routes/auth');
+const userRoutes = require("./routes/user/auth");
 
-// IMPORT MODELS so Sequelize knows them
-require('./models/User');
-require('./models/UserOTP');      // new
-// require('./models/UserSession');  // later when you add it
+require("dotenv").config();
 
 const app = express();
+const PORT = process.env.PORT || 5002;
 
-app.use(cors());
-app.use(express.json());
+// Trust the first proxy (required for X-Forwarded-For)
+app.set("trust proxy", 1);
 
-// Default route
-app.get('/', (req, res) => {
-  res.send({ success: true, message: 'Server Running...' });
-});
+// Serve static files from the 'public' folder
+app.use(express.static("public"));
 
-// Auth routes
-app.use('/auth', authRoutes);
+app.use(express.json({ limit: "2mb" }));
 
-const PORT = process.env.PORT || 5000;
+app.use("/v1/user", userRoutes);
 
-// Sync DB & start server
-sequelize
-  .sync()
-  .then(() => {
-    console.log(' Database connected & synced');
-    app.listen(PORT, () => {
-      console.log(` Server running on port ${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error('Failed to sync DB:', err);
-  });
+(async () => {
+  try {
+    await sequelize.authenticate();
+    await sequelize.sync({ alter: false });
+
+    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  } catch (e) {
+    console.error("DB init error:", e);
+    process.exit(1);
+  }
+})();

@@ -1,52 +1,50 @@
-// models/UserOTP.js
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db");
-const User = require("./User");
 
-const UserOTP = sequelize.define(
-  "UserOTP",
+const UserOtp = sequelize.define(
+  "UserOtp",
   {
     id: {
-      type: DataTypes.INTEGER,
-      autoIncrement: true,
+      type: DataTypes.BIGINT.UNSIGNED,
       primaryKey: true,
+      autoIncrement: true,
     },
-
-    userId: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
+    user_id: {
+      type: DataTypes.BIGINT.UNSIGNED,
+      allowNull: true,
     },
-
     otp: {
-      type: DataTypes.STRING(10),
+      type: DataTypes.STRING(6),
       allowNull: false,
     },
-
     expiry: {
       type: DataTypes.DATE,
       allowNull: false,
     },
-
+    status: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
     action: {
       type: DataTypes.STRING(50),
       allowNull: false,
-      defaultValue: "forgot_password",
-    },
-
-    status: {
-      // 0 = unused, 1 = used
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      defaultValue: 0,
     },
   },
   {
-    tableName: "user_otps",
+    tableName: "pb_user_otps",
     timestamps: true,
+    indexes: [
+      {
+        name: "idx_user_action_status_expiry",
+        fields: ["user_id", "action", "status", "expiry"],
+      },
+      {
+        name: "idx_action_expiry",
+        fields: ["action", "expiry"],
+      },
+    ],
   }
 );
 
-UserOTP.belongsTo(User, { foreignKey: "userId", as: "user" });
-User.hasMany(UserOTP, { foreignKey: "userId", as: "otps" });
-
-module.exports = UserOTP;
+module.exports = UserOtp;
