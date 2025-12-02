@@ -1,5 +1,6 @@
 // controllers/coins/getPackage.js
 const Joi = require("joi");
+const sequelize = require("../../config/db");
 const CoinPackage = require("../../models/CoinPackage");
 const User = require("../../models/User");
 const UserSetting = require("../../models/UserSetting");
@@ -8,7 +9,7 @@ const {
   isUserSessionValid,
   getDobRangeFromAges,
 } = require("../../utils/helper");
-const { Op, sequelize } = require("sequelize");
+const { Op } = require("sequelize");
 
 async function getPackage(req, res) {
   try {
@@ -541,11 +542,169 @@ async function getRandomPersons(req, res) {
     });
   }
 }
+async function updateUserProfile(req, res) {
+  const transaction = await sequelize.transaction();
 
+  try {
+    const updateProfileSchema = Joi.object({
+      username: Joi.string().min(3).max(50).optional(),
+      email: Joi.string().email().max(100).optional().allow(null, ""),
+      phone: Joi.string().max(100).optional().allow(null, ""),
+      gender: Joi.string()
+        .valid("male", "female", "other", "prefer_not_to_say")
+        .optional()
+        .allow(null),
+      city: Joi.string().max(100).optional().allow(null, ""),
+      state: Joi.string().max(100).optional().allow(null, ""),
+      country: Joi.string().max(100).optional().allow(null, ""),
+      address: Joi.string().optional().allow(null, ""),
+      avatar: Joi.string().max(255).optional().allow(null, ""),
+      dob: Joi.date().iso().optional().allow(null, ""),
+      bio: Joi.string().optional().allow(null, ""),
+    }).min(1);
+    // 1) Validate body
+    const { error, value } = updateProfileSchema.validate(req.body, {
+      abortEarly: true,
+      stripUnknown: true,
+    });
+
+    if (error) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+      });
+    }
+
+    //  Check session
+    const sessionResult = await isUserSessionValid(req);
+    if (!sessionResult.success) {
+      await transaction.rollback();
+      return res.status(401).json(sessionResult);
+    }
+
+    const userId = Number(sessionResult.data);
+
+    // 3) Load current user
+    const user = await User.findByPk(userId, { transaction });
+
+    if (!user) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    // Handle unique checks for username/email if they are being changed
+    if (value.username && value.username !== user.username) {
+      const existingUsername = await User.findOne({
+        where: { username: value.username },
+        transaction,
+      });
+
+      if (existingUsername) {
+        await transaction.rollback();
+        return res.status(409).json({
+          success: false,
+          message: "Username is already taken.",
+        });
+      }
+    }
+
+    if (
+      typeof value.email !== "undefined" && // email provided (can be null or empty)
+      value.email && // not empty string
+      value.email !== user.email
+    ) {
+      const existingEmail = await User.findOne({
+        where: { email: value.email },
+        transaction,
+      });
+
+      if (existingEmail) {
+        await transaction.rollback();
+        return res.status(409).json({
+          success: false,
+          message: "Email is already taken.",
+        });
+      }
+    }
+
+    const updatableFields = [
+      "username",
+      "email",
+      "phone",
+      "gender",
+      "city",
+      "state",
+      "country",
+      "address",
+      "avatar",
+      "dob",
+      "bio",
+    ];
+
+    const updates = {};
+
+    for (const key of updatableFields) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        updates[key] = value[key] === "" ? null : value[key]; // treat "" as null
+      }
+    }
+
+    // Update timestamp
+    updates.updated_at = new Date();
+
+    //  Apply update
+    await user.update(updates, { transaction });
+
+    await transaction.commit();
+
+    //  Return updated user (without sensitive stuff like password)
+    const safeUser = {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      phone: user.phone,
+      gender: user.gender,
+      city: user.city,
+      state: user.state,
+      country: user.country,
+      address: user.address,
+      avatar: user.avatar,
+      dob: user.dob,
+      bio: user.bio,
+      coins: user.coins,
+      total_likes: user.total_likes,
+      total_matches: user.total_matches,
+      total_rejects: user.total_rejects,
+      is_active: user.is_active,
+      is_verified: user.is_verified,
+      last_active: user.last_active,
+      created_at: user.created_at,
+      updated_at: user.updated_at,
+    };
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully.",
+      data: safeUser,
+    });
+  } catch (err) {
+    console.error("[updateUserProfile] Error:", err);
+    await transaction.rollback();
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while updating profile.",
+    });
+  }
+}
 module.exports = {
   getPackage,
   getAllPersons,
   getPersonById,
   getRecommendedPersons,
   getRandomPersons,
+  updateUserProfile,
 };

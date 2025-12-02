@@ -1,7 +1,7 @@
-
 const Joi = require("joi");
 const bcrypt = require("bcryptjs");
 const User = require("../../models/User");
+
 const TempUser = require("../../models/TempUser");
 const Option = require("../../models/Option");
 const UserOtp = require("../../models/UserOtp");
@@ -116,7 +116,6 @@ async function registerWithEmail(req, res) {
     });
   }
 }
-
 
 async function registerUser(req, res) {
   try {
@@ -281,7 +280,6 @@ async function registerUser(req, res) {
   }
 }
 
-
 async function verifyRegister(req, res) {
   try {
     const schema = Joi.object({
@@ -393,7 +391,6 @@ async function verifyRegister(req, res) {
   }
 }
 
-
 async function loginUser(req, res) {
   try {
     const schema = Joi.object({
@@ -457,13 +454,7 @@ async function loginUser(req, res) {
       success: true,
       message: "Login successful",
       data: {
-        user: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          phone: user.phone,
-          is_verified: user.is_verified,
-        },
+        user,
         token,
         tokenexpires_at: expires_at,
       },
@@ -516,9 +507,7 @@ async function forgotPassword(req, res) {
     const otp = generateOtp();
 
     const otpValidMinutes = await getOption("forgot_otp_time_min", 10);
-    const otpExpiresAt = new Date(
-      Date.now() + otpValidMinutes * 60 * 1000
-    );
+    const otpExpiresAt = new Date(Date.now() + otpValidMinutes * 60 * 1000);
 
     const myOtp = await UserOtp.create({
       user_id: user.id,
@@ -635,6 +624,7 @@ async function forgotPasswordVerify(req, res) {
   }
 }
 
+
 module.exports = {
   registerWithEmail,
   verifyRegister,
@@ -642,4 +632,5 @@ module.exports = {
   loginUser,
   forgotPassword,
   forgotPasswordVerify,
+
 };

@@ -27,5 +27,6 @@ router.get("/persons", userController.getAllPersons);
 router.get("/persons/random", userController.getRandomPersons);
 router.get("/persons/recommended", userController.getRecommendedPersons);
 router.get("/persons/:id", userController.getPersonById);
+router.post("/profile", userController.updateUserProfile);
 
 module.exports = router;
