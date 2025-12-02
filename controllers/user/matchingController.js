@@ -5,7 +5,6 @@ const User = require("../../models/User");
 const UserInteraction = require("../../models/UserInteraction");
 const UserSession = require("../../models/UserSession");
 
-
 async function likeUser(req, res) {
   const transaction = await sequelize.transaction();
 
@@ -25,47 +24,10 @@ async function likeUser(req, res) {
       });
     }
 
-    // 2) Read Bearer token from headers
-    const authHeader =
-      req.headers.authorization || req.headers.Authorization || "";
+    const isSessionValid = await isUserSessionValid(req);
+    if (!isSessionValid.success) return res.status(401).json(isSessionValid);
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      await transaction.rollback();
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: missing Bearer token.",
-      });
-    }
-
-    const token = authHeader.replace("Bearer ", "").trim();
-    if (!token) {
-      await transaction.rollback();
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: invalid Bearer token.",
-      });
-    }
-
-    // 3) Find active user session by token
-    const now = new Date();
-    const session = await UserSession.findOne({
-      where: {
-        session_token: token,
-        status: 1, // active session
-        expires_at: { [Op.gt]: now }, // not expired
-      },
-      transaction,
-    });
-
-    if (!session) {
-      await transaction.rollback();
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: user session not found.",
-      });
-    }
-
-    const userId = Number(session.user_id);
+    const userId = Number(isSessionValid.user_id);
     const { target_user_id: targetUserId } = value;
 
     if (userId === Number(targetUserId)) {
@@ -131,7 +93,8 @@ async function likeUser(req, res) {
       message: "Failed to like bot.",
     });
   }
-}
+} //
+
 async function rejectUser(req, res) {
   const transaction = await sequelize.transaction();
 
@@ -154,37 +117,11 @@ async function rejectUser(req, res) {
     const { target_user_id: targetUserId } = value;
 
     // 2) Get user from BEARER token → UserSession table
-    const authHeader = req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      await transaction.rollback();
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: Missing Bearer token.",
-      });
-    }
+    const isSessionValid = await isUserSessionValid(req);
+    if (!isSessionValid.success) return res.status(401).json(isSessionValid);
 
-    const token = authHeader.split(" ")[1];
-
-    // Verify session
-    const activeSession = await UserSession.findOne({
-      where: {
-        session_token: token,
-        status: 1,
-        expires_at: { [Op.gt]: new Date() },
-      },
-      transaction,
-    });
-
-    if (!activeSession) {
-      await transaction.rollback();
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: Invalid or expired session.",
-      });
-    }
-
-    const userId = activeSession.user_id;
+    const userId = isSessionValid.user_id;
 
     if (Number(userId) === Number(targetUserId)) {
       await transaction.rollback();
@@ -272,37 +209,10 @@ async function matchUser(req, res) {
 
     const { target_user_id: targetUserId } = value;
 
-    // 2) Get user from BEARER token → UserSession table
-    const authHeader = req.headers.authorization;
+    const isSessionValid = await isUserSessionValid(req);
+    if (!isSessionValid.success) return res.status(401).json(isSessionValid);
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      await transaction.rollback();
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: Missing Bearer token.",
-      });
-    }
-
-    const token = authHeader.split(" ")[1];
-
-    const activeSession = await UserSession.findOne({
-      where: {
-        session_token: token,
-        status: 1,
-        expires_at: { [Op.gt]: new Date() },
-      },
-      transaction,
-    });
-
-    if (!activeSession) {
-      await transaction.rollback();
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized: Invalid or expired session.",
-      });
-    }
-
-    const userId = activeSession.user_id;
+    const userId = isSessionValid.user_id;
 
     if (Number(userId) === Number(targetUserId)) {
       await transaction.rollback();
@@ -409,7 +319,6 @@ async function makeMutualMatch(userId, botId, transaction) {
 
   return { newlyCreated: true };
 }
-
 
 module.exports = {
   likeUser,

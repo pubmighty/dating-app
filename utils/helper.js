@@ -282,7 +282,87 @@ async function sendOtpMail(user, otpObj, title, action) {
     html: htmlContent,
   });
 }
+async function isUserSessionValid(req) {
+  try {
+    const authHeader = req.headers["authorization"];
+    if (!authHeader?.startsWith("Bearer ")) {
+      return {
+        success: false,
+        message: "Missing or invalid Authorization header",
+        data: null,
+      };
+    }
 
+    const token = authHeader.split(" ")[1];
+    const session = await UserSession.findOne({
+      where: { session_token: token, status: 1 }, // correct column + numeric
+    });
+
+    if (!session) {
+      return { success: false, message: "Invalid session", data: null };
+    }
+
+    const now = new Date();
+    if (session.expiresAt && session.expiresAt < now) {
+      await session.update({ status: 2 }); // 2 = inactive/expired
+      return { success: false, message: "Session expired", data: null };
+    }
+    const SLIDING_IDLE_SEC =
+      parseInt(
+        await getOption("min_time_to_update_last_activity_at_minute", 30)
+      ) *
+      60 *
+      1000; // Convert to milliseconds
+
+    // Sliding idle TTL
+    if (SLIDING_IDLE_SEC > 0) {
+      const lastActivityAt = session.lastActivityAt;
+      if (lastActivityAt) {
+        const timeDifference = now - new Date(lastActivityAt);
+
+        if (timeDifference >= SLIDING_IDLE_SEC) {
+          // If 30 minutes have passed, update lastActivityAt
+          await session.update({ lastActivityAt: now });
+          console.log("Updated lastActivityAt to current time.");
+        }
+      } else {
+        await session.update({ lastActivityAt: now });
+      }
+    }
+
+    return {
+      success: true,
+      message: "Sesssion is valid",
+      data: session.user_id,
+    };
+  } catch (err) {
+    console.error("Auth error:", err);
+    return {
+      success: false,
+      message: "Server error during auth",
+      data: null,
+    };
+  }
+}
+
+function getDobRangeFromAges(minAge, maxAge) {
+  const today = new Date();
+
+  const currentYear = today.getFullYear();
+  const month = today.getMonth();
+  const day = today.getDate();
+
+  // Example: age 25–35
+  // maxAge -> oldest person (35) -> earlier dob
+  // minAge -> youngest person (25) -> later dob
+  const oldestDob = new Date(currentYear - maxAge, month, day); // 35 years ago
+  const youngestDob = new Date(currentYear - minAge, month, day); // 25 years ago
+
+  return {
+    minDob: oldestDob,
+    maxDob: youngestDob,
+  };
+}
 module.exports = {
   getRealIp,
   getOption,
@@ -296,4 +376,6 @@ module.exports = {
   isValidEmail,
   isValidPhone,
   sendOtpMail,
+  isUserSessionValid,
+  getDobRangeFromAges,
 };

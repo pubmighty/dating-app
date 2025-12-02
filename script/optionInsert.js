@@ -15,6 +15,8 @@ async function run() {
     // Two-factor toggle
     await set("verify_gmail_register", true);
     await set("register_otp_time_min", 10);
+    await set("default_per_page_packages", 10);
+    await set("default_total_page_packages", 10);
 
     console.log("Options inserted/verified");
     process.exit(0);
