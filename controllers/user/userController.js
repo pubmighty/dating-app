@@ -9,6 +9,7 @@ const {
   isUserSessionValid,
   getDobRangeFromAges,
 } = require("../../utils/helper");
+
 const { Op } = require("sequelize");
 
 async function getPackage(req, res) {
@@ -542,6 +543,7 @@ async function getRandomPersons(req, res) {
     });
   }
 }
+
 async function updateUserProfile(req, res) {
   const transaction = await sequelize.transaction();
 
@@ -700,6 +702,122 @@ async function updateUserProfile(req, res) {
     });
   }
 }
+async function changePassword(req, res) {
+  const transaction = await sequelize.transaction();
+
+  try {
+    // 1) Validate body
+    const changePasswordSchema = Joi.object({
+      old_password: Joi.string().min(6).max(255).required(),
+      new_password: Joi.string().min(8).max(255).required(),
+      confirm_password: Joi.string().valid(Joi.ref("new_password")).required(),
+    });
+    const { error, value } = changePasswordSchema.validate(req.body, {
+      abortEarly: true,
+      stripUnknown: true,
+    });
+
+    if (error) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+      });
+    }
+
+    const { old_password, new_password } = value;
+
+    // 2) Validate session (user must be logged in)
+    const sessionResult = await isUserSessionValid(req);
+    if (!sessionResult.success) {
+      await transaction.rollback();
+      return res.status(401).json(sessionResult);
+    }
+
+    const userId = Number(sessionResult.data);
+    if (!userId || Number.isNaN(userId)) {
+      await transaction.rollback();
+      return res.status(401).json({
+        success: false,
+        message: "Invalid session.",
+      });
+    }
+
+    // 3) Load user
+    const user = await User.findByPk(userId, { transaction });
+
+    if (!user) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    // Optional: block password change for social login-only users
+    if (user.register_type !== "manual") {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message:
+          "Password cannot be changed for this account type. Please use your social login.",
+      });
+    }
+
+    // 4) Compare old password
+    const isMatch = await bcrypt.compare(old_password, user.password);
+    if (!isMatch) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Old password is incorrect.",
+      });
+    }
+
+    // 5) Prevent using same password again
+    const isSame = await bcrypt.compare(new_password, user.password);
+    if (isSame) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "New password must be different from old password.",
+      });
+    }
+
+    // 6) Hash new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(new_password, salt);
+
+    // 7) Update password
+    await user.update(
+      {
+        password: hashedPassword,
+        updated_at: new Date(),
+      },
+      { transaction }
+    );
+
+    // 8) Invalidate all active sessions for this user (force re-login everywhere)
+    await UserSession.destroy({
+      where: { user_id: userId },
+      transaction,
+    });
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "Password changed successfully. Please log in again.",
+    });
+  } catch (err) {
+    console.error("[changePassword] Error:", err);
+    await transaction.rollback();
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while changing password.",
+    });
+  }
+}
 module.exports = {
   getPackage,
   getAllPersons,
@@ -707,4 +825,5 @@ module.exports = {
   getRecommendedPersons,
   getRandomPersons,
   updateUserProfile,
+  changePassword,
 };

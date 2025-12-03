@@ -3,23 +3,12 @@ const Joi = require("joi");
 const sequelize = require("../../config/db");
 const User = require("../../models/User");
 const UserInteraction = require("../../models/UserInteraction");
-const {isUserSessionValid,getOrCreateChatBetweenUsers,} = require("../../utils/helper");
+const {
+  getOption,
+  isUserSessionValid,
+  getOrCreateChatBetweenUsers,
+} = require("../../utils/helper");
 const Chats = require("../../models/chats");
-function extractUserIdFromSession(sessionResult) {
-  if (!sessionResult) return null;
-  const raw =
-    sessionResult.user_id ??
-    sessionResult.userId ??
-    sessionResult.data?.user_id ??
-    sessionResult.data?.userId ??
-      sessionResult.data ??    
-    sessionResult.user?.id;
-
-  if (raw == null) return null;
-
-  const num = Number(raw);
-  return Number.isNaN(num) ? null : num;
-}
 
 async function likeUser(req, res) {
   const transaction = await sequelize.transaction();
@@ -51,7 +40,7 @@ async function likeUser(req, res) {
       await transaction.rollback();
       return res.status(401).json({
         success: false,
-        message: "Invalid session: user_id missing.",
+        message: "Invalid session",
       });
     }
 
@@ -71,17 +60,10 @@ async function likeUser(req, res) {
       await transaction.rollback();
       return res.status(404).json({
         success: false,
-        message: "Target user not found or inactive.",
+        message: "Target user not found .",
       });
     }
 
-    if (targetUser.type !== "bot") {
-      await transaction.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "You can only like user2 profiles in this app.",
-      });
-    }
 
 
     const existingInteraction = await UserInteraction.findOne({
@@ -92,8 +74,10 @@ async function likeUser(req, res) {
       transaction,
     });
 
-    const previousAction = existingInteraction ? existingInteraction.action : null;
-  
+    const previousAction = existingInteraction
+      ? existingInteraction.action
+      : null;
+
     await UserInteraction.upsert(
       {
         user_id: userId,
@@ -142,11 +126,11 @@ async function likeUser(req, res) {
       },
     });
   } catch (err) {
-    console.error("[likeUser] Error:", err);
+    console.error("Error during:", err);
     await transaction.rollback();
     return res.status(500).json({
       success: false,
-      message: "Failed to like bot.",
+      message: "Failed to like .",
     });
   }
 }
@@ -183,7 +167,7 @@ async function rejectUser(req, res) {
       await transaction.rollback();
       return res.status(401).json({
         success: false,
-        message: "Invalid session: user_id missing.",
+        message: "Invalid session.",
       });
     }
 
@@ -209,10 +193,12 @@ async function rejectUser(req, res) {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: "You can only reject user2 profiles in this app.",
+        message: "Target user not found .",
       });
     }
 
+    
+    // ---- Check existing interaction ----
     const existingInteraction = await UserInteraction.findOne({
       where: {
         user_id: userId,
@@ -221,8 +207,10 @@ async function rejectUser(req, res) {
       transaction,
     });
 
-    const previousAction = existingInteraction ? existingInteraction.action : null;
-   
+    const previousAction = existingInteraction
+      ? existingInteraction.action
+      : null;
+
     // Save/overwrite interaction as 'reject'
     await UserInteraction.upsert(
       {
@@ -243,7 +231,6 @@ async function rejectUser(req, res) {
     } else if (previousAction === "reject") {
       
     } else {
-
       await User.increment(
         { total_rejects: 1 },
         { where: { id: userId }, transaction }
@@ -261,7 +248,7 @@ async function rejectUser(req, res) {
       },
     });
   } catch (err) {
-    console.error("[rejectUser] Error:", err);
+    console.error("Error during [rejectUser] :", err);
     await transaction.rollback();
     return res.status(500).json({
       success: false,
@@ -298,13 +285,13 @@ async function matchUser(req, res) {
       return res.status(401).json(isSessionValid);
     }
 
-    const userId = extractUserIdFromSession(isSessionValid);
+    const userId = isSessionValid.data;
 
     if (!userId) {
       await transaction.rollback();
       return res.status(401).json({
         success: false,
-        message: "Invalid session: user_id missing.",
+        message: "Invalid session.",
       });
     }
 
@@ -449,14 +436,9 @@ async function makeMutualMatch(userId, botId, transaction) {
     { where: { id: userId }, transaction }
   );
 
-  await User.increment(
-    { total_matches: 1 },
-    { where: { id: botId }, transaction }
-  );
 
   return { newlyCreated: true };
 }
-
 
 module.exports = {
   likeUser,
