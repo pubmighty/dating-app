@@ -3,7 +3,7 @@ const Joi = require("joi");
 const sequelize = require("../../config/db");
 const User = require("../../models/User");
 const UserInteraction = require("../../models/UserInteraction");
-const {getOption,isUserSessionValid,getOrCreateChatBetweenUsers,} = require("../../utils/helper");
+const {isUserSessionValid,getOrCreateChatBetweenUsers,} = require("../../utils/helper");
 const Chats = require("../../models/chats");
 function extractUserIdFromSession(sessionResult) {
   if (!sessionResult) return null;
@@ -79,11 +79,11 @@ async function likeUser(req, res) {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: "You can only like bot profiles in this app.",
+        message: "You can only like user2 profiles in this app.",
       });
     }
 
-    // ---- Check existing interaction ----
+
     const existingInteraction = await UserInteraction.findOne({
       where: {
         user_id: userId,
@@ -99,23 +99,23 @@ async function likeUser(req, res) {
         user_id: userId,
         target_user_id: targetUserId,
         action: "like",
-        is_mutual: true, // user↔bot as instant mutual
+        is_mutual: true,
       },
       { transaction }
     );
 
     if (previousAction === "like") {
-      // Already liked before → no change
+     
    //   console.log("[likeUser] already liked, no counter change");
     } else if (previousAction === "reject") {
-      // REJECT -> LIKE  → likes +1, rejects -1
+      
     //  console.log("[likeUser] REJECT -> LIKE, +1 like, -1 reject");
       await User.increment(
         { total_likes: 1, total_rejects: -1 },
         { where: { id: userId }, transaction }
       );
     } else {
-      // First time interaction → like +1
+     
      // console.log("[likeUser] first LIKE, +1 like");
       await User.increment(
         { total_likes: 1 },
@@ -123,11 +123,11 @@ async function likeUser(req, res) {
       );
     }
 
-    const chat = await getOrCreateChatBetweenUsers(
-      userId,
-      targetUserId,
-      transaction
-    );
+    // const chat = await getOrCreateChatBetweenUsers(
+    //   userId,
+    //   targetUserId,
+    //   transaction
+    // );
 
     await transaction.commit();
 
@@ -138,7 +138,7 @@ async function likeUser(req, res) {
         target_user_id: targetUserId,
         target_type: targetUser.type, // 'bot'
         is_match: true, // for bots we treat like = match
-        chat_id: chat.id,
+     //   chat_id: chat.id,
       },
     });
   } catch (err) {
@@ -209,11 +209,10 @@ async function rejectUser(req, res) {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: "You can only reject bot profiles in this app.",
+        message: "You can only reject user2 profiles in this app.",
       });
     }
 
-    // ---- Check existing interaction ----
     const existingInteraction = await UserInteraction.findOne({
       where: {
         user_id: userId,
@@ -235,19 +234,16 @@ async function rejectUser(req, res) {
       { transaction }
     );
 
-    // ---- Update counters based on previous action ----
-    if (previousAction === "like") {
-      // LIKE -> REJECT → likes -1, rejects +1
+   if (previousAction === "like" || previousAction === "match") {
+      
       await User.increment(
         { total_likes: -1, total_rejects: 1 },
         { where: { id: userId }, transaction }
       );
     } else if (previousAction === "reject") {
-      // Already rejected → no change
-      //console.log("[rejectUser] already rejected, no counter change");
+      
     } else {
-      // First interaction is reject → rejects +1
-     // console.log("[rejectUser] first REJECT, +1 reject");
+
       await User.increment(
         { total_rejects: 1 },
         { where: { id: userId }, transaction }
@@ -269,7 +265,7 @@ async function rejectUser(req, res) {
     await transaction.rollback();
     return res.status(500).json({
       success: false,
-      message: "Failed to reject bot.",
+      message: "Failed to reject user2.",
     });
   }
 }
@@ -335,24 +331,61 @@ async function matchUser(req, res) {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: "You can only match with bot profiles in this app.",
+        message: "You can only match with user2 profiles in this app.",
       });
     }
+    const existingInteraction = await UserInteraction.findOne({
+      where: {
+        user_id: Number(userId),
+        target_user_id: Number(targetUserId),
+      },
+      transaction,
+    });
 
-    // Create mutual match interactions (user ↔ bot)
-    await makeMutualMatch(userId, targetUserId, transaction);
+    const previousAction = existingInteraction ? existingInteraction.action : null;
 
-    // (Later) create chat + first bot message here
+    if (previousAction === "like" || previousAction === "match") {
+   
+    } else if (previousAction === "reject") {
+     
+      await User.increment(
+        { total_likes: 1, total_rejects: -1 },
+        { where: { id: userId }, transaction }
+      );
+    } else {
+   
+      await User.increment(
+        { total_likes: 1 },
+        { where: { id: userId }, transaction }
+      );
+    }
+    const { newlyCreated } = await makeMutualMatch(
+      Number(userId),
+      Number(targetUserId),
+      transaction
+    );
+
+    let chat = null;
+
+    if (newlyCreated) {
+      chat = await getOrCreateChatBetweenUsers(
+        Number(userId),
+        Number(targetUserId),
+        transaction
+      );
+    }
 
     await transaction.commit();
 
     return res.status(200).json({
       success: true,
-      message: "Matched with bot.",
+      message: "Matched with User2.",
       data: {
         action: "match",
         target_user_id: targetUserId,
         target_type: "bot",
+        is_new_match: newlyCreated,
+    
       },
     });
   } catch (err) {
@@ -360,7 +393,7 @@ async function matchUser(req, res) {
     await transaction.rollback();
     return res.status(500).json({
       success: false,
-      message: "Failed to match with bot.",
+      message: "Failed to match with user2.",
     });
   }
 }
@@ -388,7 +421,7 @@ async function makeMutualMatch(userId, botId, transaction) {
   if (existing) {
     return { newlyCreated: false };
   }
-  //  Create / overwrite user -> bot
+  
   await UserInteraction.upsert(
     {
       user_id: userId,
@@ -399,7 +432,7 @@ async function makeMutualMatch(userId, botId, transaction) {
     { transaction }
   );
 
-  //  Create / overwrite bot -> user (virtual “bot said yes”)
+  //  Create / overwrite bot  user 
   await UserInteraction.upsert(
     {
       user_id: botId,
