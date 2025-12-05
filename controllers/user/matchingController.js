@@ -441,9 +441,10 @@ async function makeMutualMatch(userId, botId, transaction) {
 
   return { newlyCreated: true };
 }
+
 async function getUserMatches(req, res) {
   try {
-    // 1) Validate query (simple pagination only)
+    // 1) Validate query (pagination)
     const schema = Joi.object({
       page: Joi.number().integer().min(1).optional(),
       limit: Joi.number().integer().min(1).max(50).optional(),
@@ -465,7 +466,7 @@ async function getUserMatches(req, res) {
     const limit = value.limit || 10;
     const offset = (page - 1) * limit;
 
-    // 2) Validate session
+    // 2) Validate session (same pattern as likeUser)
     const isSessionValid = await isUserSessionValid(req);
     if (!isSessionValid.success) {
       return res.status(401).json(isSessionValid);
@@ -479,9 +480,8 @@ async function getUserMatches(req, res) {
       });
     }
 
-    // 3) Fetch all mutual MATCH interactions for this user
-    //    Here we ONLY care about rows where current user is user_id
-    //    and we show all target_user_id as matched bots.
+    // 3) Fetch all MATCH interactions from *this user* side
+    //    (we already upsert user->target on match)
     const interactions = await UserInteraction.findAll({
       where: {
         action: "match",
@@ -506,17 +506,16 @@ async function getUserMatches(req, res) {
       });
     }
 
-    // 4) Dedupe by target_user_id (matched bots)
+    // 4) Dedupe by target_user_id (latest mutual match per user)
     const latestByTargetId = {};
 
     interactions.forEach((row) => {
       const targetId = Number(row.target_user_id);
-
       const existing = latestByTargetId[targetId];
+
       if (!existing) {
         latestByTargetId[targetId] = row;
       } else {
-        // keep the most recent match
         const prevTime = new Date(existing.created_at || 0).getTime();
         const newTime = new Date(row.created_at || 0).getTime();
         if (newTime > prevTime) {
@@ -542,12 +541,11 @@ async function getUserMatches(req, res) {
       });
     }
 
-    // 5) Load ONLY bot users that are active (these are the targets)
-    const bots = await User.findAll({
+    // 5) Load ALL matched users (real + bot), only active ones
+    const users = await User.findAll({
       where: {
         id: { [Op.in]: targetUserIds },
         is_active: true,
-        type: "bot",
       },
       attributes: [
         "id",
@@ -560,11 +558,11 @@ async function getUserMatches(req, res) {
         "last_active",
         "is_active",
         "is_verified",
-        "type",
+        "type", // 'real' or 'bot'
       ],
     });
 
-    if (!bots.length) {
+    if (!users.length) {
       return res.status(200).json({
         success: true,
         data: {
@@ -579,33 +577,33 @@ async function getUserMatches(req, res) {
       });
     }
 
-    const botsById = {};
-    bots.forEach((u) => {
-      botsById[Number(u.id)] = u;
+    const usersById = {};
+    users.forEach((u) => {
+      usersById[Number(u.id)] = u;
     });
 
-    // keep only those ids that are valid bots (in case mismatch)
-    targetUserIds = bots.map((u) => Number(u.id));
+    // keep only ids that actually exist as users (safety)
+    targetUserIds = users.map((u) => Number(u.id));
 
-    // 6) Build simple matches list (no chats yet, just matched bots)
-    let matches = targetUserIds.map((botId) => {
-      const bot = botsById[botId];
-      const interaction = latestByTargetId[botId];
+    // 6) Build matches list (generic "user" object, not "bot")
+    let matches = targetUserIds.map((otherUserId) => {
+      const other = usersById[otherUserId];
+      const interaction = latestByTargetId[otherUserId];
 
       return {
         match_id: interaction ? interaction.id : null,
-        bot: {
-          id: bot.id,
-          username: bot.username,
-          avatar: bot.avatar,
-          dob: bot.dob,
-          city: bot.city,
-          state: bot.state,
-          country: bot.country,
-          last_active: bot.last_active,
-          is_active: bot.is_active,
-          is_verified: bot.is_verified,
-          type: bot.type, // 'bot'
+        user: {
+          id: other.id,
+          username: other.username,
+          avatar: other.avatar,
+          dob: other.dob,
+          city: other.city,
+          state: other.state,
+          country: other.country,
+          last_active: other.last_active,
+          is_active: other.is_active,
+          is_verified: other.is_verified,
+          type: other.type, // 'real' or 'bot'
         },
         matched_at: interaction ? interaction.created_at : null,
       };
