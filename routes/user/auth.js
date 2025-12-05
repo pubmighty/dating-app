@@ -20,6 +20,7 @@ router.post("/forgot-password/verify", authController.forgotPasswordVerify);
 router.post("/like", matchingController.likeUser);
 router.post("/reject", matchingController.rejectUser);
 router.post("/match", matchingController.matchUser);
+router.get("/matches", matchingController.getUserMatches);
 
 //coin
 router.get("/coin-packages", userController.getPackage);

@@ -10,6 +10,8 @@ const {
 } = require("../../utils/helper");
 const Chats = require("../../models/chats");
 
+
+
 async function likeUser(req, res) {
   const transaction = await sequelize.transaction();
 
@@ -439,9 +441,214 @@ async function makeMutualMatch(userId, botId, transaction) {
 
   return { newlyCreated: true };
 }
+async function getUserMatches(req, res) {
+  try {
+    // 1) Validate query (simple pagination only)
+    const schema = Joi.object({
+      page: Joi.number().integer().min(1).optional(),
+      limit: Joi.number().integer().min(1).max(50).optional(),
+    });
+
+    const { error, value } = schema.validate(req.query, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+      });
+    }
+
+    const page = value.page || 1;
+    const limit = value.limit || 10;
+    const offset = (page - 1) * limit;
+
+    // 2) Validate session
+    const isSessionValid = await isUserSessionValid(req);
+    if (!isSessionValid.success) {
+      return res.status(401).json(isSessionValid);
+    }
+
+    const currentUserId = Number(isSessionValid.data);
+    if (!currentUserId || Number.isNaN(currentUserId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid session.",
+      });
+    }
+
+    // 3) Fetch all mutual MATCH interactions for this user
+    //    Here we ONLY care about rows where current user is user_id
+    //    and we show all target_user_id as matched bots.
+    const interactions = await UserInteraction.findAll({
+      where: {
+        action: "match",
+        is_mutual: 1, // or true if BOOLEAN
+        user_id: currentUserId,
+      },
+      order: [["created_at", "DESC"]],
+    });
+
+    if (!interactions.length) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          matches: [],
+          pagination: {
+            page,
+            limit,
+            total_items: 0,
+            total_pages: 0,
+          },
+        },
+      });
+    }
+
+    // 4) Dedupe by target_user_id (matched bots)
+    const latestByTargetId = {};
+
+    interactions.forEach((row) => {
+      const targetId = Number(row.target_user_id);
+
+      const existing = latestByTargetId[targetId];
+      if (!existing) {
+        latestByTargetId[targetId] = row;
+      } else {
+        // keep the most recent match
+        const prevTime = new Date(existing.created_at || 0).getTime();
+        const newTime = new Date(row.created_at || 0).getTime();
+        if (newTime > prevTime) {
+          latestByTargetId[targetId] = row;
+        }
+      }
+    });
+
+    let targetUserIds = Object.keys(latestByTargetId).map((id) => Number(id));
+
+    if (!targetUserIds.length) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          matches: [],
+          pagination: {
+            page,
+            limit,
+            total_items: 0,
+            total_pages: 0,
+          },
+        },
+      });
+    }
+
+    // 5) Load ONLY bot users that are active (these are the targets)
+    const bots = await User.findAll({
+      where: {
+        id: { [Op.in]: targetUserIds },
+        is_active: true,
+        type: "bot",
+      },
+      attributes: [
+        "id",
+        "username",
+        "avatar",
+        "dob",
+        "city",
+        "state",
+        "country",
+        "last_active",
+        "is_active",
+        "is_verified",
+        "type",
+      ],
+    });
+
+    if (!bots.length) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          matches: [],
+          pagination: {
+            page,
+            limit,
+            total_items: 0,
+            total_pages: 0,
+          },
+        },
+      });
+    }
+
+    const botsById = {};
+    bots.forEach((u) => {
+      botsById[Number(u.id)] = u;
+    });
+
+    // keep only those ids that are valid bots (in case mismatch)
+    targetUserIds = bots.map((u) => Number(u.id));
+
+    // 6) Build simple matches list (no chats yet, just matched bots)
+    let matches = targetUserIds.map((botId) => {
+      const bot = botsById[botId];
+      const interaction = latestByTargetId[botId];
+
+      return {
+        match_id: interaction ? interaction.id : null,
+        bot: {
+          id: bot.id,
+          username: bot.username,
+          avatar: bot.avatar,
+          dob: bot.dob,
+          city: bot.city,
+          state: bot.state,
+          country: bot.country,
+          last_active: bot.last_active,
+          is_active: bot.is_active,
+          is_verified: bot.is_verified,
+          type: bot.type, // 'bot'
+        },
+        matched_at: interaction ? interaction.created_at : null,
+      };
+    });
+
+    // 7) Sort by matched_at desc (most recent first)
+    matches.sort((a, b) => {
+      const ta = a.matched_at ? new Date(a.matched_at).getTime() : 0;
+      const tb = b.matched_at ? new Date(b.matched_at).getTime() : 0;
+      return tb - ta;
+    });
+
+    // 8) Apply pagination in-memory
+    const totalItems = matches.length;
+    const totalPages = Math.ceil(totalItems / limit);
+    const paginatedMatches = matches.slice(offset, offset + limit);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        matches: paginatedMatches,
+        pagination: {
+          page,
+          limit,
+          total_items: totalItems,
+          total_pages: totalPages,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("[getUserMatches] Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch matches.",
+    });
+  }
+}
+
+
 
 module.exports = {
   likeUser,
   rejectUser,
   matchUser,
+  getUserMatches,
 };
