@@ -567,12 +567,12 @@ async function updateUserProfile(req, res) {
       bio: Joi.string().optional().allow(null, ""),
 
       // NEW FIELDS
-      height: Joi.string().max(10).optional().allow(null, ""),
+      height: Joi.string().max(10).optional(),
       education: Joi.string().max(100).optional().allow(null, ""),
       looking: Joi.string()
         .valid(
           "Long Term",
-          "Long Term,Open To Short ",
+          "Long Term,Open To Short",
           "Short Term,Open To Long",
           "Short Term Fun",
           "New Friends",
