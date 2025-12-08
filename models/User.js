@@ -76,7 +76,21 @@ const User = sequelize.define(
     bio: {
       type: DataTypes.TEXT,
     },
-
+    height:{
+        type: DataTypes.STRING(10),
+    },
+    education:{
+       type: DataTypes.STRING(100),
+    },
+    looking: {
+      type: DataTypes.ENUM("Long Term",
+         "Long Term, Open To Short",
+          "Short Term, Open To Long", 
+          "Short Term Fun",
+          "New Friends",
+          "Still Figuring Out"),
+      allowNull: true,
+    },
     coins: {
       type: DataTypes.INTEGER,
       defaultValue: 0,
@@ -135,6 +149,7 @@ const User = sequelize.define(
       defaultValue: DataTypes.NOW,
     },
   },
+
   {
     tableName: "pb_users",
     timestamps: false,

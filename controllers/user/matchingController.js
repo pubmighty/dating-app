@@ -3,23 +3,14 @@ const Joi = require("joi");
 const sequelize = require("../../config/db");
 const User = require("../../models/User");
 const UserInteraction = require("../../models/UserInteraction");
-const {getOption,isUserSessionValid,getOrCreateChatBetweenUsers,} = require("../../utils/helper");
+const {
+  getOption,
+  isUserSessionValid,
+  getOrCreateChatBetweenUsers,
+} = require("../../utils/helper");
 const Chats = require("../../models/chats");
-function extractUserIdFromSession(sessionResult) {
-  if (!sessionResult) return null;
-  const raw =
-    sessionResult.user_id ??
-    sessionResult.userId ??
-    sessionResult.data?.user_id ??
-    sessionResult.data?.userId ??
-      sessionResult.data ??    
-    sessionResult.user?.id;
 
-  if (raw == null) return null;
 
-  const num = Number(raw);
-  return Number.isNaN(num) ? null : num;
-}
 
 async function likeUser(req, res) {
   const transaction = await sequelize.transaction();
@@ -51,7 +42,7 @@ async function likeUser(req, res) {
       await transaction.rollback();
       return res.status(401).json({
         success: false,
-        message: "Invalid session: user_id missing.",
+        message: "Invalid session",
       });
     }
 
@@ -71,19 +62,12 @@ async function likeUser(req, res) {
       await transaction.rollback();
       return res.status(404).json({
         success: false,
-        message: "Target user not found or inactive.",
+        message: "Target user not found .",
       });
     }
 
-    if (targetUser.type !== "bot") {
-      await transaction.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "You can only like bot profiles in this app.",
-      });
-    }
 
-    // ---- Check existing interaction ----
+
     const existingInteraction = await UserInteraction.findOne({
       where: {
         user_id: userId,
@@ -92,30 +76,32 @@ async function likeUser(req, res) {
       transaction,
     });
 
-    const previousAction = existingInteraction ? existingInteraction.action : null;
-  
+    const previousAction = existingInteraction
+      ? existingInteraction.action
+      : null;
+
     await UserInteraction.upsert(
       {
         user_id: userId,
         target_user_id: targetUserId,
         action: "like",
-        is_mutual: true, // user↔bot as instant mutual
+        is_mutual: true,
       },
       { transaction }
     );
 
     if (previousAction === "like") {
-      // Already liked before → no change
+     
    //   console.log("[likeUser] already liked, no counter change");
     } else if (previousAction === "reject") {
-      // REJECT -> LIKE  → likes +1, rejects -1
+      
     //  console.log("[likeUser] REJECT -> LIKE, +1 like, -1 reject");
       await User.increment(
         { total_likes: 1, total_rejects: -1 },
         { where: { id: userId }, transaction }
       );
     } else {
-      // First time interaction → like +1
+     
      // console.log("[likeUser] first LIKE, +1 like");
       await User.increment(
         { total_likes: 1 },
@@ -123,11 +109,11 @@ async function likeUser(req, res) {
       );
     }
 
-    const chat = await getOrCreateChatBetweenUsers(
-      userId,
-      targetUserId,
-      transaction
-    );
+    // const chat = await getOrCreateChatBetweenUsers(
+    //   userId,
+    //   targetUserId,
+    //   transaction
+    // );
 
     await transaction.commit();
 
@@ -138,15 +124,15 @@ async function likeUser(req, res) {
         target_user_id: targetUserId,
         target_type: targetUser.type, // 'bot'
         is_match: true, // for bots we treat like = match
-        chat_id: chat.id,
+     //   chat_id: chat.id,
       },
     });
   } catch (err) {
-    console.error("[likeUser] Error:", err);
+    console.error("Error during:", err);
     await transaction.rollback();
     return res.status(500).json({
       success: false,
-      message: "Failed to like bot.",
+      message: "Failed to like .",
     });
   }
 }
@@ -183,7 +169,7 @@ async function rejectUser(req, res) {
       await transaction.rollback();
       return res.status(401).json({
         success: false,
-        message: "Invalid session: user_id missing.",
+        message: "Invalid session.",
       });
     }
 
@@ -209,10 +195,11 @@ async function rejectUser(req, res) {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: "You can only reject bot profiles in this app.",
+        message: "Target user not found .",
       });
     }
 
+    
     // ---- Check existing interaction ----
     const existingInteraction = await UserInteraction.findOne({
       where: {
@@ -222,8 +209,10 @@ async function rejectUser(req, res) {
       transaction,
     });
 
-    const previousAction = existingInteraction ? existingInteraction.action : null;
-   
+    const previousAction = existingInteraction
+      ? existingInteraction.action
+      : null;
+
     // Save/overwrite interaction as 'reject'
     await UserInteraction.upsert(
       {
@@ -235,19 +224,15 @@ async function rejectUser(req, res) {
       { transaction }
     );
 
-    // ---- Update counters based on previous action ----
-    if (previousAction === "like") {
-      // LIKE -> REJECT → likes -1, rejects +1
+   if (previousAction === "like" || previousAction === "match") {
+      
       await User.increment(
         { total_likes: -1, total_rejects: 1 },
         { where: { id: userId }, transaction }
       );
     } else if (previousAction === "reject") {
-      // Already rejected → no change
-      //console.log("[rejectUser] already rejected, no counter change");
+      
     } else {
-      // First interaction is reject → rejects +1
-     // console.log("[rejectUser] first REJECT, +1 reject");
       await User.increment(
         { total_rejects: 1 },
         { where: { id: userId }, transaction }
@@ -265,11 +250,11 @@ async function rejectUser(req, res) {
       },
     });
   } catch (err) {
-    console.error("[rejectUser] Error:", err);
+    console.error("Error during [rejectUser] :", err);
     await transaction.rollback();
     return res.status(500).json({
       success: false,
-      message: "Failed to reject bot.",
+      message: "Failed to reject user2.",
     });
   }
 }
@@ -302,13 +287,13 @@ async function matchUser(req, res) {
       return res.status(401).json(isSessionValid);
     }
 
-    const userId = extractUserIdFromSession(isSessionValid);
+    const userId = isSessionValid.data;
 
     if (!userId) {
       await transaction.rollback();
       return res.status(401).json({
         success: false,
-        message: "Invalid session: user_id missing.",
+        message: "Invalid session.",
       });
     }
 
@@ -335,24 +320,61 @@ async function matchUser(req, res) {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
-        message: "You can only match with bot profiles in this app.",
+        message: "You can only match with user2 profiles in this app.",
       });
     }
+    const existingInteraction = await UserInteraction.findOne({
+      where: {
+        user_id: Number(userId),
+        target_user_id: Number(targetUserId),
+      },
+      transaction,
+    });
 
-    // Create mutual match interactions (user ↔ bot)
-    await makeMutualMatch(userId, targetUserId, transaction);
+    const previousAction = existingInteraction ? existingInteraction.action : null;
 
-    // (Later) create chat + first bot message here
+    if (previousAction === "like" || previousAction === "match") {
+   
+    } else if (previousAction === "reject") {
+     
+      await User.increment(
+        { total_likes: 1, total_rejects: -1 },
+        { where: { id: userId }, transaction }
+      );
+    } else {
+   
+      await User.increment(
+        { total_likes: 1 },
+        { where: { id: userId }, transaction }
+      );
+    }
+    const { newlyCreated } = await makeMutualMatch(
+      Number(userId),
+      Number(targetUserId),
+      transaction
+    );
+
+    let chat = null;
+
+    if (newlyCreated) {
+      chat = await getOrCreateChatBetweenUsers(
+        Number(userId),
+        Number(targetUserId),
+        transaction
+      );
+    }
 
     await transaction.commit();
 
     return res.status(200).json({
       success: true,
-      message: "Matched with bot.",
+      message: "Matched with User2.",
       data: {
         action: "match",
         target_user_id: targetUserId,
         target_type: "bot",
+        is_new_match: newlyCreated,
+    
       },
     });
   } catch (err) {
@@ -360,7 +382,7 @@ async function matchUser(req, res) {
     await transaction.rollback();
     return res.status(500).json({
       success: false,
-      message: "Failed to match with bot.",
+      message: "Failed to match with user2.",
     });
   }
 }
@@ -388,7 +410,7 @@ async function makeMutualMatch(userId, botId, transaction) {
   if (existing) {
     return { newlyCreated: false };
   }
-  //  Create / overwrite user -> bot
+  
   await UserInteraction.upsert(
     {
       user_id: userId,
@@ -399,7 +421,7 @@ async function makeMutualMatch(userId, botId, transaction) {
     { transaction }
   );
 
-  //  Create / overwrite bot -> user (virtual “bot said yes”)
+  //  Create / overwrite bot  user 
   await UserInteraction.upsert(
     {
       user_id: botId,
@@ -416,17 +438,194 @@ async function makeMutualMatch(userId, botId, transaction) {
     { where: { id: userId }, transaction }
   );
 
-  await User.increment(
-    { total_matches: 1 },
-    { where: { id: botId }, transaction }
-  );
 
   return { newlyCreated: true };
 }
+
+async function getUserMatches(req, res) {
+  try {
+    // Validate query (pagination)
+    const schema = Joi.object({
+      page: Joi.number().integer().min(1).optional(),
+      limit: Joi.number().integer().min(1).max(50).optional(),
+    });
+
+    const { error, value } = schema.validate(req.query, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+      });
+    }
+
+    const page = value.page || 1;
+    const limit = value.limit || 10;
+    const offset = (page - 1) * limit;
+
+    // Validate session
+    const isSessionValid = await isUserSessionValid(req);
+    if (!isSessionValid.success) {
+      return res.status(401).json(isSessionValid);
+    }
+
+    const currentUserId = Number(isSessionValid.data);
+    if (!currentUserId || Number.isNaN(currentUserId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid session.",
+      });
+    }
+
+    //  Fetch all MATCH interactions from this user's side
+    const interactions = await UserInteraction.findAll({
+      where: {
+        action: "match",
+        is_mutual: 1,
+        user_id: currentUserId,
+      },
+      order: [["created_at", "DESC"]],
+    });
+
+    if (!interactions.length) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          matches: [],
+          pagination: {
+            page,
+            limit,
+            total_items: 0,
+            total_pages: 0,
+          },
+        },
+      });
+    }
+
+    //  Dedupe by target_user_id (latest mutual match per user)
+    const latestByTargetId = {};
+
+    interactions.forEach((row) => {
+      const targetId = Number(row.target_user_id);
+      const existing = latestByTargetId[targetId];
+
+      if (!existing) {
+        latestByTargetId[targetId] = row;
+      } else {
+        const prevTime = new Date(existing.created_at || 0).getTime();
+        const newTime = new Date(row.created_at || 0).getTime();
+        if (newTime > prevTime) {
+          latestByTargetId[targetId] = row;
+        }
+      }
+    });
+
+    let targetUserIds = Object.keys(latestByTargetId).map((id) => Number(id));
+
+    if (!targetUserIds.length) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          matches: [],
+          pagination: {
+            page,
+            limit,
+            total_items: 0,
+            total_pages: 0,
+          },
+        },
+      });
+    }
+
+    const users = await User.findAll({
+      where: {
+        id: { [Op.in]: targetUserIds },
+        is_active: true,
+      },
+      attributes: {
+        exclude: ["password"],
+      },
+    });
+
+    if (!users.length) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          matches: [],
+          pagination: {
+            page,
+            limit,
+            total_items: 0,
+            total_pages: 0,
+          },
+        },
+      });
+    }
+
+    const usersById = {};
+    users.forEach((u) => {
+      const plain = u.toJSON();
+      usersById[Number(plain.id)] = plain;
+    });
+
+    // keep only ids that actually exist as users
+    targetUserIds = users.map((u) => Number(u.id));
+
+    //  Build matches list – attach FULL user object (all columns except password)
+    let matches = targetUserIds.map((otherUserId) => {
+      const other = usersById[otherUserId];
+      const interaction = latestByTargetId[otherUserId];
+
+      return {
+        match_id: interaction ? interaction.id : null,
+        user: other, // full user data (id, username, email, gender, bio, height, education, looking, etc.)
+        matched_at: interaction ? interaction.created_at : null,
+      };
+    });
+
+    //  Sort by matched_at desc (most recent first)
+    matches.sort((a, b) => {
+      const ta = a.matched_at ? new Date(a.matched_at).getTime() : 0;
+      const tb = b.matched_at ? new Date(b.matched_at).getTime() : 0;
+      return tb - ta;
+    });
+
+    // Apply pagination in-memory
+    const totalItems = matches.length;
+    const totalPages = Math.ceil(totalItems / limit);
+    const paginatedMatches = matches.slice(offset, offset + limit);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        matches: paginatedMatches,
+        pagination: {
+          page,
+          limit,
+          total_items: totalItems,
+          total_pages: totalPages,
+        },
+      },
+      message: "All match users",
+    });
+  } catch (err) {
+    console.error("[getUserMatches] Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch matches.",
+    });
+  }
+}
+
+
 
 
 module.exports = {
   likeUser,
   rejectUser,
   matchUser,
+  getUserMatches,
 };
