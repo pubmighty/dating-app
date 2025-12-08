@@ -571,9 +571,9 @@ async function updateUserProfile(req, res) {
       education: Joi.string().max(100).optional().allow(null, ""),
       looking: Joi.string()
         .valid(
-          "Long Term Relationship",
-          "Long Term,Open To Short Term Relationship",
-          "Short Term,Open To Long Term Relationship",
+          "Long Term",
+          "Long Term,Open To Short ",
+          "Short Term,Open To Long",
           "Short Term Fun",
           "New Friends",
           "Still Figuring Out"
