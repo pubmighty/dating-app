@@ -144,8 +144,10 @@ async function getAllPersons(req, res) {
       gender = "all",
       name = null,
     } = req.query;
+
     const isSessionValid = await isUserSessionValid(req);
     if (!isSessionValid.success) return res.status(401).json(isSessionValid);
+
     let totalPages = parseInt(
       await getOption("total_maxpage_for_persons", 100),
       10
@@ -164,7 +166,7 @@ async function getAllPersons(req, res) {
 
     const offset = (page - 1) * perPage;
 
-    //  Sorting
+    // Sorting
     const validSortByFields = ["username", "created_at", "last_active"];
     const orderField = validSortByFields.includes(sortBy)
       ? sortBy
@@ -173,7 +175,7 @@ async function getAllPersons(req, res) {
     const orderDirection =
       String(sortOrder).toUpperCase() === "ASC" ? "ASC" : "DESC";
 
-    //  WHERE conditions
+    // WHERE conditions
     const whereCondition = {
       type: "bot",
     };
@@ -197,27 +199,10 @@ async function getAllPersons(req, res) {
     }
 
     const { rows, count } = await User.findAndCountAll({
-      attributes: [
-        "id",
-        "username",
-        //  "email",
-        "gender",
-        "city",
-        "state",
-        "country",
-        "avatar",
-        "dob",
-        "bio",
-        //  "coins",
-        "total_likes",
-        "total_matches",
-        "total_rejects",
-        "total_spent",
-        "is_active",
-        "is_verified",
-        "last_active",
-        "created_at",
-      ],
+    
+      attributes: {
+        exclude: ["password"],
+      },
       where: whereCondition,
       order: [[orderField, orderDirection]],
       limit: perPage,
@@ -225,14 +210,12 @@ async function getAllPersons(req, res) {
     });
 
     const totalItems = count;
-
     const calculatedTotalPages = Math.max(1, Math.ceil(totalItems / perPage));
-
     totalPages = Math.min(totalPages, calculatedTotalPages);
 
     return res.json({
       success: true,
-      message: " persons fetched successfully",
+      message: "persons fetched successfully",
       data: {
         rows,
         pagination: {
@@ -254,6 +237,7 @@ async function getAllPersons(req, res) {
     });
   }
 }
+
 
 async function getPersonById(req, res) {
   const schema = Joi.object({
@@ -300,7 +284,7 @@ async function getPersonById(req, res) {
       });
     }
 
-    // 5) Active bot → return full info
+    //  return full info
     return res.json({
       success: true,
       message: " person fetched successfully.",
@@ -336,9 +320,11 @@ async function getRecommendedPersons(req, res) {
         data: null,
       });
     }
+
     const isSessionValid = await isUserSessionValid(req);
     console.log("isSessionValid:", isSessionValid);
     if (!isSessionValid.success) return res.status(401).json(isSessionValid);
+
     const userId = isSessionValid.data;
 
     let page = parseInt(value.page, 10);
@@ -380,16 +366,14 @@ async function getRecommendedPersons(req, res) {
     if (settings.preferred_gender && settings.preferred_gender !== "any") {
       where.gender = settings.preferred_gender;
     }
-    // if (settings.language) {
-    //   where.language = settings.language;
-    // }
+
+    // Age range → DOB filter
     if (
       settings.age_range_min &&
       settings.age_range_max &&
       settings.age_range_min > 0 &&
       settings.age_range_max >= settings.age_range_min
     ) {
-      // Age range → DOB filter
       const { minDob, maxDob } = getDobRangeFromAges(
         settings.age_range_min,
         settings.age_range_max
@@ -400,10 +384,11 @@ async function getRecommendedPersons(req, res) {
       };
     }
 
-    //  Query DB
+    // Query DB
     const { rows, count } = await User.findAndCountAll({
       where,
       attributes: {
+   
         exclude: ["password"],
       },
       order: [
@@ -420,7 +405,8 @@ async function getRecommendedPersons(req, res) {
       success: true,
       message: "Recommended bot persons fetched successfully.",
       data: {
-        rows: rows,
+        // rows already contain all user fields from pb_users (except password)
+        rows,
         pagination: {
           page,
           perPage,
@@ -441,6 +427,7 @@ async function getRecommendedPersons(req, res) {
   }
 }
 
+
 async function getRandomPersons(req, res) {
   try {
     const {
@@ -450,7 +437,7 @@ async function getRandomPersons(req, res) {
       name = null,
     } = req.query;
 
-    // Validate user session
+    // If later you want session check, uncomment:
     // const isSessionValid = await isUserSessionValid(req);
     // if (!isSessionValid.success) return res.status(401).json(isSessionValid);
 
@@ -471,7 +458,6 @@ async function getRandomPersons(req, res) {
     const offset = (page - 1) * perPage;
 
     // WHERE Conditions
-
     const whereCondition = { type: "bot" };
 
     // Active / Inactive filter
@@ -491,26 +477,11 @@ async function getRandomPersons(req, res) {
     }
 
     const { rows, count } = await User.findAndCountAll({
-      attributes: [
-        "id",
-        "username",
-        "gender",
-        "city",
-        "state",
-        "country",
-        "avatar",
-        "dob",
-        "bio",
-        "total_likes",
-        "total_matches",
-        "total_rejects",
-        "total_spent",
-        "is_active",
-        "is_verified",
-        "last_active",
-        "created_at",
-      ],
       where: whereCondition,
+      
+      attributes: {
+        exclude: ["password"],
+      },
       order: User.sequelize.random(), // ALWAYS RANDOM ORDER
       limit: perPage,
       offset,
@@ -523,7 +494,7 @@ async function getRandomPersons(req, res) {
       success: true,
       message: "Random persons fetched successfully.",
       data: {
-        rows,
+        rows, // each row has full user details: height, education, looking, etc.
         pagination: {
           page,
           perPage,
@@ -543,6 +514,7 @@ async function getRandomPersons(req, res) {
     });
   }
 }
+
 
 async function updateUserProfile(req, res) {
   const transaction = await sequelize.transaction();
