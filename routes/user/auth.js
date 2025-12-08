@@ -6,6 +6,8 @@ const utilController = require("../../config/utilController");
 const matchingController = require("../../controllers/user/matchingController");
 const userController = require("../../controllers/user/userController");
 
+const adsController=require("../../controllers/user/adViewController")
+
 router.get("/setting", utilController.getAllOptions);
 
 //user auth {register, login}
@@ -25,12 +27,16 @@ router.get("/matches", matchingController.getUserMatches);
 //coin
 router.get("/coin-packages", userController.getPackage);
 
-//user bot
+//user + bot
 router.get("/persons", userController.getAllPersons);
 router.get("/persons/random", userController.getRandomPersons);
 router.get("/persons/recommended", userController.getRecommendedPersons);
 router.get("/persons/:id", userController.getPersonById);
 router.post("/profile", userController.updateUserProfile);
+
+//ads view 
+router.get("/ads/status",adsController.getAdStatus);
+router.post("/ads/complete",adsController.completeAdView);
 
 
 module.exports = router;
