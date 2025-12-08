@@ -183,7 +183,6 @@ async function registerUser(req, res) {
     if (phoneNo) {
       const user = await User.create({
         username,
-        email: null,
         phone: phoneNo,
         password: hashedPass,
         register_type: "manual",
