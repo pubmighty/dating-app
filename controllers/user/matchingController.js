@@ -444,7 +444,7 @@ async function makeMutualMatch(userId, botId, transaction) {
 
 async function getUserMatches(req, res) {
   try {
-    // 1) Validate query (pagination)
+    // Validate query (pagination)
     const schema = Joi.object({
       page: Joi.number().integer().min(1).optional(),
       limit: Joi.number().integer().min(1).max(50).optional(),
@@ -466,7 +466,7 @@ async function getUserMatches(req, res) {
     const limit = value.limit || 10;
     const offset = (page - 1) * limit;
 
-    // 2) Validate session (same pattern as likeUser)
+    // Validate session
     const isSessionValid = await isUserSessionValid(req);
     if (!isSessionValid.success) {
       return res.status(401).json(isSessionValid);
@@ -480,12 +480,11 @@ async function getUserMatches(req, res) {
       });
     }
 
-    // 3) Fetch all MATCH interactions from *this user* side
-    //    (we already upsert user->target on match)
+    //  Fetch all MATCH interactions from this user's side
     const interactions = await UserInteraction.findAll({
       where: {
         action: "match",
-        is_mutual: 1, // or true if BOOLEAN
+        is_mutual: 1,
         user_id: currentUserId,
       },
       order: [["created_at", "DESC"]],
@@ -506,7 +505,7 @@ async function getUserMatches(req, res) {
       });
     }
 
-    // 4) Dedupe by target_user_id (latest mutual match per user)
+    //  Dedupe by target_user_id (latest mutual match per user)
     const latestByTargetId = {};
 
     interactions.forEach((row) => {
@@ -541,25 +540,14 @@ async function getUserMatches(req, res) {
       });
     }
 
-    // 5) Load ALL matched users (real + bot), only active ones
     const users = await User.findAll({
       where: {
         id: { [Op.in]: targetUserIds },
         is_active: true,
       },
-      attributes: [
-        "id",
-        "username",
-        "avatar",
-        "dob",
-        "city",
-        "state",
-        "country",
-        "last_active",
-        "is_active",
-        "is_verified",
-        "type", // 'real' or 'bot'
-      ],
+      attributes: {
+        exclude: ["password"],
+      },
     });
 
     if (!users.length) {
@@ -579,44 +567,33 @@ async function getUserMatches(req, res) {
 
     const usersById = {};
     users.forEach((u) => {
-      usersById[Number(u.id)] = u;
+      const plain = u.toJSON();
+      usersById[Number(plain.id)] = plain;
     });
 
-    // keep only ids that actually exist as users (safety)
+    // keep only ids that actually exist as users
     targetUserIds = users.map((u) => Number(u.id));
 
-    // 6) Build matches list (generic "user" object, not "bot")
+    //  Build matches list – attach FULL user object (all columns except password)
     let matches = targetUserIds.map((otherUserId) => {
       const other = usersById[otherUserId];
       const interaction = latestByTargetId[otherUserId];
 
       return {
         match_id: interaction ? interaction.id : null,
-        user: {
-          id: other.id,
-          username: other.username,
-          avatar: other.avatar,
-          dob: other.dob,
-          city: other.city,
-          state: other.state,
-          country: other.country,
-          last_active: other.last_active,
-          is_active: other.is_active,
-          is_verified: other.is_verified,
-          type: other.type, // 'real' or 'bot'
-        },
+        user: other, // full user data (id, username, email, gender, bio, height, education, looking, etc.)
         matched_at: interaction ? interaction.created_at : null,
       };
     });
 
-    // 7) Sort by matched_at desc (most recent first)
+    //  Sort by matched_at desc (most recent first)
     matches.sort((a, b) => {
       const ta = a.matched_at ? new Date(a.matched_at).getTime() : 0;
       const tb = b.matched_at ? new Date(b.matched_at).getTime() : 0;
       return tb - ta;
     });
 
-    // 8) Apply pagination in-memory
+    // Apply pagination in-memory
     const totalItems = matches.length;
     const totalPages = Math.ceil(totalItems / limit);
     const paginatedMatches = matches.slice(offset, offset + limit);
@@ -632,7 +609,7 @@ async function getUserMatches(req, res) {
           total_pages: totalPages,
         },
       },
-      message:"All match users",
+      message: "All match users",
     });
   } catch (err) {
     console.error("[getUserMatches] Error:", err);
@@ -642,6 +619,7 @@ async function getUserMatches(req, res) {
     });
   }
 }
+
 
 
 

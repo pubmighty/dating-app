@@ -565,8 +565,6 @@ async function updateUserProfile(req, res) {
       avatar: Joi.string().max(255).optional().allow(null, ""),
       dob: Joi.date().iso().optional().allow(null, ""),
       bio: Joi.string().optional().allow(null, ""),
-
-      // NEW FIELDS
       height: Joi.string().max(10).optional(),
       education: Joi.string().max(100).optional().allow(null, ""),
       looking: Joi.string()
@@ -663,7 +661,6 @@ async function updateUserProfile(req, res) {
       "avatar",
       "dob",
       "bio",
-      // NEW FIELDS
       "height",
       "education",
       "looking",
@@ -700,8 +697,6 @@ async function updateUserProfile(req, res) {
       avatar: user.avatar,
       dob: user.dob,
       bio: user.bio,
-
-      // NEW FIELDS
       height: user.height,
       education: user.education,
       looking: user.looking,
