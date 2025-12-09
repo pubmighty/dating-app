@@ -694,7 +694,7 @@ async function updateUserProfile(req, res) {
     if (newAvatarFilename && oldAvatar && oldAvatar !== newAvatarFilename) {
       deleteFile(oldAvatar, "upload/avatar").catch(() => {});
     }
-
+  console.log("REQ.FILE:", req.file);
     // Return updated user (hide password)
     const safeUser = {
       id: user.id,
@@ -730,7 +730,7 @@ async function updateUserProfile(req, res) {
       data: safeUser,
     });
   } catch (err) {
-    console.error("[updateUserProfile] Error:", err);
+    console.error("updateUserProfile Error:", err);
     if (req.file) await cleanupTempFiles([req.file]).catch(() => {});
     await transaction.rollback();
     return res.status(500).json({
@@ -738,6 +738,7 @@ async function updateUserProfile(req, res) {
       message: "Something went wrong while updating profile.",
     });
   }
+  
 }
 
 
