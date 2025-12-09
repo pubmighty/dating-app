@@ -337,7 +337,10 @@ async function getChatMessages(req, res) {
 
     // Fetch messages with pagination
     const { count, rows } = await Message.findAndCountAll({
-      where: { chat_id: chatId },
+      where: {
+        chat_id: chatId,
+        status: { [Op.ne]: "deleted" },
+      },
       order: [["created_at", "ASC"]],
       limit,
       offset,
@@ -522,7 +525,6 @@ async function deleteMessage(req, res) {
 
     await message.update({
       status: "deleted",
-      message: "This message was deleted",
     });
 
     return res.json({

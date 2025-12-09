@@ -3,8 +3,19 @@ const sequelize = require("../../config/db");
 const CoinPackage = require("../../models/CoinPackage");
 const User = require("../../models/User");
 const UserSetting = require("../../models/UserSetting");
-const { getOption, isUserSessionValid, getDobRangeFromAges} = require("../../utils/helper");
-const { fileUploader, uploadImage, verifyFileType, deleteFile, cleanupTempFiles }= require("../../utils/helpers/fileUpload");
+const UserInteraction = require("../../models/UserInteraction");
+const {
+  getOption,
+  isUserSessionValid,
+  getDobRangeFromAges,
+} = require("../../utils/helper");
+const {
+  fileUploader,
+  uploadImage,
+  verifyFileType,
+  deleteFile,
+  cleanupTempFiles,
+} = require("../../utils/helpers/fileUpload");
 const { Op } = require("sequelize");
 const { compressImage } = require("../../utils/helpers/imageCompressor");
 
@@ -704,10 +715,10 @@ async function getRandomPersons(req, res) {
       name = null,
     } = req.query;
 
-    // If later you want session check, uncomment:
-    // const isSessionValid = await isUserSessionValid(req);
-    // if (!isSessionValid.success) return res.status(401).json(isSessionValid);
+    const isSessionValid = await isUserSessionValid(req);
+    if (!isSessionValid.success) return res.status(401).json(isSessionValid);
 
+    const userId = isSessionValid.data;
     let totalPages = parseInt(
       await getOption("total_maxpage_for_persons", 100),
       10
@@ -743,6 +754,20 @@ async function getRandomPersons(req, res) {
       whereCondition.username = { [Op.like]: `${name.trim()}%` };
     }
 
+    const interactions = await UserInteraction.findAll({
+      where: {
+        user_id: userId,
+        action: { [Op.in]: ["like", "reject", "match"] },
+      },
+      attributes: ["target_user_id"],
+    });
+
+    const excludedIds = interactions.map((row) => row.target_user_id);
+
+    if (excludedIds.length > 0) {
+      whereCondition.id = { [Op.notIn]: excludedIds };
+    }
+
     const { rows, count } = await User.findAndCountAll({
       where: whereCondition,
 
@@ -761,7 +786,7 @@ async function getRandomPersons(req, res) {
       success: true,
       message: "Random persons fetched successfully.",
       data: {
-        rows, // each row has full user details: height, education, looking, etc.
+        rows,
         pagination: {
           page,
           perPage,
@@ -813,7 +838,7 @@ async function getUserSettings(req, res) {
           "Still Figuring Out"
         )
         .optional()
-        .allow(null, "")
+        .allow(null, ""),
     }).min(1);
 
     // Validate body
@@ -840,7 +865,7 @@ async function getUserSettings(req, res) {
       return res.status(401).json(sessionResult);
     }
 
-     userId = Number(sessionResult.data);
+    userId = Number(sessionResult.data);
 
     // Load current user
     const user = await User.findByPk(userId, { transaction });
@@ -857,29 +882,28 @@ async function getUserSettings(req, res) {
     const oldAvatar = user.avatar;
     let newAvatarFilename = null;
 
-   
-if (req.file) {
-  const verifyResult = await verifyFileType(req.file, [
-    "image/png",
-    "image/jpeg",
-    "image/jpg",
-    "image/webp",
-    "image/heic",
-    "image/heif",
-  ]);
+    if (req.file) {
+      const verifyResult = await verifyFileType(req.file, [
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+      ]);
 
-  if (!verifyResult || !verifyResult.ok) {
-    await cleanupTempFiles([req.file]);
-    await transaction.rollback();
-    return res.status(400).json({
-      success: false,
-      message: "Invalid avatar file type.",
-    });
-  }
+      if (!verifyResult || !verifyResult.ok) {
+        await cleanupTempFiles([req.file]);
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Invalid avatar file type.",
+        });
+      }
 
-  const newAvatar = await compressImage(req.file.path, "upload/avatar");
-  value.avatar = newAvatar;
-}
+      const newAvatar = await compressImage(req.file.path, "upload/avatar");
+      value.avatar = newAvatar;
+    }
 
     // Unique checks
     if (value.username && value.username !== user.username) {
@@ -958,7 +982,7 @@ if (req.file) {
     if (newAvatarFilename && oldAvatar && oldAvatar !== newAvatarFilename) {
       deleteFile(oldAvatar, "upload/avatar").catch(() => {});
     }
-  console.log("REQ.FILE:", req.file);
+    console.log("REQ.FILE:", req.file);
     // Return updated user (hide password)
     const safeUser = {
       id: user.id,
@@ -1002,9 +1026,7 @@ if (req.file) {
       message: "Something went wrong while updating profile.",
     });
   }
-  
 }
-
 
 async function changePassword(req, res) {
   const transaction = await sequelize.transaction();

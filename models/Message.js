@@ -57,6 +57,10 @@ const Message = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    is_deleted: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
     status: {
       type: DataTypes.ENUM("sent", "delivered", "read", "deleted"),
       defaultValue: "sent",
