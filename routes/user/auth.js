@@ -7,7 +7,7 @@ const matchingController = require("../../controllers/user/matchingController");
 const userController = require("../../controllers/user/userController");
 const chatController = require("../../controllers/user/chatController");
 
-const adsController=require("../../controllers/user/adViewController")
+const adsController = require("../../controllers/user/adViewController");
 
 const { fileUploader } = require("../../utils/helpers/fileUpload");
 
@@ -24,6 +24,7 @@ router.post("/forgot-password/verify", authController.forgotPasswordVerify);
 router.post("/chats/:chatId/messages", chatController.sendMessage);
 router.get("/chats/:chatId/messages", chatController.getChatMessages);
 router.get("/chats", chatController.getUserChats);
+router.get("/messages/:messageId", chatController.deleteMessage);
 
 //user interaction {like, reject, match}
 router.post("/like", matchingController.likeUser);
@@ -40,11 +41,15 @@ router.get("/persons", userController.getAllPersons);
 router.get("/persons/random", userController.getRandomPersons);
 router.get("/persons/recommended", userController.getRecommendedPersons);
 router.get("/persons/:id", userController.getPersonById);
-router.post("/profile",  fileUploader.single("avatar"), userController.updateUserProfile);
+router.post(
+  "/profile",
+  fileUploader.single("avatar"),
+  userController.updateUserProfile
+);
 
-//ads view 
-router.get("/ads/status",adsController.getAdStatus);
-router.post("/ads/complete",adsController.completeAdView);
+//ads view
+router.get("/ads/status", adsController.getAdStatus);
+router.post("/ads/complete", adsController.completeAdView);
 
 router.get("/settings", userController.getUserSettings);
 router.post("/settings", userController.updateUserSettings);
