@@ -2,6 +2,8 @@ const User = require("./User");
 const UserInteraction = require("./UserInteraction");
 const Chat = require("./Chat");
 const Message = require("./Message");
+const CoinPackage = require("./CoinPackage");
+const CoinPurchaseTransaction = require("./CoinPurchaseTransaction");
 
 function setupAssociations() {
   User.hasMany(UserInteraction, {
@@ -85,6 +87,20 @@ function setupAssociations() {
   Message.belongsTo(User, {
     foreignKey: "receiver_id",
     as: "receiver",
+  });
+  CoinPurchaseTransaction.belongsTo(CoinPackage, {
+    foreignKey: "coin_pack_id",
+    as: "package",
+    onDelete: "SET NULL",
+    onUpdate: "CASCADE",
+  });
+
+  // A package has many purchase transactions
+  CoinPackage.hasMany(CoinPurchaseTransaction, {
+    foreignKey: "coin_pack_id",
+    as: "purchases",
+    onDelete: "SET NULL",
+    onUpdate: "CASCADE",
   });
 }
 

@@ -7,13 +7,7 @@ const Message = require("../../models/Message");
 const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
 const CoinPurchaseTransaction = require("../../models/CoinPurchaseTransaction");
 const CoinPackage = require("../../models/CoinPackage");
-
-// Simple function: how many coins per message (you can make it dynamic later)
-function getMessageCost({ senderUser, receiverUser }) {
-  // Example: 1 coin per message to bot, 2 coins to real user
-  if (receiverUser.type === "bot") return 1;
-  return 2;
-}
+const { isUserSessionValid, getOption } = require("../../utils/helper");
 
 async function getUserCoinPurchases(req, res) {
   try {
