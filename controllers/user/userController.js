@@ -1006,7 +1006,6 @@ if (req.file) {
 }
 
 
-
 async function changePassword(req, res) {
   const transaction = await sequelize.transaction();
 

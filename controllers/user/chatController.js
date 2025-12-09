@@ -539,9 +539,120 @@ async function deleteMessage(req, res) {
   }
 }
 
+async function markChatMessagesRead(req, res) {
+  try {
+    //  Validate params + body
+    const schema = Joi.object({
+      chatId: Joi.number().integer().required(),
+      lastMessageId: Joi.number().integer().optional(),
+    });
+
+    const input = {
+      chatId: req.params.chatId,
+      lastMessageId: req.body.lastMessageId,
+    };
+
+    const { error, value } = schema.validate(input, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+      });
+    }
+
+    const { chatId, lastMessageId } = value;
+
+    //  Check session (real user from token/cookie)
+    const sessionResult = await isUserSessionValid(req);
+    if (!sessionResult.success) {
+      return res.status(401).json(sessionResult);
+    }
+    const userId = Number(sessionResult.data);
+
+    //  Verify chat exists
+    const chat = await Chat.findByPk(chatId);
+    if (!chat) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat not found",
+      });
+    }
+
+    // User must be a participant in chat
+    if (chat.participant_1_id !== userId && chat.participant_2_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to update this chat",
+      });
+    }
+
+    //  Build where condition for messages
+    const where = {
+      chat_id: chatId,
+      receiver_id: userId,
+      is_read: false,
+    };
+
+    if (lastMessageId) {
+      // Mark only messages up to that id as read
+      where.id = { [Op.lte]: lastMessageId };
+    }
+
+    //  Update messages
+    const [updatedCount] = await Message.update(
+      {
+        is_read: true,
+        read_at: new Date(),
+        status: "read",
+      },
+      { where }
+    );
+
+    //  Find last read message for reference
+    const lastRead = await Message.findOne({
+      where: {
+        chat_id: chatId,
+        receiver_id: userId,
+        is_read: true,
+      },
+      order: [["id", "DESC"]],
+    });
+
+    //  Emit real-time event
+    if (global.io && updatedCount > 0 && lastRead) {
+      const room = `chat_${chatId}`;
+      global.io.to(room).emit("messages_read", {
+        chatId,
+        userId,
+        lastReadMessageId: lastRead.id,
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Messages marked as read",
+      data: {
+        updatedCount,
+        lastReadMessageId: lastRead ? lastRead.id : null,
+      },
+    });
+  } catch (err) {
+    console.error("markChatMessagesRead error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+}
+
 module.exports = {
   sendMessage,
   getChatMessages,
   getUserChats,
   deleteMessage,
+  markChatMessagesRead,
 };
