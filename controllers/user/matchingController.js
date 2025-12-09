@@ -468,12 +468,14 @@ async function getUserMatches(req, res) {
       });
     }
 
-    //  Fetch all MATCH interactions from this user's side
+    // Fetch all mutual interactions (like OR match) from this user's side
     const interactions = await UserInteraction.findAll({
       where: {
-        action: "match",
-        is_mutual: 1,
         user_id: currentUserId,
+        is_mutual: 1,
+        action: {
+          [Op.in]: ["like", "match"], // now covers "like" with mutual=1
+        },
       },
       order: [["created_at", "DESC"]],
     });
@@ -562,14 +564,14 @@ async function getUserMatches(req, res) {
     // keep only ids that actually exist as users
     targetUserIds = users.map((u) => Number(u.id));
 
-    //  Build matches list – attach FULL user object (all columns except password)
+    //  Build matches list – attach FULL user object
     let matches = targetUserIds.map((otherUserId) => {
       const other = usersById[otherUserId];
       const interaction = latestByTargetId[otherUserId];
 
       return {
         match_id: interaction ? interaction.id : null,
-        user: other, // full user data (id, username, email, gender, bio, height, education, looking, etc.)
+        user: other,
         matched_at: interaction ? interaction.created_at : null,
       };
     });
@@ -607,6 +609,7 @@ async function getUserMatches(req, res) {
     });
   }
 }
+
 
 module.exports = {
   likeUser,
