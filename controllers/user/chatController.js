@@ -3,16 +3,18 @@ const Message = require("../../models/Message");
 const Chat = require("../../models/Chat");
 const { Op, Sequelize } = require("sequelize");
 const User = require("../../models/User");
+const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
 const { generateBotReplyForChat } = require("../../utils/helpers/aiHelper");
-const { isUserSessionValid } = require("../../utils/helper");
+const { isUserSessionValid, getOption } = require("../../utils/helper");
 
 async function sendMessage(req, res) {
   const transaction = await Message.sequelize.transaction();
 
   try {
     const { chatId: chatIdParam } = req.params;
-    const { message, receiverId: receiverIdBody, replyToMessageId } = req.body;
+    const { message, replyToMessageId } = req.body;
 
+    // Validate session
     const sessionResult = await isUserSessionValid(req);
     if (!sessionResult.success) {
       await transaction.rollback();
@@ -20,8 +22,7 @@ async function sendMessage(req, res) {
     }
     const userId = Number(sessionResult.data);
 
-    console.log(userId);
-    //  Basic validation
+    // Validate message
     if (!message || !message.trim()) {
       await transaction.rollback();
       return res
@@ -29,88 +30,47 @@ async function sendMessage(req, res) {
         .json({ success: false, message: "Message is required" });
     }
 
-    const chatId =
-      chatIdParam && chatIdParam !== "null" && chatIdParam !== "undefined"
-        ? Number(chatIdParam)
-        : null;
-
-    let chat = null;
-    let receiverId = null;
-
-    // Find or create chat
-    if (chatId) {
-      chat = await Chat.findByPk(chatId, { transaction });
-
-      if (!chat) {
-        await transaction.rollback();
-        return res
-          .status(404)
-          .json({ success: false, message: "Chat not found" });
-      }
-
-      receiverId =
-        chat.participant_1_id === userId
-          ? chat.participant_2_id
-          : chat.participant_1_id;
-    } else {
-      const parsedReceiverId = Number(receiverIdBody);
-      if (!parsedReceiverId || Number.isNaN(parsedReceiverId)) {
-        await transaction.rollback();
-        return res.status(400).json({
-          success: false,
-          message:
-            "receiverId is required in body when chatId is not provided.",
-        });
-      }
-
-      if (parsedReceiverId === userId) {
-        await transaction.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "You cannot start a chat with yourself.",
-        });
-      }
-
-      receiverId = parsedReceiverId;
-
-      chat = await Chat.findOne({
-        where: {
-          [Op.or]: [
-            { participant_1_id: userId, participant_2_id: receiverId },
-            { participant_1_id: receiverId, participant_2_id: userId },
-          ],
-        },
-        transaction,
+    // Chat ID must exist → You don't want receiverId from body
+    if (!chatIdParam || chatIdParam === "null" || chatIdParam === "undefined") {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "chatId is required to send message.",
       });
-      if (!chat) {
-        chat = await Chat.create(
-          {
-            participant_1_id: userId,
-            participant_2_id: receiverId,
-            last_message_id: null,
-            last_message_time: null,
-            unread_count_p1: 0,
-            unread_count_p2: 0,
-            is_archived_p1: false,
-            is_archived_p2: false,
-            chat_status_p1: "active",
-            chat_status_p2: "active",
-          },
-          { transaction }
-        );
-      }
     }
 
-    // Safety: user must be part of chat
-    if (chat.participant_1_id !== userId && chat.participant_2_id !== userId) {
+    const chatId = Number(chatIdParam);
+
+    // Find chat
+    const chat = await Chat.findByPk(chatId, { transaction });
+    if (!chat) {
       await transaction.rollback();
       return res
-        .status(403)
-        .json({ success: false, message: "You are not part of this chat." });
+        .status(404)
+        .json({ success: false, message: "Chat not found" });
     }
 
-    //  Load sender (current user)
-    const sender = await User.findByPk(userId, { transaction });
+    // Ensure user is participant
+    const isUserP1 = chat.participant_1_id === userId;
+    const isUserP2 = chat.participant_2_id === userId;
+
+    if (!isUserP1 && !isUserP2) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        message: "You are not part of this chat.",
+      });
+    }
+
+    // Identify receiver automatically
+    const receiverId = isUserP1 ? chat.participant_2_id : chat.participant_1_id;
+
+    // Load sender (with row lock)
+    const sender = await User.findByPk(userId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
     if (!sender) {
       await transaction.rollback();
       return res
@@ -120,13 +80,6 @@ async function sendMessage(req, res) {
 
     // Load receiver
     const receiver = await User.findByPk(receiverId, { transaction });
-    console.log(
-      "[sendMessage] sender.type =",
-      sender.type,
-      "receiver.type =",
-      receiver?.type
-    );
-
     if (!receiver) {
       await transaction.rollback();
       return res
@@ -134,11 +87,30 @@ async function sendMessage(req, res) {
         .json({ success: false, message: "Receiver not found" });
     }
 
-    // If this message is a reply → validate replied message belongs to same chat
+    // COIN LOGIC
+    const optionValue = await getOption("cost_per_message", 10);
+    let messageCost = parseInt(optionValue ?? 0, 10);
+    if (isNaN(messageCost)) messageCost = 0;
+
+    if (messageCost > 0 && (sender.coins || 0) < messageCost) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        code: "INSUFFICIENT_COINS",
+        message: "You do not have enough coins to send this message.",
+        data: {
+          required: messageCost,
+          current: sender.coins || 0,
+        },
+      });
+    }
+
+    // REPLY VALIDATION
+
     let repliedMessage = null;
     if (replyToMessageId) {
-      const parsedReplyId = Number(replyToMessageId);
-      if (!parsedReplyId || Number.isNaN(parsedReplyId)) {
+      const parsedReply = Number(replyToMessageId);
+      if (isNaN(parsedReply)) {
         await transaction.rollback();
         return res.status(400).json({
           success: false,
@@ -147,10 +119,7 @@ async function sendMessage(req, res) {
       }
 
       repliedMessage = await Message.findOne({
-        where: {
-          id: parsedReplyId,
-          chat_id: chat.id,
-        },
+        where: { id: parsedReply, chat_id: chat.id },
         transaction,
       });
 
@@ -158,12 +127,13 @@ async function sendMessage(req, res) {
         await transaction.rollback();
         return res.status(400).json({
           success: false,
-          message: "Replied message not found in this chat.",
+          message: "Reply message not found in this chat.",
         });
       }
     }
 
-    // Save user's message
+    // SAVE USER MESSAGE
+
     const userMessage = await Message.create(
       {
         chat_id: chat.id,
@@ -174,19 +144,43 @@ async function sendMessage(req, res) {
         message_type: "text",
         sender_type: "real",
         status: "sent",
+        is_paid: messageCost > 0,
+        price: messageCost,
       },
       { transaction }
     );
 
-    // Update chat meta & unread counts
-    const isSenderP1 = chat.participant_1_id === userId;
+    // Deduct coins
+    let newCoinBalance = sender.coins || 0;
 
+    if (messageCost > 0) {
+      newCoinBalance -= messageCost;
+
+      await sender.update({ coins: newCoinBalance }, { transaction });
+
+      await CoinSpentTransaction.create(
+        {
+          user_id: userId,
+          coins: messageCost,
+          spent_on: "message",
+          message_id: userMessage.id,
+          status: "completed",
+          created_at: new Date(),
+          date: new Date(),
+        },
+        { transaction }
+      );
+    }
+
+    // ---------------------------
+    // UPDATE CHAT
+    // ---------------------------
     const updateData = {
       last_message_id: userMessage.id,
       last_message_time: new Date(),
     };
 
-    if (isSenderP1) {
+    if (isUserP1) {
       updateData.unread_count_p2 = chat.unread_count_p2 + 1;
     } else {
       updateData.unread_count_p1 = chat.unread_count_p1 + 1;
@@ -196,9 +190,10 @@ async function sendMessage(req, res) {
 
     await transaction.commit();
 
-    //  AI bot reply (outside transaction)
+    // BOT REPLY (OUTSIDE TX)
     let botMessageSaved = null;
-    if (receiver && receiver.type === "bot") {
+
+    if (receiver.type === "bot") {
       try {
         const botReplyText = await generateBotReplyForChat(chat.id, message);
 
@@ -218,10 +213,10 @@ async function sendMessage(req, res) {
           last_message_time: new Date(),
         };
 
-        if (isSenderP1) {
-          botUpdateData.unread_count_p1 = (chat.unread_count_p1 || 0) + 1;
+        if (isUserP1) {
+          botUpdateData.unread_count_p1 = chat.unread_count_p1 + 1;
         } else {
-          botUpdateData.unread_count_p2 = (chat.unread_count_p2 || 0) + 1;
+          botUpdateData.unread_count_p2 = chat.unread_count_p2 + 1;
         }
 
         await chat.update(botUpdateData);
@@ -230,30 +225,30 @@ async function sendMessage(req, res) {
       }
     }
 
-    //  Build response payload with reply info
+    // RESPONSE
+
     return res.json({
       success: true,
       message: "Message sent successfully",
       data: {
         chatId: chat.id,
+        coinsBalance: newCoinBalance,
+        coinsDeducted: messageCost,
 
-        sender: sender
-          ? {
-              id: sender.id,
-              username: sender.username,
-              type: sender.type,
-              avatar: sender.avatar,
-            }
-          : null,
+        sender: {
+          id: sender.id,
+          username: sender.username,
+          type: sender.type,
+          avatar: sender.avatar,
+          coins: newCoinBalance,
+        },
 
-        receiver: receiver
-          ? {
-              id: receiver.id,
-              username: receiver.username,
-              type: receiver.type,
-              avatar: receiver.avatar,
-            }
-          : null,
+        receiver: {
+          id: receiver.id,
+          username: receiver.username,
+          type: receiver.type,
+          avatar: receiver.avatar,
+        },
 
         userMessage: {
           id: userMessage.id,
@@ -264,15 +259,6 @@ async function sendMessage(req, res) {
           status: userMessage.status,
           created_at: userMessage.createdAt,
           reply_id: userMessage.reply_id,
-          // Full replied message info (if any)
-          replyTo: repliedMessage
-            ? {
-                id: repliedMessage.id,
-                sender_id: repliedMessage.sender_id,
-                message: repliedMessage.message,
-                created_at: repliedMessage.createdAt,
-              }
-            : null,
         },
 
         botMessage: botMessageSaved
@@ -285,13 +271,6 @@ async function sendMessage(req, res) {
               status: botMessageSaved.status,
               created_at: botMessageSaved.createdAt,
               reply_id: botMessageSaved.reply_id,
-
-              replyTo: {
-                id: userMessage.id,
-                sender_id: userMessage.sender_id,
-                message: userMessage.message,
-                created_at: userMessage.createdAt,
-              },
             }
           : null,
       },
@@ -501,8 +480,68 @@ async function getUserChats(req, res) {
   }
 }
 
+async function deleteMessage(req, res) {
+  try {
+    const messageId = Number(req.params.messageId);
+    const session = await isUserSessionValid(req);
+    if (!session.success) {
+      return res.status(401).json(session);
+    }
+    const userId = Number(session.data);
+
+    if (!messageId) {
+      return res.status(400).json({
+        success: false,
+        message: "messageId is required",
+      });
+    }
+
+    const message = await Message.findByPk(messageId);
+    if (!message) {
+      return res.status(404).json({
+        success: false,
+        message: "Message not found",
+      });
+    }
+
+    const chat = await Chat.findByPk(message.chat_id);
+    if (!chat) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat not found",
+      });
+    }
+
+    // only sender can unsend
+    if (message.sender_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "You can only delete your own messages",
+      });
+    }
+
+    await message.update({
+      status: "deleted",
+      message: "This message was deleted",
+    });
+
+    return res.json({
+      success: true,
+      message: "Message deleted successfully",
+      data: message,
+    });
+  } catch (err) {
+    console.error("deleteMessage error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+}
+
 module.exports = {
   sendMessage,
   getChatMessages,
   getUserChats,
+  deleteMessage,
 };

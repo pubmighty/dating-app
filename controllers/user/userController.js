@@ -784,6 +784,7 @@ async function getRandomPersons(req, res) {
     });
   }
 }
+
 async function getUserSettings(req, res) {
   try {
     //  Validate session

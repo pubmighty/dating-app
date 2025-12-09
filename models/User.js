@@ -76,19 +76,16 @@ const User = sequelize.define(
     bio: {
       type: DataTypes.TEXT,
     },
-    height:{
-        type: DataTypes.STRING(10),
-    },
-    education:{
-       type: DataTypes.STRING(100),
-    },
-    looking: {
-      type: DataTypes.ENUM("Long Term",
-         "Long Term, Open To Short",
-          "Short Term, Open To Long", 
-          "Short Term Fun",
-          "New Friends",
-          "Still Figuring Out"),
+
+    looking_for: {
+      type: DataTypes.ENUM(
+        "Long Term",
+        "Long Term, Open To Short",
+        "Short Term, Open To Long",
+        "Short Term Fun",
+        "New Friends",
+        "Still Figuring Out"
+      ),
       allowNull: true,
     },
     coins: {
@@ -100,7 +97,21 @@ const User = sequelize.define(
       type: DataTypes.INTEGER,
       defaultValue: 0,
     },
-
+    height: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    looking_for: {
+      type: DataTypes.ENUM(
+        "Long-term relationship",
+        "Long-term, open to short",
+        "Short-term, open to long",
+        "Short-term fun",
+        "New friends",
+        "Still figuring it out"
+      ),
+      allowNull: true,
+    },
     total_matches: {
       type: DataTypes.INTEGER,
       defaultValue: 0,
@@ -124,7 +135,10 @@ const User = sequelize.define(
     ip_address: {
       type: DataTypes.STRING(45),
     },
-
+    education: {
+      type: DataTypes.STRING(200),
+      allowNull: true,
+    },
     is_active: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
