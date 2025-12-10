@@ -9,9 +9,9 @@ const chatController = require("../../controllers/user/chatController");
 const adsController = require("../../controllers/user/adViewController");
 const { fileUploader } = require("../../utils/helpers/fileUpload");
 
-// const  { initiateVideoCall, acceptVideoCall,  rejectVideoCall, endVideoCall, getVideoCallStatus,
-//   getVideoCallHistory,
-// } =require("../../controllers/user/videoCallConroller")
+const  { initiateVideoCall, acceptVideoCall,  rejectVideoCall, endVideoCall, getVideoCallStatus,
+  getVideoCallHistory,
+} =require("../../controllers/user/videoCallConroller")
 
 router.get("/setting", utilController.getAllOptions);
 
@@ -55,12 +55,12 @@ router.get("/settings", userController.getUserSettings);
 router.post("/settings", userController.updateUserSettings);
 
 //video call 
-// router.post("/chats/:chatId/video-calls/initiate", initiateVideoCall);
-// router.post("/video-calls/:callId/accept", acceptVideoCall);
-// router.post("/video-calls/:callId/reject", rejectVideoCall);
-// router.post("/video-calls/:callId/end", endVideoCall);
-// router.get("/video-calls/:callId/status", getVideoCallStatus);
-// router.get("/video-calls", getVideoCallHistory);
+router.post("/chats/:chatId/video-calls/initiate", initiateVideoCall);
+router.post("/video-calls/:callId/accept", acceptVideoCall);
+router.post("/video-calls/:callId/reject", rejectVideoCall);
+router.post("/video-calls/:callId/end", endVideoCall);
+router.get("/video-calls/:callId/status", getVideoCallStatus);
+router.get("/video-calls", getVideoCallHistory);
 
 
 module.exports = router;

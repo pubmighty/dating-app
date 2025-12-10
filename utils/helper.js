@@ -161,14 +161,23 @@ async function generateUniqueUsername(base) {
 async function getOption(optionName, dValue = null) {
   try {
     const option = await Option.findOne({ where: { name: optionName } });
-    if (option) {
-      option.dValue = dValue;
+
+    if (!option) {
+      // no row => use default
+      return dValue;
     }
 
-    return dValue; // Return default value if option is not found
+    const raw = option.value;
+
+    // if value is null/empty, fallback
+    if (raw === null || raw === undefined || raw === "") {
+      return dValue;
+    }
+
+    return raw; // IMPORTANT: return DB value
   } catch (error) {
     console.error("Error fetching option:", error);
-    return dValue; // Return default value in case of error
+    return dValue;
   }
 }
 
@@ -412,6 +421,31 @@ async function getOrCreateChatBetweenUsers(userIdA, userIdB, transaction) {
 
   return chat;
 }
+function validateCallParticipants(chat, callerId, receiverId) {
+  const p1 = chat.participant_1_id;
+  const p2 = chat.participant_2_id;
+
+  if (callerId !== p1 && callerId !== p2) {
+    return { success: false, message: "Caller not part of this chat" };
+  }
+
+  if (receiverId !== p1 && receiverId !== p2) {
+    return { success: false, message: "Receiver not part of this chat" };
+  }
+
+  if (callerId === receiverId) {
+    return { success: false, message: "Cannot call yourself" };
+  }
+
+  return { success: true };
+}
+
+function calculateCallCost(durationSeconds, perMinuteCost) {
+  if (!durationSeconds || durationSeconds <= 0) return 0;
+  const minutes = Math.ceil(durationSeconds / 60);
+  return minutes * perMinuteCost;
+}
+
 
 module.exports = {
   getRealIp,
@@ -429,4 +463,6 @@ module.exports = {
   isUserSessionValid,
   getDobRangeFromAges,
   getOrCreateChatBetweenUsers,
+  validateCallParticipants,
+  calculateCallCost,
 };
