@@ -103,11 +103,11 @@ async function likeUser(req, res) {
       );
     }
 
-    // const chat = await getOrCreateChatBetweenUsers(
-    //   userId,
-    //   targetUserId,
-    //   transaction
-    // );
+    const chat = await getOrCreateChatBetweenUsers(
+      userId,
+      targetUserId,
+      transaction
+    );
 
     await transaction.commit();
 
@@ -118,7 +118,7 @@ async function likeUser(req, res) {
         target_user_id: targetUserId,
         target_type: targetUser.type, // 'bot'
         is_match: true, // for bots we treat like = match
-        //   chat_id: chat.id,
+        chat_id: chat.id,
       },
     });
   } catch (err) {

@@ -101,17 +101,17 @@ const User = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
-    looking_for: {
-      type: DataTypes.ENUM(
-        "Long-term relationship",
-        "Long-term, open to short",
-        "Short-term, open to long",
-        "Short-term fun",
-        "New friends",
-        "Still figuring it out"
-      ),
-      allowNull: true,
-    },
+    // looking_for: {
+    //   type: DataTypes.ENUM(
+    //     "Long-term relationship",
+    //     "Long-term, open to short",
+    //     "Short-term, open to long",
+    //     "Short-term fun",
+    //     "New friends",
+    //     "Still figuring it out"
+    //   ),
+    //   allowNull: true,
+    // },
     total_matches: {
       type: DataTypes.INTEGER,
       defaultValue: 0,
