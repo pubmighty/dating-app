@@ -56,7 +56,7 @@ async function updateUserProfile(req, res) {
         .optional()
         .allow(null, ""),
 
-      height: Joi.number().integer().min(50).max(250).optional().allow(null),
+      height: Joi.string().max(250).optional().allow(null),
       education: Joi.string().max(200).optional().allow(null, "")
     }).min(1);
 
