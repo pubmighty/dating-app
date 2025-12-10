@@ -49,7 +49,7 @@ async function updateUserProfile(req, res) {
     )
     .optional()
     .allow(null, ""),
-    height: Joi.string().integer().max(250).optional().allow(null,""),
+    height: Joi.string().max(250).optional().allow(null,""),
      education: Joi.string().max(200).optional().allow(null, "")
     }).min(1);
     // 1) Validate body
