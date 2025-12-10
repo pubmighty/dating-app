@@ -6,142 +6,152 @@ const User = require("../../models/User");
 const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
 const { generateBotReplyForChat } = require("../../utils/helpers/aiHelper");
 const { isUserSessionValid, getOption } = require("../../utils/helper");
+const {verifyFileType, uploadFile, cleanupTempFiles} = require("../../utils/helpers/fileUpload");
 
 async function sendMessage(req, res) {
   const transaction = await Message.sequelize.transaction();
 
   try {
     const { chatId: chatIdParam } = req.params;
-    const { message, replyToMessageId } = req.body;
+    const { message: textBody, replyToMessageId, messageType } = req.body;
+    const file = req.file || null; 
 
-    // Validate session
     const sessionResult = await isUserSessionValid(req);
     if (!sessionResult.success) {
       await transaction.rollback();
+      await cleanupTempFiles([file]);
       return res.status(401).json(sessionResult);
     }
     const userId = Number(sessionResult.data);
 
-    // Validate message
-    if (!message || !message.trim()) {
-      await transaction.rollback();
-      return res
-        .status(400)
-        .json({ success: false, message: "Message is required" });
-    }
-
-    // Chat ID must exist → You don't want receiverId from body
-    if (!chatIdParam || chatIdParam === "null" || chatIdParam === "undefined") {
-      await transaction.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "chatId is required to send message.",
-      });
+    if (!chatIdParam) {
+      await cleanupTempFiles([file]);
+      return res.status(400).json({ success: false, message: "chatId required" });
     }
 
     const chatId = Number(chatIdParam);
 
-    // Find chat
     const chat = await Chat.findByPk(chatId, { transaction });
     if (!chat) {
-      await transaction.rollback();
-      return res
-        .status(404)
-        .json({ success: false, message: "Chat not found" });
+      await cleanupTempFiles([file]);
+      return res.status(404).json({ success: false, message: "Chat not found" });
     }
 
-    // Ensure user is participant
     const isUserP1 = chat.participant_1_id === userId;
     const isUserP2 = chat.participant_2_id === userId;
-
     if (!isUserP1 && !isUserP2) {
-      await transaction.rollback();
-      return res.status(403).json({
-        success: false,
-        message: "You are not part of this chat.",
-      });
+      await cleanupTempFiles([file]);
+      return res.status(403).json({ success: false, message: "Not in this chat" });
     }
 
-    // Identify receiver automatically
     const receiverId = isUserP1 ? chat.participant_2_id : chat.participant_1_id;
 
-    // Load sender (with row lock)
+    //  MESSAGE-TYPE HANDLING (TEXT OR FILE)
+    let finalMessageType = (messageType || "text").toLowerCase();
+    const allowedTypes = ["text", "image", "audio", "video", "file"];
+
+    if (!allowedTypes.includes(finalMessageType)) {
+      finalMessageType = "text";
+    }
+
+    let finalMediaUrl = null;
+    let finalMediaType = null;
+    let finalFileSize = null;
+
+    if (finalMessageType === "text") {
+      if (!textBody || !textBody.trim()) {
+        await cleanupTempFiles([file]);
+        return res.status(400).json({ success: false, message: "Message required" });
+      }
+    } else {
+   
+      if (!file) {
+        return res.status(400).json({
+          success: false,
+          message: `file is required for ${finalMessageType}`,
+        });
+      }
+
+      const detect = await verifyFileType(file, [
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+        "image/jpg",
+        "audio/mpeg", 
+        "audio/wav",
+        "video/mp4",
+        "application/pdf",
+      ]);
+
+      if (!detect || !detect.ok) {
+        await cleanupTempFiles([file]);
+        return res.status(400).json({ success: false, message: "Invalid file type" });
+      }
+
+      const saved = await uploadFile(
+        file,
+        "upload/chat",   // folder inside public/
+        detect.ext,
+        "chat_message",
+        chatId,
+        req.ip,
+        req.headers["user-agent"],
+        null,
+        null
+      );
+
+      finalMediaUrl = `/upload/chat/${saved.filename}`;
+      finalMediaType = finalMessageType;
+      finalFileSize = file.size;
+
+      // temp file is already deleted by uploadFile()
+    }
+
+    // COIN LOGIC (unchanged)
+    const optionValue = await getOption("cost_per_message", 10);
+    let messageCost = parseInt(optionValue ?? 0, 10);
+    if (isNaN(messageCost)) messageCost = 0;
+
     const sender = await User.findByPk(userId, {
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
 
-    if (!sender) {
-      await transaction.rollback();
-      return res
-        .status(404)
-        .json({ success: false, message: "Sender not found" });
-    }
-
-    // Load receiver
-    const receiver = await User.findByPk(receiverId, { transaction });
-    if (!receiver) {
-      await transaction.rollback();
-      return res
-        .status(404)
-        .json({ success: false, message: "Receiver not found" });
-    }
-
-    // COIN LOGIC
-    const optionValue = await getOption("cost_per_message", 10);
-    let messageCost = parseInt(optionValue ?? 0, 10);
-    if (isNaN(messageCost)) messageCost = 0;
-
-    if (messageCost > 0 && (sender.coins || 0) < messageCost) {
+    if (messageCost > 0 && sender.coins < messageCost) {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
         code: "INSUFFICIENT_COINS",
-        message: "You do not have enough coins to send this message.",
-        data: {
-          required: messageCost,
-          current: sender.coins || 0,
-        },
+        message: "Not enough coins",
       });
     }
 
-    // REPLY VALIDATION
-
+    // REPLY CHECK
     let repliedMessage = null;
     if (replyToMessageId) {
-      const parsedReply = Number(replyToMessageId);
-      if (isNaN(parsedReply)) {
-        await transaction.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "replyToMessageId must be a valid number.",
-        });
-      }
-
       repliedMessage = await Message.findOne({
-        where: { id: parsedReply, chat_id: chat.id },
+        where: { id: Number(replyToMessageId), chat_id: chat.id },
         transaction,
       });
-
-      if (!repliedMessage) {
-        await transaction.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Reply message not found in this chat.",
-        });
-      }
     }
 
-    // SAVE USER MESSAGE
-
-    const userMessage = await Message.create(
+    // SAVE MESSAGE
+    const newMsg = await Message.create(
       {
         chat_id: chat.id,
         sender_id: userId,
         receiver_id: receiverId,
-        message,
+
+        message: textBody || "",
+
+        message_type: finalMessageType,
+        media_url: finalMediaUrl,
+        media_type: finalMediaType,
+        file_size: finalFileSize,
+
         reply_id: repliedMessage ? repliedMessage.id : null,
-        message_type: "text",
         sender_type: "real",
         status: "sent",
         is_paid: messageCost > 0,
@@ -150,139 +160,42 @@ async function sendMessage(req, res) {
       { transaction }
     );
 
-    // Deduct coins
-    let newCoinBalance = sender.coins || 0;
-
+    // COIN DEDUCTION
     if (messageCost > 0) {
-      newCoinBalance -= messageCost;
-
-      await sender.update({ coins: newCoinBalance }, { transaction });
-
+      await sender.update({ coins: sender.coins - messageCost }, { transaction });
       await CoinSpentTransaction.create(
         {
           user_id: userId,
           coins: messageCost,
           spent_on: "message",
-          message_id: userMessage.id,
+          message_id: newMsg.id,
           status: "completed",
-          created_at: new Date(),
-          date: new Date(),
         },
         { transaction }
       );
     }
 
+    // UPDATE CHAT UNREADS
     const updateData = {
-      last_message_id: userMessage.id,
+      last_message_id: newMsg.id,
       last_message_time: new Date(),
     };
-
-    if (isUserP1) {
-      updateData.unread_count_p2 = chat.unread_count_p2 + 1;
-    } else {
-      updateData.unread_count_p1 = chat.unread_count_p1 + 1;
-    }
+    if (isUserP1) updateData.unread_count_p2 += 1;
+    else updateData.unread_count_p1 += 1;
 
     await chat.update(updateData, { transaction });
-
     await transaction.commit();
-
-    // BOT REPLY (OUTSIDE TX)
-    let botMessageSaved = null;
-
-    if (receiver.type === "bot") {
-      try {
-        const botReplyText = await generateBotReplyForChat(chat.id, message);
-
-        botMessageSaved = await Message.create({
-          chat_id: chat.id,
-          sender_id: receiverId,
-          receiver_id: userId,
-          message: botReplyText,
-          reply_id: userMessage.id,
-          message_type: "text",
-          sender_type: "bot",
-          status: "sent",
-        });
-
-        const botUpdateData = {
-          last_message_id: botMessageSaved.id,
-          last_message_time: new Date(),
-        };
-
-        if (isUserP1) {
-          botUpdateData.unread_count_p1 = chat.unread_count_p1 + 1;
-        } else {
-          botUpdateData.unread_count_p2 = chat.unread_count_p2 + 1;
-        }
-
-        await chat.update(botUpdateData);
-      } catch (err) {
-        console.error("[error during Send Message bot reply]", err);
-      }
-    }
-
-    // RESPONSE
 
     return res.json({
       success: true,
-      message: "Message sent successfully",
-      data: {
-        chatId: chat.id,
-        coinsBalance: newCoinBalance,
-        coinsDeducted: messageCost,
-
-        sender: {
-          id: sender.id,
-          username: sender.username,
-          type: sender.type,
-          avatar: sender.avatar,
-          coins: newCoinBalance,
-        },
-
-        receiver: {
-          id: receiver.id,
-          username: receiver.username,
-          type: receiver.type,
-          avatar: receiver.avatar,
-        },
-
-        userMessage: {
-          id: userMessage.id,
-          chat_id: userMessage.chat_id,
-          sender_id: userMessage.sender_id,
-          receiver_id: userMessage.receiver_id,
-          message: userMessage.message,
-          status: userMessage.status,
-          created_at: userMessage.createdAt,
-          reply_id: userMessage.reply_id,
-        },
-
-        botMessage: botMessageSaved
-          ? {
-              id: botMessageSaved.id,
-              chat_id: botMessageSaved.chat_id,
-              sender_id: botMessageSaved.sender_id,
-              receiver_id: botMessageSaved.receiver_id,
-              message: botMessageSaved.message,
-              status: botMessageSaved.status,
-              created_at: botMessageSaved.createdAt,
-              reply_id: botMessageSaved.reply_id,
-            }
-          : null,
-      },
+      message: "Message sent",
+      data: newMsg,
     });
-  } catch (error) {
-    console.error("[sendMessage] Error:", error);
-
-    if (transaction && !transaction.finished) {
-      await transaction.rollback();
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Something went wrong",
-    });
+  } catch (err) {
+    console.error("sendMessage error:", err);
+    await transaction.rollback();
+    await cleanupTempFiles([req.file]);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 }
 
@@ -381,7 +294,7 @@ async function getUserChats(req, res) {
     }
 
     const page = Number(value.page);
-    const limit = Number(value.limit);
+    const limit = Number (value.limit);
     const offset = (page - 1) * limit;
 
     const session = await isUserSessionValid(req);
