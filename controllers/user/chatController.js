@@ -6,7 +6,11 @@ const User = require("../../models/User");
 const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
 const { generateBotReplyForChat } = require("../../utils/helpers/aiHelper");
 const { isUserSessionValid, getOption } = require("../../utils/helper");
-const {verifyFileType, uploadFile, cleanupTempFiles} = require("../../utils/helpers/fileUpload");
+const {
+  verifyFileType,
+  uploadFile,
+  cleanupTempFiles,
+} = require("../../utils/helpers/fileUpload");
 const { compressImage } = require("../../utils/helpers/imageCompressor");
 
 async function sendMessage(req, res) {
@@ -45,6 +49,16 @@ async function sendMessage(req, res) {
     const isUserP1 = chat.participant_1_id === userId;
     const isUserP2 = chat.participant_2_id === userId;
 
+    const myStatus = isUserP1 ? chat.chat_status_p1 : chat.chat_status_p2;
+    // If I blocked them → I cannot send messages
+    if (myStatus === "blocked") {
+      await cleanupTempFiles([file]);
+      return res.status(403).json({
+        success: false,
+        code: "YOU_BLOCKED_USER",
+        message: "You have blocked this user. Unblock to send messages.",
+      });
+    }
     if (!isUserP1 && !isUserP2) {
       await cleanupTempFiles([file]);
       return res
@@ -55,9 +69,12 @@ async function sendMessage(req, res) {
     const receiverId = isUserP1 ? chat.participant_2_id : chat.participant_1_id;
 
     // Determine type
-    let finalMessageType = (messageType || (file ? "image" : "text")).toLowerCase();
+    let finalMessageType = (
+      messageType || (file ? "image" : "text")
+    ).toLowerCase();
     const allowedTypes = ["text", "image"];
-    if (!allowedTypes.includes(finalMessageType)) finalMessageType = file ? "image" : "text";
+    if (!allowedTypes.includes(finalMessageType))
+      finalMessageType = file ? "image" : "text";
 
     let finalMediaFilename = null;
     let finalMediaType = null;
@@ -67,7 +84,9 @@ async function sendMessage(req, res) {
     if (finalMessageType === "text") {
       if (!textBody || !textBody.trim()) {
         await cleanupTempFiles([file]);
-        return res.status(400).json({ success: false, message: "Text message is empty" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Text message is empty" });
       }
 
       await cleanupTempFiles([file]); // Discard any accidental file
@@ -90,7 +109,9 @@ async function sendMessage(req, res) {
 
       if (!detect || !detect.ok) {
         await cleanupTempFiles([file]);
-        return res.status(400).json({ success: false, message: "Invalid image type" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid image type" });
       }
 
       // Compress image save to upload/chats
@@ -138,7 +159,7 @@ async function sendMessage(req, res) {
         message: finalMessageType === "text" ? (textBody || "").trim() : "",
         message_type: finalMessageType,
 
-        media_url: finalMediaFilename,   // <<<<<< ONLY FILENAME STORED  
+        media_url: finalMediaFilename, // <<<<<< ONLY FILENAME STORED
         media_type: finalMediaType,
         file_size: finalFileSize,
 
@@ -153,7 +174,10 @@ async function sendMessage(req, res) {
 
     // Coin deduction
     if (messageCost > 0) {
-      await sender.update({ coins: sender.coins - messageCost }, { transaction });
+      await sender.update(
+        { coins: sender.coins - messageCost },
+        { transaction }
+      );
 
       await CoinSpentTransaction.create(
         {
@@ -330,121 +354,6 @@ async function getChatMessages(req, res) {
     });
   }
 }
-
-// async function getUserChats(req, res) {
-//   try {
-//     const schema = Joi.object({
-//       page: Joi.number().integer().default(1),
-//       limit: Joi.number().integer().default(20),
-//     }).unknown(true);
-
-//     const { error, value } = schema.validate(req.query);
-//     if (error) {
-//       return res.status(400).json({
-//         success: false,
-//         message: error.details[0].message,
-//       });
-//     }
-
-//     const page = Number(value.page);
-//     const limit = Number (value.limit);
-//     const offset = (page - 1) * limit;
-
-//     const session = await isUserSessionValid(req);
-//     if (!session.success) return res.status(401).json(session);
-//     const userId = Number(session.data);
-
-//     const chats = await Chat.findAll({
-//       where: {
-//         [Op.or]: [{ participant_1_id: userId }, { participant_2_id: userId }],
-//       },
-//       attributes: ["id", "participant_1_id", "participant_2_id"],
-
-//       include: [
-//         {
-//           model: Message,
-//           as: "messages",
-//           attributes: [
-//             "id",
-//             "sender_id",
-//             "receiver_id",
-//             "message",
-//             "message_type",
-//             "created_at",
-//             "is_read",
-//           ],
-//           separate: true,
-//           limit: 1,
-//           order: [["created_at", "DESC"]],
-//         },
-//       ],
-
-//       //  order chats by last message time
-//       order: [
-//         [
-//           Sequelize.literal(
-//             "(SELECT MAX(created_at) FROM pb_messages WHERE chat_id = Chat.id) DESC"
-//           ),
-//         ],
-//       ],
-
-//       limit,
-//       offset,
-//     });
-
-//     const chatList = [];
-
-//     for (const chat of chats) {
-//       const otherUserId =
-//         chat.participant_1_id === userId
-//           ? chat.participant_2_id
-//           : chat.participant_1_id;
-
-//       const otherUser = await User.findByPk(otherUserId, {
-//         attributes: ["id", "username", "avatar", "is_active", "last_active"],
-//       });
-
-//       const lastMessage = chat.messages[0] || null;
-
-//       const unreadCount = await Message.count({
-//         where: {
-//           chat_id: chat.id,
-//           sender_id: otherUserId,
-//           receiver_id: userId,
-//           is_read: false,
-//         },
-//       });
-
-//       chatList.push({
-//         chat_id: chat.id,
-//         user: otherUser,
-//         last_message: lastMessage ? lastMessage.message : null,
-//         last_message_type: lastMessage ? lastMessage.message_type : null,
-//         last_message_time: lastMessage ? lastMessage.created_at : null,
-//         unread_count: unreadCount,
-//       });
-//     }
-
-//     return res.json({
-//       success: true,
-//       message: "Chats fetched successfully",
-//       data: {
-//         chats: chatList,
-//         pagination: {
-//           page,
-//           limit,
-//           hasMore: chatList.length === limit,
-//         },
-//       },
-//     });
-//   } catch (err) {
-//     console.error("getUserChats Error:", err);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Internal server error",
-//     });
-//   }
-// }
 
 async function getUserChats(req, res) {
   try {
@@ -865,6 +774,141 @@ async function markChatMessagesRead(req, res) {
   }
 }
 
+async function blockChat(req, res) {
+  const transaction = await Chat.sequelize.transaction();
+
+  try {
+    const { chatId: chatIdParam } = req.params;
+    const { action } = req.body || {}; // "block" | "unblock" (optional, default: "block")
+
+    //  Validate session
+    const sessionResult = await isUserSessionValid(req);
+    if (!sessionResult.success) {
+      await transaction.rollback();
+      return res.status(401).json(sessionResult);
+    }
+    const userId = Number(sessionResult.data);
+
+    //  Validate chatId
+    if (!chatIdParam) {
+      await transaction.rollback();
+      return res
+        .status(400)
+        .json({ success: false, message: "chatId is required" });
+    }
+
+    const chatId = Number(chatIdParam);
+    if (!chatId || Number.isNaN(chatId)) {
+      await transaction.rollback();
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid chatId" });
+    }
+
+    //  Load chat with lock (real-life: prevent race conditions)
+    const chat = await Chat.findByPk(chatId, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!chat) {
+      await transaction.rollback();
+      return res
+        .status(404)
+        .json({ success: false, message: "Chat not found" });
+    }
+
+    //  Ensure user is a participant
+    const isUserP1 = chat.participant_1_id === userId;
+    const isUserP2 = chat.participant_2_id === userId;
+
+    if (!isUserP1 && !isUserP2) {
+      await transaction.rollback();
+      return res
+        .status(403)
+        .json({ success: false, message: "You are not part of this chat." });
+    }
+
+    //  Determine operation: block or unblock
+    const op = (action || "block").toLowerCase(); // default: block
+    if (!["block", "unblock"].includes(op)) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid action. Use "block" or "unblock".',
+      });
+    }
+
+    const newStatus = op === "block" ? "blocked" : "active";
+
+    //  Update the current user's chat status
+    if (isUserP1) {
+      if (chat.chat_status_p1 === newStatus) {
+        // idempotent
+        await transaction.commit();
+        return res.json({
+          success: true,
+          message:
+            op === "block"
+              ? "User is already blocked in this chat."
+              : "User is already unblocked in this chat.",
+          data: {
+            chatId: chat.id,
+            yourStatus: chat.chat_status_p1,
+            otherStatus: chat.chat_status_p2,
+          },
+        });
+      }
+
+      chat.chat_status_p1 = newStatus;
+    } else if (isUserP2) {
+      if (chat.chat_status_p2 === newStatus) {
+        await transaction.commit();
+        return res.json({
+          success: true,
+          message:
+            op === "block"
+              ? "User is already blocked in this chat."
+              : "User is already unblocked in this chat.",
+          data: {
+            chatId: chat.id,
+            yourStatus: chat.chat_status_p2,
+            otherStatus: chat.chat_status_p1,
+          },
+        });
+      }
+
+      chat.chat_status_p2 = newStatus;
+    }
+
+    await chat.save({ transaction });
+    await transaction.commit();
+
+    return res.json({
+      success: true,
+      message:
+        op === "block"
+          ? "User has been blocked in this chat."
+          : "User has been unblocked in this chat.",
+      data: {
+        chatId: chat.id,
+        yourStatus: isUserP1 ? chat.chat_status_p1 : chat.chat_status_p2,
+        otherStatus: isUserP1 ? chat.chat_status_p2 : chat.chat_status_p1,
+      },
+    });
+  } catch (error) {
+    console.error("[blockChatUser] Error:", error);
+
+    if (transaction && !transaction.finished) {
+      await transaction.rollback();
+    }
+
+    return res
+      .status(500)
+      .json({ success: false, message: "Something went wrong" });
+  }
+}
+
 module.exports = {
   sendMessage,
   getChatMessages,
@@ -872,4 +916,5 @@ module.exports = {
   deleteMessage,
   markChatMessagesRead,
   pinChat,
+  blockChat,
 };

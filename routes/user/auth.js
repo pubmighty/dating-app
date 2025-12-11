@@ -9,9 +9,14 @@ const chatController = require("../../controllers/user/chatController");
 const adsController = require("../../controllers/user/adViewController");
 const { fileUploader } = require("../../utils/helpers/fileUpload");
 
-const  { initiateVideoCall, acceptVideoCall,  rejectVideoCall, endVideoCall, getVideoCallStatus,
+const {
+  initiateVideoCall,
+  acceptVideoCall,
+  rejectVideoCall,
+  endVideoCall,
+  getVideoCallStatus,
   getVideoCallHistory,
-} =require("../../controllers/user/videoCallConroller")
+} = require("../../controllers/user/videoCallConroller");
 
 router.get("/setting", utilController.getAllOptions);
 
@@ -24,11 +29,16 @@ router.post("/forgot-password", authController.forgotPassword);
 router.post("/forgot-password/verify", authController.forgotPasswordVerify);
 
 //chatting between user1 & user2
-router.post("/chats/:chatId/messages",fileUploader.single("file"), chatController.sendMessage);
+router.post(
+  "/chats/:chatId/messages",
+  fileUploader.single("file"),
+  chatController.sendMessage
+);
 router.get("/chats/:chatId/messages", chatController.getChatMessages);
 router.get("/chats", chatController.getUserChats);
 router.get("/messages/:messageId", chatController.deleteMessage);
 router.post("/chats/:chatId/pin", chatController.pinChat);
+router.post("/chats/:chatId/block", chatController.blockChat);
 
 //user interaction {like, reject, match}
 router.post("/like", matchingController.likeUser);
@@ -45,23 +55,26 @@ router.get("/persons", userController.getAllPersons);
 router.get("/persons/random", userController.getRandomPersons);
 router.get("/persons/recommended", userController.getRecommendedPersons);
 router.get("/persons/:id", userController.getPersonById);
-router.post("/profile", fileUploader.single("avatar"), userController.updateUserProfile);
+router.post(
+  "/profile",
+  fileUploader.single("avatar"),
+  userController.updateUserProfile
+);
 
 //ads view
 router.get("/ads/status", adsController.getAdStatus);
 router.post("/ads/complete", adsController.completeAdView);
 
-//settings 
+//settings
 router.get("/settings", userController.getUserSettings);
 router.post("/settings", userController.updateUserSettings);
 
-//video call 
+//video call
 router.post("/chats/:chatId/video-calls/initiate", initiateVideoCall);
 router.post("/video-calls/:callId/accept", acceptVideoCall);
 router.post("/video-calls/:callId/reject", rejectVideoCall);
 router.post("/video-calls/:callId/end", endVideoCall);
 router.get("/video-calls/:callId/status", getVideoCallStatus);
 router.get("/video-calls", getVideoCallHistory);
-
 
 module.exports = router;
