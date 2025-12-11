@@ -7,7 +7,8 @@ const ROOT_DIR = path.resolve(__dirname, "..", "..");
 const PUBLIC_DIR = path.join(ROOT_DIR, "public");
 
 async function compressImage(tempPath, type = "avatar") {
-  const folder =( type === "avatar"  ? "upload/avatar": "upload/chat-images"); 
+ 
+  const folder = type === "avatar" ? "upload/avatar" : "upload/chats";
 
   const filename = `IMG-${Date.now()}-${Math.round(Math.random() * 1e9)}.webp`;
   const targetDir = path.join(PUBLIC_DIR, folder);
@@ -27,8 +28,9 @@ async function compressImage(tempPath, type = "avatar") {
     await fs.remove(tempPath);
 
     return {
-      filename,
-      url: `/${folder}/${filename}`,
+      filename,          // return only filename
+      folder,            // return folder for optional usage
+      url: `/${folder}/${filename}` // still giving url for frontend if needed
     };
   } catch (err) {
     try {

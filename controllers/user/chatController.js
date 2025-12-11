@@ -7,9 +7,7 @@ const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
 const { generateBotReplyForChat } = require("../../utils/helpers/aiHelper");
 const { isUserSessionValid, getOption } = require("../../utils/helper");
 const {verifyFileType, uploadFile, cleanupTempFiles} = require("../../utils/helpers/fileUpload");
-
 const { compressImage } = require("../../utils/helpers/imageCompressor");
-
 
 async function sendMessage(req, res) {
   const transaction = await Message.sequelize.transaction();
@@ -50,24 +48,29 @@ async function sendMessage(req, res) {
 
     const receiverId = isUserP1 ? chat.participant_2_id : chat.participant_1_id;
 
-    let finalMessageType = (messageType || "text").toLowerCase();
-    const allowedTypes = ["text", "image", "audio", "video", "file"];
-    if (!allowedTypes.includes(finalMessageType)) finalMessageType = "text";
+    // Determine type
+    let finalMessageType = (messageType || (file ? "image" : "text")).toLowerCase();
+    const allowedTypes = ["text", "image"];
+    if (!allowedTypes.includes(finalMessageType)) finalMessageType = file ? "image" : "text";
 
-    let finalMediaUrl = null;
+    let finalMediaFilename = null;
     let finalMediaType = null;
     let finalFileSize = null;
 
+    // TEXT MESSAGE
     if (finalMessageType === "text") {
       if (!textBody || !textBody.trim()) {
         await cleanupTempFiles([file]);
-        return res.status(400).json({ success: false, message: "Message required" });
+        return res.status(400).json({ success: false, message: "Text message is empty" });
       }
+
+      await cleanupTempFiles([file]); // Discard any accidental file
     } else {
+      // IMAGE MESSAGE
       if (!file) {
         return res.status(400).json({
           success: false,
-          message: `file is required for ${finalMessageType}`,
+          message: "Image file is required",
         });
       }
 
@@ -78,41 +81,22 @@ async function sendMessage(req, res) {
         "image/heic",
         "image/heif",
         "image/jpg",
-        "audio/mpeg",
-        "audio/wav",
-        "video/mp4",
-        "application/pdf",
       ]);
 
       if (!detect || !detect.ok) {
         await cleanupTempFiles([file]);
-        return res.status(400).json({ success: false, message: "Invalid file type" });
+        return res.status(400).json({ success: false, message: "Invalid image type" });
       }
 
-      if (finalMessageType === "image") {
-        const compressed = await compressImage(file.path, "chat");
-        finalMediaUrl = compressed.url;
-        finalMediaType = "image";
-        finalFileSize = file.size; // original file size
-      } else {
-        const saved = await uploadFile(
-          file,
-          "upload/chat",
-          detect.ext,
-          "chat_message",
-          chatId,
-          req.ip,
-          req.headers["user-agent"],
-          null,
-          null
-        );
+      // Compress image save to upload/chats
+      const compressed = await compressImage(file.path, "chat");
 
-        finalMediaUrl = `/upload/chat/${saved.filename}`;
-        finalMediaType = finalMessageType;
-        finalFileSize = file.size;
-      }
+      finalMediaFilename = compressed.filename; // *** ONLY filename ***
+      finalMediaType = "image";
+      finalFileSize = file.size;
     }
 
+    // COINS
     const optionValue = await getOption("cost_per_message", 10);
     let messageCost = parseInt(optionValue ?? 0, 10);
     if (isNaN(messageCost)) messageCost = 0;
@@ -131,6 +115,7 @@ async function sendMessage(req, res) {
       });
     }
 
+    // REPLY CHECK
     let repliedMessage = null;
     if (replyToMessageId) {
       repliedMessage = await Message.findOne({
@@ -139,16 +124,16 @@ async function sendMessage(req, res) {
       });
     }
 
+    // SAVE MESSAGE
     const newMsg = await Message.create(
       {
         chat_id: chat.id,
         sender_id: userId,
         receiver_id: receiverId,
-
-        message: textBody || "",
+        message: finalMessageType === "text" ? (textBody || "").trim() : "",
         message_type: finalMessageType,
 
-        media_url: finalMediaUrl,
+        media_url: finalMediaFilename,   // <<<<<< ONLY FILENAME STORED  
         media_type: finalMediaType,
         file_size: finalFileSize,
 
@@ -161,9 +146,10 @@ async function sendMessage(req, res) {
       { transaction }
     );
 
-    // COIN DEDUCTION
+    // Coin deduction
     if (messageCost > 0) {
       await sender.update({ coins: sender.coins - messageCost }, { transaction });
+
       await CoinSpentTransaction.create(
         {
           user_id: userId,
@@ -176,6 +162,7 @@ async function sendMessage(req, res) {
       );
     }
 
+    // Update unread counters
     const updateData = {
       last_message_id: newMsg.id,
       last_message_time: new Date(),
