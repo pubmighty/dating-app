@@ -16,8 +16,9 @@ const {
   deleteFile,
   cleanupTempFiles,
 } = require("../../utils/helpers/fileUpload");
-const { Op } = require("sequelize");
+const { Op,Sequelize } = require("sequelize");
 const { compressImage } = require("../../utils/helpers/imageCompressor");
+
 
 async function updateUserProfile(req, res) {
   const transaction = await sequelize.transaction();
@@ -739,10 +740,15 @@ async function getRandomPersons(req, res) {
       name = null,
     } = req.query;
 
+    // Session & userId
     const isSessionValid = await isUserSessionValid(req);
-    if (!isSessionValid.success) return res.status(401).json(isSessionValid);
+    if (!isSessionValid.success) {
+      return res.status(401).json(isSessionValid);
+    }
+    const userId = Number(isSessionValid.data);
+    const isLoggedInUser = !!userId;
 
-    const userId = isSessionValid.data;
+    // Options for pagination
     let totalPages = parseInt(
       await getOption("total_maxpage_for_persons", 100),
       10
@@ -759,48 +765,86 @@ async function getRandomPersons(req, res) {
 
     const offset = (page - 1) * perPage;
 
-    // WHERE Conditions
+    // WHERE conditions (same as before)
     const whereCondition = { type: "bot" };
 
-    // Active / Inactive filter
     if (isActive !== "all") {
       whereCondition.is_active = isActive === "1";
     }
 
-    // Gender filter
     const allowedGenders = ["male", "female", "other", "prefer_not_to_say"];
     if (gender !== "all" && allowedGenders.includes(gender)) {
       whereCondition.gender = gender;
     }
 
-    // Search filter
     if (name && name.trim() !== "") {
       whereCondition.username = { [Op.like]: `${name.trim()}%` };
     }
 
-    // const interactions = await UserInteraction.findAll({
-    //   where: {
-    //     user_id: userId,
-    //     action: { [Op.in]: ["like", "reject", "match"] },
-    //   },
-    //   attributes: ["target_user_id"],
-    // });
+    //  Build EXISTS SQLs (chapter unlock style)
+    const UI_TBL = "pb_user_interactions"; // your real table name
+    const USER_ALIAS = "`User`"; // Sequelize alias
 
-    // const excludedIds = interactions.map((row) => row.target_user_id);
+    const uidEsc = isLoggedInUser ? sequelize.escape(userId) : "NULL";
 
-    // if (excludedIds.length > 0) {
-    //   whereCondition.id = { [Op.notIn]: excludedIds };
-    // }
+    // hasLiked: user already liked this target
+    const hasLikedSQL = isLoggedInUser
+      ? `EXISTS (
+          SELECT 1 FROM ${UI_TBL} ui
+          WHERE ui.user_id = ${uidEsc}
+            AND ui.target_user_id = ${USER_ALIAS}.id
+            AND ui.action = 'like'
+        )`
+      : "FALSE";
 
+    // hasRejected: user has rejected this target
+    const hasRejectedSQL = isLoggedInUser
+      ? `EXISTS (
+          SELECT 1 FROM ${UI_TBL} ui2
+          WHERE ui2.user_id = ${uidEsc}
+            AND ui2.target_user_id = ${USER_ALIAS}.id
+            AND ui2.action = 'reject'
+        )`
+      : "FALSE";
+
+    // hasMatched: they are matched
+    const hasMatchedSQL = isLoggedInUser
+      ? `EXISTS (
+          SELECT 1 FROM ${UI_TBL} ui3
+          WHERE ui3.user_id = ${uidEsc}
+            AND ui3.target_user_id = ${USER_ALIAS}.id
+            AND ui3.action = 'match'
+        )`
+      : "FALSE";
+
+    // canLike: allowed to like ONLY if there is NO 'like' record yet.
+    // Rejection does NOT block like.
+    const canLikeSQL = isLoggedInUser
+      ? `NOT EXISTS (
+          SELECT 1 FROM ${UI_TBL} ui4
+          WHERE ui4.user_id = ${uidEsc}
+            AND ui4.target_user_id = ${USER_ALIAS}.id
+            AND ui4.action = 'like'
+        )`
+      : "FALSE"; // or "TRUE" if you want guests to like (probably not)
+
+    // Single query with interaction flags
     const { rows, count } = await User.findAndCountAll({
       where: whereCondition,
-
       attributes: {
         exclude: ["password"],
+        include: [
+          [Sequelize.literal(hasLikedSQL), "hasLiked"],
+          [Sequelize.literal(hasRejectedSQL), "hasRejected"],
+          [Sequelize.literal(hasMatchedSQL), "hasMatched"],
+          [Sequelize.literal(canLikeSQL), "canLike"],
+        ],
       },
-      order: User.sequelize.random(), // ALWAYS RANDOM ORDER
+      order: sequelize.random(), // still random
       limit: perPage,
       offset,
+      subQuery: false,
+      distinct: true,
     });
 
     const calculatedTotalPages = Math.max(1, Math.ceil(count / perPage));
