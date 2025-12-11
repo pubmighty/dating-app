@@ -18,8 +18,7 @@ async function run() {
     await set("default_per_page_packages", 10);
     await set("default_total_page_packages", 10);
     await set("cost_per_message", 10);
-
-
+    await set("max_pinned_chats", 10);
 
     console.log("Options inserted/verified");
     process.exit(0);

@@ -28,6 +28,7 @@ router.post("/chats/:chatId/messages",fileUploader.single("file"), chatControlle
 router.get("/chats/:chatId/messages", chatController.getChatMessages);
 router.get("/chats", chatController.getUserChats);
 router.get("/messages/:messageId", chatController.deleteMessage);
+router.post("/chats/:chatId/pin", chatController.pinChat);
 
 //user interaction {like, reject, match}
 router.post("/like", matchingController.likeUser);
