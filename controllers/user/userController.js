@@ -57,10 +57,9 @@ async function updateUserProfile(req, res) {
         .allow(null, ""),
 
       height: Joi.string().max(250).optional().allow(null),
-      education: Joi.string().max(200).optional().allow(null, "")
+      education: Joi.string().max(200).optional().allow(null, ""),
     }).min(1);
 
-    
     const { error, value } = updateProfileSchema.validate(req.body, {
       abortEarly: true,
       stripUnknown: true,
@@ -143,7 +142,7 @@ async function updateUserProfile(req, res) {
       "bio",
       "looking_for",
       "height",
-      "education"
+      "education",
     ];
 
     const updates = {};
@@ -201,7 +200,6 @@ async function updateUserProfile(req, res) {
     });
   }
 }
-
 
 async function changePassword(req, res) {
   const transaction = await sequelize.transaction();
@@ -741,10 +739,10 @@ async function getRandomPersons(req, res) {
       name = null,
     } = req.query;
 
-    // const isSessionValid = await isUserSessionValid(req);
-    // if (!isSessionValid.success) return res.status(401).json(isSessionValid);
+    const isSessionValid = await isUserSessionValid(req);
+    if (!isSessionValid.success) return res.status(401).json(isSessionValid);
 
-    // const userId = isSessionValid.data;
+    const userId = isSessionValid.data;
     let totalPages = parseInt(
       await getOption("total_maxpage_for_persons", 100),
       10
