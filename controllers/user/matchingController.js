@@ -60,11 +60,11 @@ async function likeUser(req, res) {
       await transaction.rollback();
       return res.status(404).json({
         success: false,
-        message: "Target user not found .",
+        message: "Target user not found.",
       });
     }
 
-    // ---- Check existing interaction ----
+    // ---- Check existing interaction (for this user -> target) ----
     const existingInteraction = await UserInteraction.findOne({
       where: {
         user_id: userId,
@@ -73,36 +73,49 @@ async function likeUser(req, res) {
       transaction,
     });
 
-    const previousAction = existingInteraction
-      ? existingInteraction.action
-      : null;
+    const previousAction = existingInteraction ? existingInteraction.action : null;
 
+    // ❌ Rule: If already 'like' or 'match', do NOT allow liking again
+    if (previousAction === "like" || previousAction === "match") {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "You have already liked or matched with this user.",
+      });
+    }
+
+    // ✅ Allowed cases:
+    //  - previousAction === 'reject' -> switch to 'like'
+    //  - previousAction === null (no row) -> first like
+
+    // Upsert to set action = 'like'
     await UserInteraction.upsert(
       {
         user_id: userId,
         target_user_id: targetUserId,
         action: "like",
-        is_mutual: true,
+        is_mutual: true, // for bots: treat like as match
       },
       { transaction }
     );
 
-    if (previousAction === "like") {
-      //   console.log("[likeUser] already liked, no counter change");
-    } else if (previousAction === "reject") {
-      //  console.log("[likeUser] REJECT -> LIKE, +1 like, -1 reject");
+    // ---- Update counters for the acting user ----
+    if (previousAction === "reject") {
+      // REJECT -> LIKE: +1 like, -1 reject
       await User.increment(
         { total_likes: 1, total_rejects: -1 },
         { where: { id: userId }, transaction }
       );
-    } else {
-      // console.log("[likeUser] first LIKE, +1 like");
+    } else if (!previousAction) {
+      // First time LIKE: +1 like
       await User.increment(
         { total_likes: 1 },
         { where: { id: userId }, transaction }
       );
     }
+    // (If previousAction was something else, handle as needed)
 
+    // For bots we still create/get chat and treat as match
     const chat = await getOrCreateChatBetweenUsers(
       userId,
       targetUserId,
@@ -122,15 +135,14 @@ async function likeUser(req, res) {
       },
     });
   } catch (err) {
-    console.error("Error during:", err);
+    console.error("Error during likeUser:", err);
     await transaction.rollback();
     return res.status(500).json({
       success: false,
-      message: "Failed to like .",
+      message: "Failed to like.",
     });
   }
 }
-
 
 async function rejectUser(req, res) {
   const transaction = await sequelize.transaction();
