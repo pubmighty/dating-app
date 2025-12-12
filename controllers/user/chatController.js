@@ -25,7 +25,6 @@ async function sendMessage(req, res) {
     const { message: textBody, replyToMessageId, messageType } = req.body;
     const file = req.file || null;
 
-    // SESSION CHECK
     const sessionResult = await isUserSessionValid(req);
     if (!sessionResult.success) {
       await transaction.rollback();
@@ -43,7 +42,6 @@ async function sendMessage(req, res) {
         .json({ success: false, message: "chatId required" });
     }
 
-    // GET CHAT
     const chat = await Chat.findByPk(chatId, { transaction });
     if (!chat) {
       await cleanupTempFiles([file]);
@@ -55,14 +53,8 @@ async function sendMessage(req, res) {
     const isUserP1 = chat.participant_1_id === userId;
     const isUserP2 = chat.participant_2_id === userId;
 
-    if (!isUserP1 && !isUserP2) {
-      await cleanupTempFiles([file]);
-      return res
-        .status(403)
-        .json({ success: false, message: "Not in this chat" });
-    }
-
     const myStatus = isUserP1 ? chat.chat_status_p1 : chat.chat_status_p2;
+
     if (myStatus === "blocked") {
       await cleanupTempFiles([file]);
       return res.status(403).json({
@@ -72,22 +64,28 @@ async function sendMessage(req, res) {
       });
     }
 
+    if (!isUserP1 && !isUserP2) {
+      await cleanupTempFiles([file]);
+      return res
+        .status(403)
+        .json({ success: false, message: "Not in this chat" });
+    }
+
     const receiverId = isUserP1 ? chat.participant_2_id : chat.participant_1_id;
 
-    // MESSAGE TYPE
+    // Determine type
     let finalMessageType = (
       messageType || (file ? "image" : "text")
     ).toLowerCase();
+
     const allowedTypes = ["text", "image"];
-    if (!allowedTypes.includes(finalMessageType)) {
+    if (!allowedTypes.includes(finalMessageType))
       finalMessageType = file ? "image" : "text";
-    }
 
     let finalMediaFilename = null;
     let finalMediaType = null;
     let finalFileSize = null;
 
-    // TEXT MESSAGE
     if (finalMessageType === "text") {
       if (!textBody || !textBody.trim()) {
         await cleanupTempFiles([file]);
@@ -95,15 +93,14 @@ async function sendMessage(req, res) {
           .status(400)
           .json({ success: false, message: "Text message is empty" });
       }
-      await cleanupTempFiles([file]);
-    }
 
-    // IMAGE MESSAGE
-    if (finalMessageType === "image") {
+      await cleanupTempFiles([file]);
+    } else {
       if (!file) {
-        return res
-          .status(400)
-          .json({ success: false, message: "Image file is required" });
+        return res.status(400).json({
+          success: false,
+          message: "Image file is required",
+        });
       }
 
       const detect = await verifyFileType(file, [
@@ -123,6 +120,7 @@ async function sendMessage(req, res) {
       }
 
       const compressed = await compressImage(file.path, "chat");
+
       finalMediaFilename = compressed.filename;
       finalMediaType = "image";
       finalFileSize = file.size;
@@ -147,7 +145,7 @@ async function sendMessage(req, res) {
       });
     }
 
-    // REPLY CHECK
+    // Reply check
     let repliedMessage = null;
     if (replyToMessageId) {
       repliedMessage = await Message.findOne({
@@ -156,7 +154,7 @@ async function sendMessage(req, res) {
       });
     }
 
-    // SAVE REAL USER MESSAGE
+    // Save message
     const newMsg = await Message.create(
       {
         chat_id: chat.id,
@@ -164,9 +162,11 @@ async function sendMessage(req, res) {
         receiver_id: receiverId,
         message: finalMessageType === "text" ? (textBody || "").trim() : "",
         message_type: finalMessageType,
+
         media_url: finalMediaFilename,
         media_type: finalMediaType,
         file_size: finalFileSize,
+
         reply_id: repliedMessage ? repliedMessage.id : null,
         sender_type: "real",
         status: "seen",
@@ -176,7 +176,6 @@ async function sendMessage(req, res) {
       { transaction }
     );
 
-    // COIN DEDUCTION
     if (messageCost > 0) {
       await sender.update(
         { coins: sender.coins - messageCost },
@@ -197,9 +196,9 @@ async function sendMessage(req, res) {
 
     await transaction.commit();
 
-    // BOT REPLY (with delay)
-
-    let botMessageSaved = null;
+    // ======================
+    // BOT REPLY (with typing delay)
+    // ======================
 
     try {
       const receiver = await User.findByPk(receiverId);
@@ -218,7 +217,7 @@ async function sendMessage(req, res) {
         try {
           botReplyText = await generateBotReplyForChat(chat.id, textBody || "");
         } catch (aiErr) {
-          console.error("[sendMessage] AI reply error:", aiErr);
+          console.error("[sendMessage] AI bot reply error:", aiErr);
         }
 
         if (!botReplyText || !botReplyText.toString().trim()) {
@@ -228,58 +227,53 @@ async function sendMessage(req, res) {
             ];
         }
 
-        // SAVE BOT MESSAGE
-        botMessageSaved = await Message.create({
-          chat_id: chat.id,
-          sender_id: receiverId,
-          receiver_id: userId,
-          message: botReplyText,
-          reply_id: newMsg.id,
-          message_type: "text",
-          sender_type: "bot",
-          status: "sent",
-          is_paid: false,
-          price: 0,
-          media_url: null,
-          media_type: null,
-          file_size: null,
-        });
+        const typing = typingTime(botReplyText, 40);
+        const delayMs = typing.milliseconds;
 
-        // UPDATE CHAT UNREAD
-        const botUpdateData = {
-          last_message_id: botMessageSaved.id,
-          last_message_time: new Date(),
-        };
+        setTimeout(async () => {
+          try {
+            let botMessageSaved = await Message.create({
+              chat_id: chat.id,
+              sender_id: receiverId,
+              receiver_id: userId,
+              message: botReplyText,
+              reply_id: newMsg.id,
+              message_type: "text",
+              sender_type: "bot",
+              status: "sent",
+              is_paid: false,
+              price: 0,
+              media_url: null,
+              media_type: null,
+              file_size: null,
+            });
 
-        let delayMs = 0;
+            const botUpdateData = {
+              last_message_id: botMessageSaved.id,
+              last_message_time: new Date(),
+            };
 
-        if (botMessageSaved && botMessageSaved.message) {
-          const typing = typingTime(botMessageSaved.message, 80);
-          delayMs = typing.milliseconds;
-        }
+            if (isUserP1) {
+              botUpdateData.unread_count_p1 = (chat.unread_count_p1 || 0) + 1;
+            } else {
+              botUpdateData.unread_count_p2 = (chat.unread_count_p2 || 0) + 1;
+            }
 
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-
-        if (isUserP1) {
-          botUpdateData.unread_count_p1 = (chat.unread_count_p1 || 0) + 1;
-        } else {
-          botUpdateData.unread_count_p2 = (chat.unread_count_p2 || 0) + 1;
-        }
-
-        await Chat.update(botUpdateData, { where: { id: chat.id } });
+            await Chat.update(botUpdateData, { where: { id: chat.id } });
+          } catch (innerErr) {
+            console.error("[sendMessage] Error saving bot message:", innerErr);
+          }
+        }, delayMs);
       }
-    } catch (errBot) {
-      console.error("[sendMessage] Bot error:", errBot);
+    } catch (botErr) {
+      console.error("[sendMessage] Error during bot reply:", botErr);
     }
 
     return res.json({
       success: true,
       message: "Message sent",
-      data: {
-        user: newMsg,
-        bot: botMessageSaved,
-      },
-    });
+      data: newMsg,
+    }); 
   } catch (err) {
     console.error("sendMessage error:", err);
     await transaction.rollback();
