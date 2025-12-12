@@ -73,9 +73,11 @@ async function likeUser(req, res) {
       transaction,
     });
 
-    const previousAction = existingInteraction ? existingInteraction.action : null;
+    const previousAction = existingInteraction
+      ? existingInteraction.action
+      : null;
 
-    // ❌ Rule: If already 'like' or 'match', do NOT allow liking again
+    //  Rule: If already 'like' or 'match', do NOT allow liking again
     if (previousAction === "like" || previousAction === "match") {
       await transaction.rollback();
       return res.status(400).json({
@@ -84,7 +86,7 @@ async function likeUser(req, res) {
       });
     }
 
-    // ✅ Allowed cases:
+    // Allowed cases:
     //  - previousAction === 'reject' -> switch to 'like'
     //  - previousAction === null (no row) -> first like
 
@@ -263,7 +265,6 @@ async function rejectUser(req, res) {
   }
 }
 
-
 async function matchUser(req, res) {
   const transaction = await sequelize.transaction();
 
@@ -390,7 +391,6 @@ async function matchUser(req, res) {
   }
 }
 
-
 async function makeMutualMatch(userId, botId, transaction) {
   // Extra safety: don't let undefined slip in
   if (!userId || !botId) {
@@ -444,7 +444,6 @@ async function makeMutualMatch(userId, botId, transaction) {
 
   return { newlyCreated: true };
 }
-
 
 async function getUserMatches(req, res) {
   try {
@@ -626,13 +625,9 @@ async function getUserMatches(req, res) {
   }
 }
 
-
-
-
 module.exports = {
   likeUser,
   rejectUser,
   matchUser,
   getUserMatches,
-
 };

@@ -5,7 +5,11 @@ const { Op, Sequelize } = require("sequelize");
 const User = require("../../models/User");
 const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
 const { generateBotReplyForChat } = require("../../utils/helpers/aiHelper");
-const { isUserSessionValid, getOption } = require("../../utils/helper");
+const {
+  isUserSessionValid,
+  getOption,
+  typingTime,
+} = require("../../utils/helper");
 const {
   verifyFileType,
   uploadFile,
@@ -50,7 +54,7 @@ async function sendMessage(req, res) {
     const isUserP2 = chat.participant_2_id === userId;
 
     const myStatus = isUserP1 ? chat.chat_status_p1 : chat.chat_status_p2;
-    // If I blocked them → I cannot send messages
+
     if (myStatus === "blocked") {
       await cleanupTempFiles([file]);
       return res.status(403).json({
@@ -59,6 +63,7 @@ async function sendMessage(req, res) {
         message: "You have blocked this user. Unblock to send messages.",
       });
     }
+
     if (!isUserP1 && !isUserP2) {
       await cleanupTempFiles([file]);
       return res
@@ -72,6 +77,7 @@ async function sendMessage(req, res) {
     let finalMessageType = (
       messageType || (file ? "image" : "text")
     ).toLowerCase();
+
     const allowedTypes = ["text", "image"];
     if (!allowedTypes.includes(finalMessageType))
       finalMessageType = file ? "image" : "text";
@@ -80,7 +86,6 @@ async function sendMessage(req, res) {
     let finalMediaType = null;
     let finalFileSize = null;
 
-    // TEXT MESSAGE
     if (finalMessageType === "text") {
       if (!textBody || !textBody.trim()) {
         await cleanupTempFiles([file]);
@@ -89,7 +94,7 @@ async function sendMessage(req, res) {
           .json({ success: false, message: "Text message is empty" });
       }
 
-      await cleanupTempFiles([file]); // Discard any accidental file
+      await cleanupTempFiles([file]);
     } else {
       if (!file) {
         return res.status(400).json({
@@ -114,10 +119,9 @@ async function sendMessage(req, res) {
           .json({ success: false, message: "Invalid image type" });
       }
 
-      // Compress image save to upload/chats
       const compressed = await compressImage(file.path, "chat");
 
-      finalMediaFilename = compressed.filename; // *** ONLY filename ***
+      finalMediaFilename = compressed.filename;
       finalMediaType = "image";
       finalFileSize = file.size;
     }
@@ -141,7 +145,7 @@ async function sendMessage(req, res) {
       });
     }
 
-    // REPLY CHECK
+    // Reply check
     let repliedMessage = null;
     if (replyToMessageId) {
       repliedMessage = await Message.findOne({
@@ -150,7 +154,7 @@ async function sendMessage(req, res) {
       });
     }
 
-    // SAVE MESSAGE
+    // Save message
     const newMsg = await Message.create(
       {
         chat_id: chat.id,
@@ -172,7 +176,6 @@ async function sendMessage(req, res) {
       { transaction }
     );
 
-    // Coin deduction
     if (messageCost > 0) {
       await sender.update(
         { coins: sender.coins - messageCost },
@@ -191,25 +194,16 @@ async function sendMessage(req, res) {
       );
     }
 
-    // Update unread counters
-    const updateData = {
-      last_message_id: newMsg.id,
-      last_message_time: new Date(),
-    };
-
-    if (isUserP1) updateData.unread_count_p2 += 1;
-    else updateData.unread_count_p1 += 1;
-
-    await chat.update(updateData, { transaction });
-
     await transaction.commit();
 
-    let botMessageSaved = null;
+    // ======================
+    // BOT REPLY (with typing delay)
+    // ======================
+
     try {
-      const receiver = await User.findByPk(receiverId); // reload receiver outside tx
+      const receiver = await User.findByPk(receiverId);
 
       if (receiver && receiver.type === "bot") {
-        // Fallback canned messages
         const fallbackMessages = [
           "Hey! I’m here ",
           "I was thinking about you just now.",
@@ -219,50 +213,62 @@ async function sendMessage(req, res) {
         ];
 
         let botReplyText = null;
+
         try {
           botReplyText = await generateBotReplyForChat(chat.id, textBody || "");
         } catch (aiErr) {
           console.error("[sendMessage] AI bot reply error:", aiErr);
         }
+
         if (!botReplyText || !botReplyText.toString().trim()) {
           botReplyText =
             fallbackMessages[
               Math.floor(Math.random() * fallbackMessages.length)
             ];
         }
-        botMessageSaved = await Message.create({
-          chat_id: chat.id,
-          sender_id: receiverId,
-          receiver_id: userId,
-          message: botReplyText,
-          reply_id: newMsg.id,
-          message_type: "text",
-          sender_type: "bot",
-          status: "sent",
-          is_paid: false,
-          price: 0,
-          media_url: null,
-          media_type: null,
-          file_size: null,
-        });
 
-        const botUpdateData = {
-          last_message_id: botMessageSaved.id,
-          last_message_time: new Date(),
-        };
+        const typing = typingTime(botReplyText, 40);
+        const delayMs = typing.milliseconds;
 
-        if (isUserP1) {
-          // sender was p1, so bot replies to p1 → unread for p1
-          botUpdateData.unread_count_p1 = (chat.unread_count_p1 || 0) + 1;
-        } else {
-          botUpdateData.unread_count_p2 = (chat.unread_count_p2 || 0) + 1;
-        }
+        setTimeout(async () => {
+          try {
+            let botMessageSaved = await Message.create({
+              chat_id: chat.id,
+              sender_id: receiverId,
+              receiver_id: userId,
+              message: botReplyText,
+              reply_id: newMsg.id,
+              message_type: "text",
+              sender_type: "bot",
+              status: "sent",
+              is_paid: false,
+              price: 0,
+              media_url: null,
+              media_type: null,
+              file_size: null,
+            });
 
-        await Chat.update(botUpdateData, { where: { id: chat.id } });
+            const botUpdateData = {
+              last_message_id: botMessageSaved.id,
+              last_message_time: new Date(),
+            };
+
+            if (isUserP1) {
+              botUpdateData.unread_count_p1 = (chat.unread_count_p1 || 0) + 1;
+            } else {
+              botUpdateData.unread_count_p2 = (chat.unread_count_p2 || 0) + 1;
+            }
+
+            await Chat.update(botUpdateData, { where: { id: chat.id } });
+          } catch (innerErr) {
+            console.error("[sendMessage] Error saving bot message:", innerErr);
+          }
+        }, delayMs);
       }
     } catch (botErr) {
       console.error("[sendMessage] Error during bot reply:", botErr);
     }
+
     return res.json({
       success: true,
       message: "Message sent",
@@ -405,7 +411,7 @@ async function getUserChats(req, res) {
           ],
           separate: true,
           limit: 1,
-          order: [["created_at", "DESC"]],
+          order: [["id", "DESC"]],
         },
       ],
 
@@ -490,49 +496,49 @@ async function getUserChats(req, res) {
   }
 }
 
-async function pinChat(req, res) {
-  try {
-    //  Validate params + body
-    const paramsSchema = Joi.object({
-      chatId: Joi.number().integer().required(),
-    });
+async function pinChats(req, res) {
+  const t = await Chat.sequelize.transaction();
 
+  try {
+    // Validate body
     const bodySchema = Joi.object({
+      chat_ids: Joi.array().items(Joi.number().integer()).min(1).required(),
       is_pin: Joi.boolean().required(), // true = pin, false = unpin
     });
 
-    const { error: paramsError, value: paramsValue } = paramsSchema.validate(
-      req.params
-    );
-    if (paramsError) {
+    const { error, value } = bodySchema.validate(req.body);
+    if (error) {
+      await t.rollback();
       return res.status(400).json({
         success: false,
-        message: paramsError.details[0].message,
+        message: error.details[0].message,
       });
     }
 
-    const { error: bodyError, value: bodyValue } = bodySchema.validate(
-      req.body
-    );
-    if (bodyError) {
-      return res.status(400).json({
-        success: false,
-        message: bodyError.details[0].message,
-      });
-    }
-
-    const chatId = Number(paramsValue.chatId);
-    const { is_pin } = bodyValue;
+    const { chat_ids, is_pin } = value;
 
     // Validate session
     const session = await isUserSessionValid(req);
     if (!session.success) {
+      await t.rollback();
       return res.status(401).json(session);
     }
     const userId = Number(session.data);
 
-    //  Load chat and verify user is a participant
-    const chat = await Chat.findByPk(chatId, {
+    if (!Array.isArray(chat_ids) || chat_ids.length === 0) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "chat_ids must be a non-empty array",
+      });
+    }
+
+    // Load all chats that belong to this user
+    const chats = await Chat.findAll({
+      where: {
+        id: { [Op.in]: chat_ids },
+        [Op.or]: [{ participant_1_id: userId }, { participant_2_id: userId }],
+      },
       attributes: [
         "id",
         "participant_1_id",
@@ -540,65 +546,83 @@ async function pinChat(req, res) {
         "is_pin_p1",
         "is_pin_p2",
       ],
+      transaction: t,
+      lock: t.LOCK.UPDATE, // avoid race conditions
     });
 
-    if (!chat) {
+    if (chats.length === 0) {
+      await t.rollback();
       return res.status(404).json({
         success: false,
-        message: "Chat not found",
+        message: "No valid chats found for this user",
       });
     }
-
-    if (chat.participant_1_id !== userId && chat.participant_2_id !== userId) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not a participant of this chat",
-      });
-    }
-
-    //  Decide which pin column to update for this user
-    const isUserP1 = chat.participant_1_id === userId;
-    const pinColumn = isUserP1 ? "is_pin_p1" : "is_pin_p2";
 
     //  Optional: enforce max pinned chats per user
     if (is_pin) {
-      const maxPinned = parseInt(await getOption("max_pinned_chats", 3), 10);
+      const maxPinned = parseInt(await getOption("max_pinned_chats", 100), 100);
 
       if (Number.isInteger(maxPinned) && maxPinned > 0) {
-        const pinnedCount = await Chat.count({
+        const currentPinnedCount = await Chat.count({
           where: {
             [Op.or]: [
               { participant_1_id: userId, is_pin_p1: true },
               { participant_2_id: userId, is_pin_p2: true },
             ],
           },
+          transaction: t,
         });
 
-        if (pinnedCount >= maxPinned) {
+        // how many new pins will be added in this batch
+        const newlyPinCount = chats.filter((chat) => {
+          const isUserP1 = chat.participant_1_id === userId;
+          const alreadyPinned = isUserP1 ? chat.is_pin_p1 : chat.is_pin_p2;
+          return !alreadyPinned;
+        }).length;
+
+        const totalAfter = currentPinnedCount + newlyPinCount;
+
+        if (totalAfter > maxPinned) {
+          const remaining = Math.max(maxPinned - currentPinnedCount, 0);
+          await t.rollback();
           return res.status(400).json({
             success: false,
-            message: `You can pin a maximum of ${maxPinned} chats`,
+            message:
+              remaining > 0
+                ? `You can only pin ${remaining} more chats (max ${maxPinned} pinned chats allowed)`
+                : `You already reached the maximum of ${maxPinned} pinned chats`,
           });
         }
       }
     }
 
-    //  Update pin state
-    chat[pinColumn] = is_pin;
-    await chat.save();
+    //  Apply pin/unpin to all valid chats
+    const updatedChatIds = [];
+
+    for (const chat of chats) {
+      const isUserP1 = chat.participant_1_id === userId;
+      const pinColumn = isUserP1 ? "is_pin_p1" : "is_pin_p2";
+
+      chat[pinColumn] = is_pin;
+      await chat.save({ transaction: t });
+      updatedChatIds.push(chat.id);
+    }
+
+    await t.commit();
 
     return res.json({
       success: true,
       message: is_pin
-        ? "Chat pinned successfully"
-        : "Chat unpinned successfully",
+        ? "Chats pinned successfully"
+        : "Chats unpinned successfully",
       data: {
-        chat_id: chat.id,
+        chat_ids: updatedChatIds,
         is_pin,
       },
     });
   } catch (err) {
-    console.error("pinChat Error:", err);
+    console.error("bulkPinChats Error:", err);
+    await t.rollback();
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -915,6 +939,6 @@ module.exports = {
   getUserChats,
   deleteMessage,
   markChatMessagesRead,
-  pinChat,
+  pinChats,
   blockChat,
 };

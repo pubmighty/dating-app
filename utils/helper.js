@@ -446,6 +446,23 @@ function calculateCallCost(durationSeconds, perMinuteCost) {
   return minutes * perMinuteCost;
 }
 
+function typingTime(sentence, wpm = 40) {
+  // Average word = 5 characters → standard WPM calculation
+  const charsPerMinute = wpm * 5;
+  const charsPerSecond = charsPerMinute / 60;
+
+  // Total characters including digits, symbols, spaces
+  const totalChars = sentence.length;
+
+  // Time needed
+  const seconds = totalChars / charsPerSecond;
+
+  return {
+    characters: totalChars,
+    seconds: parseFloat(seconds.toFixed(2)),
+    milliseconds: Math.round(seconds * 1000),
+  };
+}
 
 module.exports = {
   getRealIp,
@@ -465,4 +482,5 @@ module.exports = {
   getOrCreateChatBetweenUsers,
   validateCallParticipants,
   calculateCallCost,
+  typingTime,
 };
