@@ -45,6 +45,7 @@ router.get("/chats", chatController.getUserChats);
 router.get("/messages/:messageId", chatController.deleteMessage);
 router.post("/chats/pin", chatController.pinChats);
 router.post("/chats/:chatId/block", chatController.blockChat);
+router.post("/chat/read", chatController.markChatMessagesRead);
 router.post("/chats/delete", chatController.deleteChat);
 
 //user interaction {like, reject, match}
@@ -84,7 +85,7 @@ router.post("/video-calls/:callId/end", endVideoCall);
 router.get("/video-calls/:callId/status", getVideoCallStatus);
 router.get("/video-calls", getVideoCallHistory);
 
-// user media helper path
+// user media
 router.post("/media", fileUploader.single("file"), uploadUserMedia);
 router.get("/media", getMyMedia);
 router.post("/media/:id", deleteMyMedia);

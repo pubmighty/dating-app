@@ -23,7 +23,7 @@ const { compressImage } = require("../../utils/helpers/imageCompressor");
 async function updateUserProfile(req, res) {
   const transaction = await sequelize.transaction();
 
-  const normalizeInterests = (raw) => {
+ const normalizeInterests = (raw) => {
     if (!raw) return null;
 
     let arr = [];
@@ -36,22 +36,19 @@ async function updateUserProfile(req, res) {
       return null;
     }
 
-    let ids = arr
+    let interests = arr
       .map((v) => String(v).trim())
       .filter(Boolean);
 
-    // remove duplicates
-    ids = [...new Set(ids)];
+    interests = [...new Set(interests)];
 
-    // limit to 6
-    ids = ids.slice(0, 6);
+    interests = interests.slice(0, 6);
 
-    if (!ids.length) return null;
+    if (!interests.length) return null;
 
-    return ids.join(","); 
+    return interests.join(",");
   };
 
-  // Helper: parse stored CSV -> array of IDs
   const parseInterests = (stored) => {
     if (!stored) return [];
     return stored
@@ -96,13 +93,10 @@ async function updateUserProfile(req, res) {
 
       height: Joi.string().max(250).optional().allow(null),
       education: Joi.string().max(200).optional().allow(null, ""),
-      interests: Joi.alternatives()
-        .try(
-          Joi.array().items(Joi.alternatives(Joi.number().integer(), Joi.string())).max(6),
-          Joi.string().max(255).allow(null, "")
-        )
-        .optional(),
-    }).min(1);
+      interests: Joi.array()
+      .items(Joi.string().max(50))
+      .max(6)
+      .optional(),  }).min(1);
 
     const { error, value } = updateProfileSchema.validate(req.body, {
       abortEarly: true,
@@ -225,7 +219,6 @@ async function updateUserProfile(req, res) {
       height: user.height,
       education: user.education,
       interests: parseInterests(user.interests),
-
       coins: user.coins,
       total_likes: user.total_likes,
       total_matches: user.total_matches,
