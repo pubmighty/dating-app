@@ -17,6 +17,8 @@ const {
 } = require("../../utils/helpers/fileUpload");
 const { compressImage } = require("../../utils/helpers/imageCompressor");
 
+
+
 async function sendMessage(req, res) {
   const transaction = await Message.sequelize.transaction();
 
@@ -221,7 +223,7 @@ async function sendMessage(req, res) {
       });
     }
 
-    const receiver = await User.findByPk(receiverId, { transaction });
+   
 
     newMsg = await Message.create(
       {
@@ -338,14 +340,7 @@ async function sendMessage(req, res) {
 
         await Chat.update(botUpdateData, { where: { id: chat.id } });
 
-        // (Optional) SOCKET: bot message event
-        if (global.io && botMessageSaved) {
-          const room = `chat_${chatId}`;
-          global.io.to(room).emit("new_message", {
-            chatId,
-            message: botMessageSaved,
-          });
-        }
+       
       }
     } catch (errBot) {
       console.error("[sendMessage] Bot error:", errBot);

@@ -45,7 +45,6 @@ router.get("/chats", chatController.getUserChats);
 router.get("/messages/:messageId", chatController.deleteMessage);
 router.post("/chats/pin", chatController.pinChats);
 router.post("/chats/:chatId/block", chatController.blockChat);
-router.post("/chat/read", chatController.markChatMessagesRead);
 router.post("/chats/delete", chatController.deleteChat);
 
 //user interaction {like, reject, match}
