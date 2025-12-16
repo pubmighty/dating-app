@@ -915,9 +915,68 @@ async function getRandomPersons(req, res) {
   }
 }
 
-
 async function getUserSettings(req, res) {
+  const transaction = await sequelize.transaction();
+
+  const normalizeInterests = (raw) => {
+    if (!raw) return null;
+
+    let arr = [];
+
+    if (Array.isArray(raw)) {
+      arr = raw;
+    } else if (typeof raw === "string") {
+      arr = raw.split(",");
+    } else {
+      return null;
+    }
+
+    let interests = arr
+      .map((v) => String(v).trim())
+      .filter(Boolean);
+
+    interests = [...new Set(interests)];
+    interests = interests.slice(0, 6);
+
+    if (!interests.length) return null;
+
+    return interests.join(",");
+  };
+
+  const parseInterests = (stored) => {
+    if (!stored) return [];
+    return stored
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  };
+
   try {
+    if (req.file) {
+      
+      const verifyResult = await verifyFileType(req.file, [
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+      ]);
+
+      if (!verifyResult || !verifyResult.ok) {
+        await cleanupTempFiles([req.file]).catch(() => {});
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Invalid avatar file type.",
+        });
+      }
+
+      const result = await compressImage(req.file.path, "avatar");
+   
+      req.body.avatar = result.filename;
+    }
+
     const updateProfileSchema = Joi.object({
       username: Joi.string().min(3).max(50).optional(),
       email: Joi.string().email().max(100).optional().allow(null, ""),
@@ -935,9 +994,7 @@ async function getUserSettings(req, res) {
       avatar: Joi.string().max(255).optional().allow(null, ""),
       dob: Joi.date().iso().optional().allow(null, ""),
       bio: Joi.string().optional().allow(null, ""),
-      height: Joi.string().max(10).optional(),
-      education: Joi.string().max(100).optional().allow(null, ""),
-      looking: Joi.string()
+      looking_for: Joi.string()
         .valid(
           "Long Term",
           "Long Term Open To Short",
@@ -948,39 +1005,45 @@ async function getUserSettings(req, res) {
         )
         .optional()
         .allow(null, ""),
-    }).min(1);
 
-    // Validate body
+      height: Joi.string().max(250).optional().allow(null),
+      education: Joi.string().max(200).optional().allow(null, ""),
+      interests: Joi.array().items(Joi.string().max(50)).max(6).optional(),
+    });
+
     const { error, value } = updateProfileSchema.validate(req.body, {
       abortEarly: true,
       stripUnknown: true,
     });
 
     if (error) {
-      if (req.file) await cleanupTempFiles([req.file]);
+      if (req.file) await cleanupTempFiles([req.file]).catch(() => {});
       await transaction.rollback();
       return res.status(400).json({
         success: false,
         message: error.details[0].message,
       });
     }
-    const userId = Number(session.data);
 
-    // Check session
+    // normalize interests (array -> csv)
+    if (Object.prototype.hasOwnProperty.call(value, "interests")) {
+      value.interests = normalizeInterests(value.interests);
+    }
+
+    // Session check (same as ref)
     const sessionResult = await isUserSessionValid(req);
     if (!sessionResult.success) {
-      if (req.file) await cleanupTempFiles([req.file]);
+      if (req.file) await cleanupTempFiles([req.file]).catch(() => {});
       await transaction.rollback();
       return res.status(401).json(sessionResult);
     }
 
-    userId = Number(sessionResult.data);
+    const userId = Number(sessionResult.data);
 
-    // Load current user
+    // Load user in transaction
     const user = await User.findByPk(userId, { transaction });
-
     if (!user) {
-      if (req.file) await cleanupTempFiles([req.file]);
+      if (req.file) await cleanupTempFiles([req.file]).catch(() => {});
       await transaction.rollback();
       return res.status(404).json({
         success: false,
@@ -989,30 +1052,6 @@ async function getUserSettings(req, res) {
     }
 
     const oldAvatar = user.avatar;
-    let newAvatarFilename = null;
-
-    if (req.file) {
-      const verifyResult = await verifyFileType(req.file, [
-        "image/png",
-        "image/jpeg",
-        "image/jpg",
-        "image/webp",
-        "image/heic",
-        "image/heif",
-      ]);
-
-      if (!verifyResult || !verifyResult.ok) {
-        await cleanupTempFiles([req.file]);
-        await transaction.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Invalid avatar file type.",
-        });
-      }
-
-      const newAvatar = await compressImage(req.file.path, "upload/avatar");
-      value.avatar = newAvatar;
-    }
 
     // Unique checks
     if (value.username && value.username !== user.username) {
@@ -1022,7 +1061,7 @@ async function getUserSettings(req, res) {
       });
 
       if (existingUsername) {
-        if (req.file) await cleanupTempFiles([req.file]);
+        if (req.file) await cleanupTempFiles([req.file]).catch(() => {});
         await transaction.rollback();
         return res.status(409).json({
           success: false,
@@ -1042,7 +1081,7 @@ async function getUserSettings(req, res) {
       });
 
       if (existingEmail) {
-        if (req.file) await cleanupTempFiles([req.file]);
+        if (req.file) await cleanupTempFiles([req.file]).catch(() => {});
         await transaction.rollback();
         return res.status(409).json({
           success: false,
@@ -1063,36 +1102,33 @@ async function getUserSettings(req, res) {
       "avatar",
       "dob",
       "bio",
+      "looking_for",
       "height",
       "education",
-      "looking",
+      "interests",
     ];
 
     const updates = {};
-
     for (const key of updatableFields) {
       if (Object.prototype.hasOwnProperty.call(value, key)) {
-        // Treat empty string as null, like existing behavior
         updates[key] = value[key] === "" ? null : value[key];
       }
     }
 
-    // Update timestamp
     updates.updated_at = new Date();
 
-    // Apply update
     await user.update(updates, { transaction });
 
     await transaction.commit();
 
+    //  cleanup uploaded temp file
     if (req.file) await cleanupTempFiles([req.file]).catch(() => {});
 
-    // Delete old avatar after successful update
-    if (newAvatarFilename && oldAvatar && oldAvatar !== newAvatarFilename) {
-      deleteFile(oldAvatar, "upload/avatar").catch(() => {});
+    //  delete old avatar if changed
+    if (req.body?.avatar && oldAvatar && oldAvatar !== req.body.avatar) {
+      deleteFile(oldAvatar, "avatar").catch(() => {});
     }
-    console.log("REQ.FILE:", req.file);
-    // Return updated user (hide password)
+
     const safeUser = {
       id: user.id,
       username: user.username,
@@ -1106,10 +1142,10 @@ async function getUserSettings(req, res) {
       avatar: user.avatar,
       dob: user.dob,
       bio: user.bio,
+      looking_for: user.looking_for,
       height: user.height,
       education: user.education,
-      looking: user.looking,
-
+      interests: parseInterests(user.interests),
       coins: user.coins,
       total_likes: user.total_likes,
       total_matches: user.total_matches,
@@ -1127,9 +1163,9 @@ async function getUserSettings(req, res) {
       data: safeUser,
     });
   } catch (err) {
-    console.error("updateUserProfile Error:", err);
+    console.error("[getUserSettings/update profile] Error:", err);
     if (req.file) await cleanupTempFiles([req.file]).catch(() => {});
-    await transaction.rollback();
+    await transaction.rollback().catch(() => {});
     return res.status(500).json({
       success: false,
       message: "Something went wrong while updating profile.",
