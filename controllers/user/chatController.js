@@ -17,13 +17,10 @@ const {
 } = require("../../utils/helpers/fileUpload");
 const { compressImage } = require("../../utils/helpers/imageCompressor");
 
-
-
 async function sendMessage(req, res) {
   const transaction = await Message.sequelize.transaction();
 
   let newMsg = null;
-  let botMessageSaved = null;
 
   try {
     const { chatId: chatIdParam } = req.params;
@@ -43,7 +40,9 @@ async function sendMessage(req, res) {
     if (!chatId || Number.isNaN(chatId)) {
       await transaction.rollback();
       await cleanupTempFiles([file]);
-      return res.status(400).json({ success: false, message: "chatId required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "chatId required" });
     }
 
     // lock chat row for safe unread count update
@@ -64,7 +63,9 @@ async function sendMessage(req, res) {
     if (!isUserP1 && !isUserP2) {
       await transaction.rollback();
       await cleanupTempFiles([file]);
-      return res.status(403).json({ success: false, message: "Not in this chat" });
+      return res
+        .status(403)
+        .json({ success: false, message: "Not in this chat" });
     }
 
     const myStatus = isUserP1 ? chat.chat_status_p1 : chat.chat_status_p2;
@@ -80,7 +81,6 @@ async function sendMessage(req, res) {
 
     const receiverId = isUserP1 ? chat.participant_2_id : chat.participant_1_id;
 
-    // MARK MY RECEIVED MESSAGES AS READ (if any)
     {
       const where = {
         chat_id: chatId,
@@ -88,34 +88,24 @@ async function sendMessage(req, res) {
         is_read: false,
       };
 
-      const [updatedCount] = await Message.update(
+      await Message.update(
         { is_read: true, read_at: new Date(), status: "read" },
         { where, transaction }
       );
 
-      updatedReadCount = updatedCount;
+      if (isUserP1) chat.unread_count_p1 = 0;
+      else chat.unread_count_p2 = 0;
 
-      if (updatedCount > 0) {
-        const lastRead = await Message.findOne({
-          where: { chat_id: chatId, receiver_id: userId, is_read: true },
-          order: [["id", "DESC"]],
-          transaction,
-        });
-
-        if (lastRead) lastReadMessageId = lastRead.id;
-
-        // reset unread count for me in chat table (optional but good)
-        if (isUserP1) chat.unread_count_p1 = 0;
-        else chat.unread_count_p2 = 0;
-
-        await chat.save({ transaction });
-      }
+      await chat.save({ transaction });
     }
 
-    // MESSAGE TYPE + FILE HANDLING (your logic)
-    let finalMessageType = (messageType || (file ? "image" : "text")).toLowerCase();
+    let finalMessageType = (
+      messageType ||
+      (file ? "image" : "text")
+    ).toLowerCase();
     const allowedTypes = ["text", "image"];
-    if (!allowedTypes.includes(finalMessageType)) finalMessageType = file ? "image" : "text";
+    if (!allowedTypes.includes(finalMessageType))
+      finalMessageType = file ? "image" : "text";
 
     let finalMediaFilename = null;
     let finalMediaType = null;
@@ -125,13 +115,17 @@ async function sendMessage(req, res) {
       if (!textBody || !textBody.trim()) {
         await transaction.rollback();
         await cleanupTempFiles([file]);
-        return res.status(400).json({ success: false, message: "Text message is empty" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Text message is empty" });
       }
       await cleanupTempFiles([file]);
     } else {
       if (!file) {
         await transaction.rollback();
-        return res.status(400).json({ success: false, message: "Image file is required" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Image file is required" });
       }
 
       const detect = await verifyFileType(file, [
@@ -146,7 +140,9 @@ async function sendMessage(req, res) {
       if (!detect || !detect.ok) {
         await transaction.rollback();
         await cleanupTempFiles([file]);
-        return res.status(400).json({ success: false, message: "Invalid image type" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid image type" });
       }
 
       const compressed = await compressImage(file.path, "chat");
@@ -155,7 +151,7 @@ async function sendMessage(req, res) {
       finalFileSize = file.size;
     }
 
-    // COINS (your logic)
+    // COINS
     const optionValue = await getOption("cost_per_message", 10);
     let messageCost = parseInt(optionValue ?? 0, 10);
     if (Number.isNaN(messageCost)) messageCost = 0;
@@ -191,15 +187,11 @@ async function sendMessage(req, res) {
         receiver_id: receiverId,
         message: finalMessageType === "text" ? (textBody || "").trim() : "",
         message_type: finalMessageType,
-
         media_url: finalMediaFilename,
         media_type: finalMediaType,
         file_size: finalFileSize,
-
         reply_id: repliedMessage ? repliedMessage.id : null,
         sender_type: "real",
-
-        // important
         is_read: false,
         read_at: null,
         status: "sent",
@@ -231,7 +223,6 @@ async function sendMessage(req, res) {
       last_message_time: new Date(),
     };
 
-    // receiver side unread increment
     if (receiverId === chat.participant_1_id) {
       chatUpdate.unread_count_p1 = (chat.unread_count_p1 || 0) + 1;
     } else {
@@ -239,13 +230,20 @@ async function sendMessage(req, res) {
     }
 
     await chat.update(chatUpdate, { transaction });
-
     await transaction.commit();
 
-    try {
-      const freshReceiver = await User.findByPk(receiverId);
+    res.json({
+      success: true,
+      message: "Message sent",
+      data: newMsg,
+    });
 
-      if (freshReceiver && freshReceiver.type === "bot") {
+    const delayMs = 3000;
+    setTimeout(async () => {
+      try {
+        const freshReceiver = await User.findByPk(receiverId);
+        if (!freshReceiver || freshReceiver.type !== "bot") return;
+
         const fallbackMessages = [
           "Hey! I'm here ",
           "I was thinking about you just now.",
@@ -262,10 +260,11 @@ async function sendMessage(req, res) {
         }
 
         if (!botReplyText || !botReplyText.toString().trim()) {
-          botReplyText = fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)];
+          botReplyText =
+            fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)];
         }
 
-        botMessageSaved = await Message.create({
+        const botMessageSaved = await Message.create({
           chat_id: chat.id,
           sender_id: receiverId,
           receiver_id: userId,
@@ -288,29 +287,27 @@ async function sendMessage(req, res) {
           last_message_time: new Date(),
         };
 
-        // userId is receiver of bot msg → increment unread for this user
+        // increment unread for the real user safely
         if (userId === chat.participant_1_id) {
-          botUpdate.unread_count_p1 = (chat.unread_count_p1 || 0) + 1;
+          botUpdate.unread_count_p1 = Sequelize.literal("unread_count_p1 + 1");
         } else {
-          botUpdate.unread_count_p2 = (chat.unread_count_p2 || 0) + 1;
+          botUpdate.unread_count_p2 = Sequelize.literal("unread_count_p2 + 1");
         }
 
         await Chat.update(botUpdate, { where: { id: chat.id } });
+      } catch (errBot) {
+        console.error("[sendMessage] Bot error:", errBot);
       }
-    } catch (errBot) {
-      console.error("[sendMessage] Bot error:", errBot);
-    }
+    }, delayMs);
 
-    return res.json({
-      success: true,
-      message: "Message sent",
-      data: newMsg,
-    });
+    return;
   } catch (err) {
     console.error("sendMessage error:", err);
     await transaction.rollback();
     await cleanupTempFiles([req.file]);
-    return res.status(500).json({ success: false, message: "Server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error" });
   }
 }
 
@@ -426,7 +423,6 @@ async function getChatMessages(req, res) {
   }
 }
 
-
 async function getUserChats(req, res) {
   try {
     const schema = Joi.object({
@@ -450,7 +446,13 @@ async function getUserChats(req, res) {
     if (!session.success) return res.status(401).json(session);
     const userId = Number(session.data);
 
-    // get chats (simple)
+    const pinOrderLiteral = Sequelize.literal(`
+      CASE
+        WHEN participant_1_id = ${userId} THEN IFNULL(is_pin_p1, 0)
+        ELSE IFNULL(is_pin_p2, 0)
+      END
+    `);
+
     const { count, rows: chats } = await Chat.findAndCountAll({
       where: {
         [Op.or]: [
@@ -458,8 +460,11 @@ async function getUserChats(req, res) {
           { participant_2_id: userId, chat_status_p2: { [Op.ne]: "deleted" } },
         ],
       },
-      attributes: ["id", "participant_1_id", "participant_2_id", "is_pin_p1", "is_pin_p2"],
-      order: [["updated_at", "DESC"]],
+      attributes: ["id", "participant_1_id", "participant_2_id", "is_pin_p1", "is_pin_p2", "updated_at"],
+      order: [
+        [pinOrderLiteral, "DESC"],      
+        ["updated_at", "DESC"],        
+      ],
       limit,
       offset,
     });
@@ -468,7 +473,9 @@ async function getUserChats(req, res) {
 
     for (const chat of chats) {
       const otherUserId =
-        chat.participant_1_id === userId ? chat.participant_2_id : chat.participant_1_id;
+        chat.participant_1_id === userId
+          ? chat.participant_2_id
+          : chat.participant_1_id;
 
       const otherUser = await User.findByPk(otherUserId, {
         attributes: ["id", "username", "avatar", "is_active", "last_active"],
