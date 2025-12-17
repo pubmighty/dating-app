@@ -511,7 +511,7 @@ async function getUserChats(req, res) {
            "gender",
            "country",
            "dob",
-           "intrests",
+           "interests",
            "looking_for",
            "height",
            "education" 
