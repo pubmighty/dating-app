@@ -332,8 +332,7 @@ async function sendMessage(req, res) {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 }
-
-
+//changes
 async function getChatMessages(req, res) {
   const transaction = await Message.sequelize.transaction();
 
