@@ -89,7 +89,7 @@ const CoinPackage = sequelize.define(
     },
   },
   {
-    tableName: "coin_packages",
+    tableName: "pb_coin_packages",
     timestamps: true,
     underscored: true,
     indexes: [

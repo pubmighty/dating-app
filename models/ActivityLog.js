@@ -52,7 +52,7 @@ const ActivityLog = sequelize.define(
     },
   },
   {
-    tableName: "Activity_Logs",
+    tableName: "pb_activity_logs",
     timestamps: false, // we only use created_at
     underscored: false,
   }
