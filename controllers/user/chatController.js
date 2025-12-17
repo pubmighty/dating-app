@@ -22,13 +22,16 @@ async function sendMessage(req, res) {
 
   let newMsg = null;
   let botMessageSaved = null;
+  let updatedReadCount = 0;
+  let lastReadMessageId = null;
+  let myUnreadCountAfterRead = 0;
+  let receiverUnreadCountAfterSend = null;
 
   try {
     const { chatId: chatIdParam } = req.params;
     const { message: textBody, replyToMessageId, messageType } = req.body;
     const file = req.file || null;
 
-    // SESSION CHECK
     const sessionResult = await isUserSessionValid(req);
     if (!sessionResult.success) {
       await transaction.rollback();
@@ -42,12 +45,10 @@ async function sendMessage(req, res) {
     if (!chatId || Number.isNaN(chatId)) {
       await transaction.rollback();
       await cleanupTempFiles([file]);
-      return res
-        .status(400)
-        .json({ success: false, message: "chatId required" });
+      return res.status(400).json({ success: false, message: "chatId required" });
     }
 
-    // LOCK CHAT ROW (important for unread counts correctness)
+    // lock chat row for safe updates
     const chat = await Chat.findByPk(chatId, {
       transaction,
       lock: transaction.LOCK.UPDATE,
@@ -65,9 +66,7 @@ async function sendMessage(req, res) {
     if (!isUserP1 && !isUserP2) {
       await transaction.rollback();
       await cleanupTempFiles([file]);
-      return res
-        .status(403)
-        .json({ success: false, message: "Not in this chat" });
+      return res.status(403).json({ success: false, message: "Not in this chat" });
     }
 
     const myStatus = isUserP1 ? chat.chat_status_p1 : chat.chat_status_p2;
@@ -83,52 +82,56 @@ async function sendMessage(req, res) {
 
     const receiverId = isUserP1 ? chat.participant_2_id : chat.participant_1_id;
 
-    // 1) MARK MY RECEIVED MESSAGES AS READ + RESET MY UNREAD COUNT
-    await Message.update(
-      { is_read: true, read_at: new Date(), status: "read" },
-      {
-        where: {
-          chat_id: chatId,
-          receiver_id: userId,
-          is_read: false,
-        },
-        transaction,
+    {
+      const where = {
+        chat_id: chatId,
+        receiver_id: userId,
+        is_read: false,
+      };
+
+      const [count] = await Message.update(
+        { is_read: true, read_at: new Date(), status: "read" },
+        { where, transaction }
+      );
+
+      updatedReadCount = count;
+
+      if (updatedReadCount > 0) {
+        const lastRead = await Message.findOne({
+          where: { chat_id: chatId, receiver_id: userId, is_read: true },
+          order: [["id", "DESC"]],
+          transaction,
+        });
+        if (lastRead) lastReadMessageId = lastRead.id;
       }
-    );
 
-    if (isUserP1) chat.unread_count_p1 = 0;
-    else chat.unread_count_p2 = 0;
+      if (isUserP1) chat.unread_count_p1 = 0;
+      else chat.unread_count_p2 = 0;
 
-    // 2) MESSAGE TYPE + FILE HANDLING
+      await chat.save({ transaction });
+
+      myUnreadCountAfterRead = 0;
+    }
+
     let finalMessageType = (messageType || (file ? "image" : "text")).toLowerCase();
     const allowedTypes = ["text", "image"];
-    if (!allowedTypes.includes(finalMessageType)) {
-      finalMessageType = file ? "image" : "text";
-    }
+    if (!allowedTypes.includes(finalMessageType)) finalMessageType = file ? "image" : "text";
 
     let finalMediaFilename = null;
     let finalMediaType = null;
     let finalFileSize = null;
 
-    // TEXT
     if (finalMessageType === "text") {
       if (!textBody || !textBody.trim()) {
         await transaction.rollback();
         await cleanupTempFiles([file]);
-        return res
-          .status(400)
-          .json({ success: false, message: "Text message is empty" });
+        return res.status(400).json({ success: false, message: "Text message is empty" });
       }
       await cleanupTempFiles([file]);
-    }
-
-    // IMAGE
-    if (finalMessageType === "image") {
+    } else {
       if (!file) {
         await transaction.rollback();
-        return res
-          .status(400)
-          .json({ success: false, message: "Image file is required" });
+        return res.status(400).json({ success: false, message: "Image file is required" });
       }
 
       const detect = await verifyFileType(file, [
@@ -143,9 +146,7 @@ async function sendMessage(req, res) {
       if (!detect || !detect.ok) {
         await transaction.rollback();
         await cleanupTempFiles([file]);
-        return res
-          .status(400)
-          .json({ success: false, message: "Invalid image type" });
+        return res.status(400).json({ success: false, message: "Invalid image type" });
       }
 
       const compressed = await compressImage(file.path, "chat");
@@ -154,7 +155,6 @@ async function sendMessage(req, res) {
       finalFileSize = file.size;
     }
 
-    // 3) COINS
     const optionValue = await getOption("cost_per_message", 10);
     let messageCost = parseInt(optionValue ?? 0, 10);
     if (Number.isNaN(messageCost)) messageCost = 0;
@@ -173,7 +173,6 @@ async function sendMessage(req, res) {
       });
     }
 
-    // 4) REPLY CHECK
     let repliedMessage = null;
     if (replyToMessageId) {
       repliedMessage = await Message.findOne({
@@ -182,7 +181,6 @@ async function sendMessage(req, res) {
       });
     }
 
-    // 5) CREATE MY MESSAGE (UNREAD FOR RECEIVER)
     newMsg = await Message.create(
       {
         chat_id: chat.id,
@@ -195,19 +193,15 @@ async function sendMessage(req, res) {
         file_size: finalFileSize,
         reply_id: repliedMessage ? repliedMessage.id : null,
         sender_type: "real",
-
-        // IMPORTANT: receiver hasn't read it yet
         is_read: false,
         read_at: null,
         status: "sent",
-
         is_paid: messageCost > 0,
         price: messageCost,
       },
       { transaction }
     );
 
-    // 6) DEDUCT COINS
     if (messageCost > 0) {
       await sender.update({ coins: sender.coins - messageCost }, { transaction });
 
@@ -223,7 +217,6 @@ async function sendMessage(req, res) {
       );
     }
 
-    // 7) UPDATE CHAT: last message + increment UNREAD for receiver (atomic)
     const chatUpdate = {
       last_message_id: newMsg.id,
       last_message_time: new Date(),
@@ -237,12 +230,16 @@ async function sendMessage(req, res) {
 
     await Chat.update(chatUpdate, { where: { id: chat.id }, transaction });
 
-    // Save my unread reset change too
-    await chat.save({ transaction });
+    const refreshedChatAfterSend = await Chat.findByPk(chat.id, { transaction });
+    if (refreshedChatAfterSend) {
+      receiverUnreadCountAfterSend =
+        receiverId === refreshedChatAfterSend.participant_1_id
+          ? refreshedChatAfterSend.unread_count_p1
+          : refreshedChatAfterSend.unread_count_p2;
+    }
 
     await transaction.commit();
 
-    // 8) BOT REPLY (OLD BEHAVIOR: WAIT DELAY THEN RETURN BOT IN RESPONSE)
     try {
       const freshReceiver = await User.findByPk(receiverId);
       if (freshReceiver && freshReceiver.type === "bot") {
@@ -258,26 +255,20 @@ async function sendMessage(req, res) {
         try {
           botReplyText = await generateBotReplyForChat(chat.id, textBody || "");
         } catch (aiErr) {
-          console.error("[sendMessage] AI reply error:", aiErr);
+          console.error("[sendMessage] AI bot reply error:", aiErr);
         }
 
         if (!botReplyText || !botReplyText.toString().trim()) {
-          botReplyText =
-            fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)];
+          botReplyText = fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)];
         }
-
-        // typing delay based on message length
         let delayMs = 0;
         try {
-          const typing = typingTime(botReplyText, 80); // your helper
+          const typing = typingTime(botReplyText, 80);
           delayMs = typing?.milliseconds ?? 0;
         } catch (e) {
           delayMs = 2500;
         }
-
-        if (delayMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-        }
+        if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
 
         botMessageSaved = await Message.create({
           chat_id: chat.id,
@@ -297,7 +288,6 @@ async function sendMessage(req, res) {
           file_size: null,
         });
 
-        // Update chat + increment unread for the real user (atomic)
         const botChatUpdate = {
           last_message_id: botMessageSaved.id,
           last_message_time: new Date(),
@@ -320,14 +310,18 @@ async function sendMessage(req, res) {
       message: "Message sent",
       data: {
         user: newMsg,
-        bot: botMessageSaved,
+        bot: botMessageSaved, // null if not bot
+      },
+      meta: {
+        updatedReadCount,
+        lastReadMessageId,
+        unreadCount: myUnreadCountAfterRead, // always 0 after sendMessage open chat
+        receiverUnreadCount: receiverUnreadCountAfterSend,
       },
     });
   } catch (err) {
     console.error("sendMessage error:", err);
-    try {
-      await transaction.rollback();
-    } catch (_) {}
+    await transaction.rollback();
     await cleanupTempFiles([req.file]);
     return res.status(500).json({ success: false, message: "Server error" });
   }
@@ -481,7 +475,7 @@ async function getUserChats(req, res) {
           { participant_2_id: userId, chat_status_p2: { [Op.ne]: "deleted" } },
         ],
       },
-      attributes: ["id", "participant_1_id", "participant_2_id", "is_pin_p1", "is_pin_p2", "updated_at"],
+      attributes: ["id", "participant_1_id", "participant_2_id", "is_pin_p1", "is_pin_p2", "last_message_time"],
       order: [
         [pinOrderLiteral, "DESC"],      
         ["updated_at", "DESC"],        
@@ -535,13 +529,12 @@ async function getUserChats(req, res) {
 
       const isPinnedForUser =
         chat.participant_1_id === userId ? chat.is_pin_p1 : chat.is_pin_p2;
-
       chatList.push({
         chat_id: chat.id,
         user: otherUser,
         last_message: lastMessage ? lastMessage.message : null,
         last_message_type: lastMessage ? lastMessage.message_type : null,
-        last_message_time: lastMessage ? lastMessage.created_at : null,
+        last_message_time: chat.last_message_time || (lastMessage ? lastMessage.created_at : null),
         unread_count: unreadCount,
         is_pin: !!isPinnedForUser,
       });
