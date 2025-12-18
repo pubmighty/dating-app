@@ -483,10 +483,18 @@ async function getUserChats(req, res) {
           { participant_2_id: userId, chat_status_p2: { [Op.ne]: "deleted" } },
         ],
       },
-      attributes: ["id", "participant_1_id", "participant_2_id", "is_pin_p1", "is_pin_p2", "last_message_time"],
+      attributes: [
+        "id",
+        "participant_1_id",
+        "participant_2_id",
+        "is_pin_p1",
+        "is_pin_p2",
+        "last_message_time",
+        "is_block",
+      ],
       order: [
-        [pinOrderLiteral, "DESC"],      
-        ["updated_at", "DESC"],        
+        [pinOrderLiteral, "DESC"],
+        ["updated_at", "DESC"],
       ],
       limit,
       offset,
@@ -502,21 +510,21 @@ async function getUserChats(req, res) {
 
       const otherUser = await User.findByPk(otherUserId, {
         attributes: [
-          "id", 
+          "id",
           "username",
-           "avatar",
-           "is_active",
-           "last_active",
-           "bio",
-           "email",
-           "phone",
-           "gender",
-           "country",
-           "dob",
-           "interests",
-           "looking_for",
-           "height",
-           "education" 
+          "avatar",
+          "is_active",
+          "last_active",
+          "bio",
+          "email",
+          "phone",
+          "gender",
+          "country",
+          "dob",
+          "interests",
+          "looking_for",
+          "height",
+          "education",
         ],
       });
 
@@ -542,10 +550,12 @@ async function getUserChats(req, res) {
         user: otherUser,
         last_message: lastMessage ? lastMessage.message : null,
         last_message_type: lastMessage ? lastMessage.message_type : null,
-        last_message_time: chat.last_message_time || (lastMessage ? lastMessage.created_at : null),
+        last_message_time:
+          chat.last_message_time || (lastMessage ? lastMessage.created_at : null),
         unread_count: unreadCount,
         is_pin: !!isPinnedForUser,
-      }); //changes 
+        is_block: !!chat.is_block, 
+      });
     }
 
     return res.json({
@@ -842,7 +852,6 @@ async function blockChat(req, res) {
     const { chatId: chatIdParam } = req.params;
     const { action } = req.body || {}; // "block" | "unblock" (optional, default: "block")
 
-    //  Validate session
     const sessionResult = await isUserSessionValid(req);
     if (!sessionResult.success) {
       await transaction.rollback();
@@ -850,7 +859,7 @@ async function blockChat(req, res) {
     }
     const userId = Number(sessionResult.data);
 
-    //  Validate chatId
+    // Validate chatId
     if (!chatIdParam) {
       await transaction.rollback();
       return res
@@ -866,7 +875,7 @@ async function blockChat(req, res) {
         .json({ success: false, message: "Invalid chatId" });
     }
 
-    //  Load chat with lock (real-life: prevent race conditions)
+    // Load chat with lock
     const chat = await Chat.findByPk(chatId, {
       transaction,
       lock: transaction.LOCK.UPDATE,
@@ -879,7 +888,7 @@ async function blockChat(req, res) {
         .json({ success: false, message: "Chat not found" });
     }
 
-    //  Ensure user is a participant
+    // Ensure user is a participant
     const isUserP1 = chat.participant_1_id === userId;
     const isUserP2 = chat.participant_2_id === userId;
 
@@ -890,8 +899,8 @@ async function blockChat(req, res) {
         .json({ success: false, message: "You are not part of this chat." });
     }
 
-    //  Determine operation: block or unblock
-    const op = (action || "block").toLowerCase(); // default: block
+    // Determine operation: block or unblock
+    const op = (action || "block").toLowerCase();
     if (!["block", "unblock"].includes(op)) {
       await transaction.rollback();
       return res.status(400).json({
@@ -900,65 +909,40 @@ async function blockChat(req, res) {
       });
     }
 
-    const newStatus = op === "block" ? "blocked" : "active";
+    const newIsBlock = op === "block";
 
-    //  Update the current user's chat status
-    if (isUserP1) {
-      if (chat.chat_status_p1 === newStatus) {
-        // idempotent
-        await transaction.commit();
-        return res.json({
-          success: true,
-          message:
-            op === "block"
-              ? "User is already blocked in this chat."
-              : "User is already unblocked in this chat.",
-          data: {
-            chatId: chat.id,
-            yourStatus: chat.chat_status_p1,
-            otherStatus: chat.chat_status_p2,
-          },
-        });
-      }
-
-      chat.chat_status_p1 = newStatus;
-    } else if (isUserP2) {
-      if (chat.chat_status_p2 === newStatus) {
-        await transaction.commit();
-        return res.json({
-          success: true,
-          message:
-            op === "block"
-              ? "User is already blocked in this chat."
-              : "User is already unblocked in this chat.",
-          data: {
-            chatId: chat.id,
-            yourStatus: chat.chat_status_p2,
-            otherStatus: chat.chat_status_p1,
-          },
-        });
-      }
-
-      chat.chat_status_p2 = newStatus;
+    // Idempotent response
+    if (!!chat.is_block === newIsBlock) {
+      await transaction.commit();
+      return res.json({
+        success: true,
+        message:
+          op === "block"
+            ? "Chat is already blocked."
+            : "Chat is already unblocked.",
+        data: {
+          chatId: chat.id,
+          is_block: !!chat.is_block,
+        },
+      });
     }
 
+    chat.is_block = newIsBlock;
     await chat.save({ transaction });
     await transaction.commit();
 
     return res.json({
       success: true,
-      message:
-        op === "block"
-          ? "User has been blocked in this chat."
-          : "User has been unblocked in this chat.",
+      message: newIsBlock
+        ? "Chat has been blocked."
+        : "Chat has been unblocked.",
       data: {
         chatId: chat.id,
-        yourStatus: isUserP1 ? chat.chat_status_p1 : chat.chat_status_p2,
-        otherStatus: isUserP1 ? chat.chat_status_p2 : chat.chat_status_p1,
+        is_block: !!chat.is_block,
       },
     });
   } catch (error) {
-    console.error("[blockChatUser] Error:", error);
+    console.error("[blockChat] Error:", error);
 
     if (transaction && !transaction.finished) {
       await transaction.rollback();

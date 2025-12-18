@@ -51,7 +51,11 @@ const Chat = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
-  
+    is_block:{
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
     chat_status_p1: {
       type: DataTypes.ENUM("active", "blocked", "deleted"),
       defaultValue: "active",

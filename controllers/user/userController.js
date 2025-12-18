@@ -8,6 +8,8 @@ const {
   getOption,
   isUserSessionValid,
   getDobRangeFromAges,
+  maskEmail,
+  maskPhone
 } = require("../../utils/helper");
 const {
   fileUploader,
@@ -607,7 +609,6 @@ async function getPersonById(req, res) {
   const { id } = value;
 
   try {
-    //  Fetch BOT user by ID
     const botUser = await User.findOne({
       where: {
         id,
@@ -627,11 +628,15 @@ async function getPersonById(req, res) {
       });
     }
 
-    //  return full info
+    const personData = botUser.toJSON();
+    // mask sensitive fields
+    personData.email = maskEmail(personData.email);
+    personData.phone = maskPhone(personData.phone);
+
     return res.json({
       success: true,
-      message: " person fetched successfully.",
-      data: botUser,
+      message: "person fetched successfully.",
+      data: personData,
     });
   } catch (err) {
     console.error("error during getPersonById:", err);

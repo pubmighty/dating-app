@@ -386,6 +386,32 @@ function normalizeParticipants(userIdA, userIdB) {
     : { participant1Id: id2, participant2Id: id1 };
 }
 
+function maskPhone(phone) {
+  if (!phone || phone.length < 4) return phone;
+
+  const str = phone.toString();
+  const first = str.slice(0, 2);
+  const last = str.slice(-1);
+
+  return `${first}${"*".repeat(str.length - 3)}${last}`;
+}
+
+function maskEmail(email) {
+  if (!email || !email.includes("@")) return email;
+
+  const [name, domain] = email.split("@");
+
+  if (domain.length <= 2) {
+    return `${name}@**`;
+  }
+
+  const firstChar = domain[0];
+  const lastChar = domain.slice(-1);
+
+  return `${name}@${"*".repeat(domain.length - 2)}${lastChar}`;
+}
+
+
 async function getOrCreateChatBetweenUsers(userIdA, userIdB, transaction) {
   // Optional: normalize to avoid duplicate chats
   const [p1, p2] =
@@ -483,4 +509,6 @@ module.exports = {
   validateCallParticipants,
   calculateCallCost,
   typingTime,
+  maskPhone,
+  maskEmail
 };
