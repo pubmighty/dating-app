@@ -67,7 +67,7 @@ const UserSetting = sequelize.define(
     },
   },
   {
-    tableName: "user_settings",
+    tableName: "pb_user_settings",
     timestamps: true,
     underscored: true,
     indexes: [{ fields: ["user_id"] }],

@@ -1,4 +1,3 @@
-// helpers/mediaUploadHelper.js
 
 const path = require("path");
 const fs = require("fs-extra");
@@ -182,9 +181,31 @@ function buildProfileMediaUrl(filename) {
   if (!filename) return null;
   return `${PROFILE_MEDIA_WEB_PATH}/${filename}`;
 }
+async function moveUploadedFile(file, folder) {
+  // example: uploads/chat_audio
+  const uploadRoot = path.join(__dirname, "../../public/uploads");
+  const targetDir = path.join(uploadRoot, folder);
+
+  // ensure folder exists
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
+  const ext = path.extname(file.originalname || "");
+  const filename = Date.now() + "_" + Math.random().toString(36).slice(2) + ext;
+
+  const targetPath = path.join(targetDir, filename);
+
+  // move file
+  await fs.promises.rename(file.path, targetPath);
+
+  // return relative path or filename (your choice)
+  return `${folder}/${filename}`;
+}
 
 module.exports = {
   uploadProfileMedia,
   deleteProfileMediaFile,
-  buildProfileMediaUrl, 
+  buildProfileMediaUrl,
+  moveUploadedFile,
 };

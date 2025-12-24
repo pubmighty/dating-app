@@ -1,7 +1,7 @@
 const Joi = require("joi");
 const bcrypt = require("bcryptjs");
 const User = require("../../models/User");
-
+const { logActivity } = require("../../utils/helpers/activityLogHelper");
 const TempUser = require("../../models/TempUser");
 const Option = require("../../models/Option");
 const UserOtp = require("../../models/UserOtp");

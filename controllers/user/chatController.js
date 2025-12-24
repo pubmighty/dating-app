@@ -1,9 +1,9 @@
 const Joi = require("joi");
 const path = require("path");
-const fs = require("fs-extra");
 const Message = require("../../models/Message");
 const Chat = require("../../models/Chat");
-const { Op, Sequelize } = require("sequelize");
+const Sequelize = require("sequelize");
+const { Op } = require("sequelize");
 const User = require("../../models/User");
 const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
 const { generateBotReplyForChat } = require("../../utils/helpers/aiHelper");
@@ -17,24 +17,9 @@ const {
   uploadFile,
   cleanupTempFiles,
 } = require("../../utils/helpers/fileUpload");
+const { moveUploadedFile } = require("../../utils/helpers/mediaHelper");
+
 const { compressImage } = require("../../utils/helpers/imageCompressor");
-
-async function moveUploadedFile(file, folder) {
-  if (!file?.path) return null;
-
-  const ROOT_DIR = path.resolve(__dirname, "..", "..");
-  const PUBLIC_DIR = path.join(ROOT_DIR, "public");
-
-  const destDir = path.join(PUBLIC_DIR, "uploads", folder);
-  await fs.ensureDir(destDir);
-
-  const filename = file.filename || path.basename(file.path); // multer filename
-  const destPath = path.join(destDir, filename);
-
-  await fs.move(file.path, destPath, { overwrite: true });
-
-  return path.join("uploads", folder, filename).replaceAll("\\", "/");
-}
 
 // async function sendMessage(req, res) {
 //   const transaction = await Message.sequelize.transaction();
@@ -614,7 +599,7 @@ async function sendMessage(req, res) {
         });
       }
 
-      // mime check (strong)
+      // mime check
       const detect = await verifyFileType(file, [
         "image/png",
         "image/jpeg",
@@ -687,7 +672,7 @@ async function sendMessage(req, res) {
         "video/quicktime", // mov
         "video/webm",
         "video/3gpp",
-        "video/x-matroska", // mkv (optional)
+        "video/x-matroska", // mkv
       ]);
       if (!detect || !detect.ok) {
         await t.rollback();
@@ -761,7 +746,7 @@ async function sendMessage(req, res) {
       });
     }
 
-    // 8) Reply check
+    //  Reply check
     let repliedMessage = null;
     if (bVal.replyToMessageId) {
       repliedMessage = await Message.findOne({
@@ -770,7 +755,7 @@ async function sendMessage(req, res) {
       });
     }
 
-    // 9) Create message
+    // Create message
     // For media messages: store caption in `message` (like WhatsApp)
     newMsg = await Message.create(
       {
@@ -796,7 +781,7 @@ async function sendMessage(req, res) {
       { transaction: t }
     );
 
-    // 10) Deduct coins + log transaction
+    // Deduct coins + log transaction
     if (messageCost > 0) {
       await sender.update(
         { coins: Number(sender.coins || 0) - messageCost },
@@ -831,14 +816,14 @@ async function sendMessage(req, res) {
 
     await t.commit();
 
-    // 12) Respond immediately (WhatsApp behavior)
+    // Respond immediately
     res.json({
       success: true,
       message: "Message sent",
       data: newMsg,
     });
 
-    // 13) BOT reply (your existing logic) — keep it outside txn
+    //BOT reply (your existing logic)
     const delayMs = 3000;
     setTimeout(async () => {
       try {
@@ -955,7 +940,7 @@ async function getUserChats(req, res) {
         "participant_2_id",
         "is_pin_p1",
         "is_pin_p2",
-        "updated_at",
+        "last_message_time",
       ],
       order: [
         [pinOrderLiteral, "DESC"],
@@ -974,7 +959,23 @@ async function getUserChats(req, res) {
           : chat.participant_1_id;
 
       const otherUser = await User.findByPk(otherUserId, {
-        attributes: ["id", "username", "avatar", "is_active", "last_active"],
+        attributes: [
+          "id",
+          "username",
+          "avatar",
+          "is_active",
+          "last_active",
+          "bio",
+          "email",
+          "phone",
+          "gender",
+          "country",
+          "dob",
+          "interests",
+          "looking_for",
+          "height",
+          "education",
+        ],
       });
 
       const lastMessage = await Message.findOne({
@@ -994,16 +995,17 @@ async function getUserChats(req, res) {
 
       const isPinnedForUser =
         chat.participant_1_id === userId ? chat.is_pin_p1 : chat.is_pin_p2;
-
       chatList.push({
         chat_id: chat.id,
         user: otherUser,
         last_message: lastMessage ? lastMessage.message : null,
         last_message_type: lastMessage ? lastMessage.message_type : null,
-        last_message_time: lastMessage ? lastMessage.created_at : null,
+        last_message_time:
+          chat.last_message_time ||
+          (lastMessage ? lastMessage.created_at : null),
         unread_count: unreadCount,
         is_pin: !!isPinnedForUser,
-      });
+      }); //changes
     }
 
     return res.json({

@@ -5,6 +5,7 @@ const Message = require("./Message");
 const CoinPackage = require("./CoinPackage");
 const CoinPurchaseTransaction = require("./CoinPurchaseTransaction");
 const UserMedia = require("./UserMedia");
+const ActivityLog = require("./ActivityLog");
 
 function setupAssociations() {
   User.hasMany(UserInteraction, {
@@ -35,7 +36,7 @@ function setupAssociations() {
     onUpdate: "CASCADE",
   });
 
-   User.hasMany(UserMedia, {
+  User.hasMany(UserMedia, {
     foreignKey: "user_id",
     as: "media", // user.getMedia()
     onDelete: "CASCADE",
@@ -109,6 +110,12 @@ function setupAssociations() {
     as: "purchases",
     onDelete: "SET NULL",
     onUpdate: "CASCADE",
+  });
+  ActivityLog.belongsTo(User, {
+     foreignKey: "user_id", as: "user" 
+    });
+  User.hasMany(ActivityLog, { 
+    foreignKey: "user_id", as: "activity_logs" 
   });
 }
 
