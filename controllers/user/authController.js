@@ -101,7 +101,17 @@ async function registerWithEmail(req, res) {
     });
 
     const { token, expires_at } = await handleSessionCreate(req, user.id);
-
+    await logActivity(req, {
+    userId: existing.id,
+    action: "login_success",
+    entityType: "auth",
+    entityId: existing.id,
+    metadata: {
+      method: "google",
+      flow: "existing_user_login",
+      email: existing.email ? maskEmail(existing.email) : null,
+    },
+  });     
     return res.status(201).json({
       success: true,
       message: "Registration successful",
@@ -179,7 +189,6 @@ async function registerUser(req, res) {
     // Check if email verification is enabled
     const verifyEmailRegister = await getOption("verify_register_email", true);
 
-    // PHONE REGISTRATION → create user directly
     if (phoneNo) {
       const user = await User.create({
         username,
@@ -191,7 +200,18 @@ async function registerUser(req, res) {
       });
 
       const { token, expires_at } = await handleSessionCreate(req, user.id);
-
+        await logActivity(req, {
+        userId: user.id,
+        action: "register_success",
+        entityType: "auth",
+        entityId: user.id,
+        metadata: {
+          method: "phone",
+          phone: maskPhone(user.phone),
+          register_type: "manual",
+          verified: false,
+        },
+      });
       return res.status(201).json({
         success: true,
         message: "Registration successful",
@@ -365,7 +385,16 @@ async function verifyRegister(req, res) {
     await tempUser.destroy();
 
     const { token, expires_at } = await handleSessionCreate(req, user.id);
-
+    await logActivity(req, {
+          userId: user.id,
+          action: "verify_register_success",
+          entityType: "auth",
+          entityId: user.id,
+          metadata: {
+            method: "email",
+            email: maskEmail(user.email),
+          },
+        });
     return res.status(200).json({
       success: true,
       message: "Email verified successfully.",
@@ -449,6 +478,16 @@ async function loginUser(req, res) {
 
     const { token, expires_at } = await handleSessionCreate(req, user.id);
 
+        await logActivity(req, {
+          userId: user.id,
+          action: "login_success",
+          entityType: "auth",
+          entityId: user.id,
+          metadata: {
+            method: isValidEmail(login) ? "email" : isValidPhone(login) ? "phone" : "username",
+            login: isValidEmail(login) ? login :login  ? login : login,
+          },
+        });
     return res.status(200).json({
       success: true,
       message: "Login successful",

@@ -10,6 +10,14 @@ function getIp(req) {  //this is for logging the ip of the user
   }
 }
 
+function getUserAgent(req) {
+   try {
+     return req.headers["user-agent"] || null; 
+      } catch {
+         return null;
+         } 
+    }
+
 async function logActivity(
   req,
   {
