@@ -10,12 +10,10 @@ async function verifyGooglePlayPurchase(req, res) {
   const t = await sequelize.transaction();
 
   try {
-    // 1) Validate body
+    //  Validate body
     const schema = Joi.object({
       coin_pack_id: Joi.number().integer().required(),
       purchase_token: Joi.string().min(10).max(255).required(),
-
-      // Android can send these. We'll still validate with DB mapping.
       product_id: Joi.string().min(3).max(100).optional().allow(null, ""),
       order_id: Joi.string().max(200).optional().allow(null, ""),
     });
@@ -32,7 +30,7 @@ async function verifyGooglePlayPurchase(req, res) {
         .json({ success: false, message: error.details[0].message });
     }
 
-    // 2) Session check
+    // Session check
     const session = await isUserSessionValid(req);
     if (!session.success) {
       await t.rollback();
@@ -50,7 +48,7 @@ async function verifyGooglePlayPurchase(req, res) {
 
     const { coin_pack_id, purchase_token, product_id, order_id } = value;
 
-    // 3) Load pack (must be active)
+    //  Load pack (must be active)
     const pack = await CoinPackage.findOne({
       where: { id: coin_pack_id, status: "active" },
       transaction: t,
@@ -65,7 +63,7 @@ async function verifyGooglePlayPurchase(req, res) {
       });
     }
 
-    // 4) Determine productId to verify (prefer DB mapping)
+    //  Determine productId to verify (prefer DB mapping)
     const productIdToVerify = pack.play_product_id || product_id;
     if (!productIdToVerify) {
       await t.rollback();
@@ -76,7 +74,7 @@ async function verifyGooglePlayPurchase(req, res) {
       });
     }
 
-    // 5) Idempotency: if token already processed, do NOT credit again
+    //  Idempotency: if token already processed, do NOT credit again
     const existing = await CoinPurchaseTransaction.findOne({
       where: { purchase_token },
       transaction: t,
@@ -95,7 +93,7 @@ async function verifyGooglePlayPurchase(req, res) {
       });
     }
 
-    // 6) Create pending transaction first (audit)
+    //  Create pending transaction first.
     const txRow = existing
       ? existing
       : await CoinPurchaseTransaction.create(
@@ -118,7 +116,7 @@ async function verifyGooglePlayPurchase(req, res) {
           { transaction: t }
         );
 
-    // 7) Verify with Google
+    // Verify with Google
     const gp = await verifyInAppPurchase({
       packageName,
       productId: productIdToVerify,
@@ -157,7 +155,7 @@ async function verifyGooglePlayPurchase(req, res) {
       });
     }
 
-    // 8) Credit user coins in same DB transaction
+    //  Credit user coins in same DB transaction
     const user = await User.findByPk(userId, {
       transaction: t,
       lock: t.LOCK.UPDATE,
@@ -181,7 +179,7 @@ async function verifyGooglePlayPurchase(req, res) {
       { transaction: t }
     );
 
-    // 9) Mark completed
+    //  Mark completed
     await txRow.update(
       {
         status: "completed",
@@ -190,7 +188,7 @@ async function verifyGooglePlayPurchase(req, res) {
       { transaction: t }
     );
 
-    // 10) sold_count++
+    //  sold_count++
     await pack.update(
       { sold_count: Number(pack.sold_count || 0) + 1 },
       { transaction: t }
@@ -198,7 +196,7 @@ async function verifyGooglePlayPurchase(req, res) {
 
     await t.commit();
 
-    // 11) Tell Android to consume/ack now
+    //  Tell Android to consume/ack now
     return res.json({
       success: true,
       message: "Purchase verified and coins credited",
