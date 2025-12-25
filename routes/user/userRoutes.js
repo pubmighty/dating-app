@@ -14,7 +14,6 @@ const {
 } = require("../../controllers/user/googleBillingController");
 const utilController = require("../../controllers/user/utilController");
 
-
 /**
  * GET /setting
  *
@@ -50,19 +49,19 @@ router.get("/setting", utilController.getSiteSettings);
  * TODO - Rate limiting must be enforced to prevent brute-force and abuse.
  * - Responses should be consist to avoid user enumeration.
  * - Tokens, OTPs, and verification codes must have strict expiry.
- * 
+ *
  *  Security Notes:
  *  TODO - Apply IP rate limiting on all auth endpoints.
  * - Never log passwords, OTPs, or raw tokens.
  * - Enforce strong password policies at registration and reset.
-*/
+ */
 
 /**
  * 1. /register/google
  *    - Handles registration using Google OAuth data.
  *    - Validates provider token and maps external identity to internal user record.
  *    - Must prevent duplicate accounts and handle provider-linked users safely.
-*/
+ */
 router.post("/register/google", authController.registerWithGoogle);
 
 /**
@@ -70,14 +69,14 @@ router.post("/register/google", authController.registerWithGoogle);
  *    - Handles standard email-based user registration.
  *    - Triggers email verification process with OTP.
  *    - Creates a temp user record if verification on otherise create normal user.
-*/
+ */
 router.post("/register", authController.registerUser);
 
 /**
  * 3. /register/verify
  *    - Verifies registration via OTP.
  *    - Activates the user account only after successful verification.
-*/
+ */
 router.post("/register/verify", authController.verifyRegister);
 
 /**
@@ -85,7 +84,7 @@ router.post("/register/verify", authController.verifyRegister);
  *    - Authenticates user credentials.
  *    - Issues session tokens on success.
  *    - Must NOT reveal whether email or password was incorrect.
-*/
+ */
 router.post("/login", authController.loginUser);
 
 /**
@@ -94,23 +93,49 @@ router.post("/login", authController.loginUser);
  *    - Generates a time-limited OTP.
  *    - Must respond with success even if the email does not exist
  *      (to prevent account enumeration).
-*/
+ */
 router.post("/forgot-password", authController.forgotPassword);
 
 /**
  * 6. /forgot-password/verify
  *    - Verifies password reset OTP.
  *    - Allows user to securely set a new password.
-*/
+ */
 router.post("/forgot-password/verify", authController.forgotPasswordVerify);
 
-
-//user interaction {like, reject, match}
+/**
+ * 1. /like
+ *    - Handles user "like" action.
+ *    - Records a like interaction between the logged-in user and target user.
+ *    - If the target user is a bot → creates an instant match.
+ *    - If the target user is human → creates a match only when the target has already liked back.
+ *    - Prevents duplicate likes or repeated matches.
+ *    - Safely updates interaction counters likes using transactions.
+ *    - Creates or fetches a chat automatically when a match is formed.
+ */
 router.post("/like", matchingController.likeUser);
-router.post("/reject", matchingController.rejectUser);
-router.post("/match", matchingController.matchUser);
-router.get("/matches", matchingController.getUserMatches);
 
+/**
+ * 2. /reject
+ *    - Handles user "reject" action.
+ *    - Records a reject interaction between the logged-in user and target user.
+ *    - If a match existed, breaks the match safely on both sides.
+ *    - Decrements match counters correctly without allowing negative values.
+ *    - Updates reject counters for the acting user only.
+ *    - Does NOT create chats and does NOT notify the target user.
+ */
+router.post("/reject", matchingController.rejectUser);
+
+/**
+ * 3. /matches
+ *    - Fetches user interaction list for the logged-in user.
+ *    - By default returns matched users (mutual matches only).
+ *    - Supports optional filtering by interaction type (match or like).
+ *    - Supports pagination, sorting, and ordering.
+ *    - Returns one entry per target user (no duplicates).
+ *    - Joins target user profile data efficiently (no N+1 queries).
+ */
+router.get("/matches", matchingController.getUserMatches);
 
 //chatting between user1 & user2
 router.post(
@@ -125,7 +150,6 @@ router.post("/chats/pin", chatController.pinChats);
 router.post("/chats/:chatId/block", chatController.blockChat);
 router.post("/chats/:chatId/read", chatController.markChatMessagesRead);
 router.post("/chats/delete", chatController.deleteChat);
-
 
 //coin
 router.get("/coins/purchases", coinController.getUserCoinPurchases);
