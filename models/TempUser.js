@@ -17,6 +17,10 @@ const TempUser = sequelize.define(
       type: DataTypes.STRING(300),
       allowNull: true,
     },
+    phone: {
+      type: DataTypes.STRING(300),
+      allowNull: true,
+    },
     password: {
       type: DataTypes.STRING(300),
       allowNull: false,
