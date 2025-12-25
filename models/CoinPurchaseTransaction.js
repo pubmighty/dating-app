@@ -52,6 +52,9 @@ const CoinPurchaseTransaction = sequelize.define(
       defaultValue: "pending",
     },
 
+    purchase_token: {
+      type: DataTypes.STRING(255),
+    },
     date: {
       type: DataTypes.DATE,
       allowNull: false,

@@ -24,7 +24,11 @@ async function sendOtpMail(user, otpObj, title, action) {
 
 module.exports = {
     sendOtpMail,
+<<<<<<< HEAD
     sendOtpMail,
 }
 
 
+=======
+}
+>>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b

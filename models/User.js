@@ -150,9 +150,17 @@ const User = sequelize.define(
     last_active: {
       type: DataTypes.DATE,
     },
+<<<<<<< HEAD
     google_id: {
       type: DataTypes.STRING(300),
     },
+=======
+
+    google_id: {
+      type: DataTypes.STRING(300),
+    },
+
+>>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
     status: {
       type: DataTypes.TINYINT.UNSIGNED,
       allowNull: false,

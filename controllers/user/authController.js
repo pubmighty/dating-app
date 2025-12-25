@@ -3,29 +3,25 @@ const bcrypt = require("bcryptjs");
 const User = require("../../models/User");
 const TempUser = require("../../models/TempUser");
 const UserOtp = require("../../models/UserOtp");
-const { OAuth2Client, AwsClient } = require("google-auth-library");
-const {
-  getRealIp,
-  generateOtp,
-  getOption,
-  isValidPhone,
-  isValidEmail,
-} = require("../../utils/helper");
-const {
-  publicUserAttributes,
-  BCRYPT_ROUNDS,
-} = require("../../utils/staticValues");
+const { OAuth2Client } = require("google-auth-library");
+const { getRealIp, getOption } = require("../../utils/helper");
 const {
   handleUserSessionCreation,
-  generateRandomUsername,
+  generateUniqueUsername,
   generateRandomPassword,
+  isValidEmail,
+  isValidPhone,
 } = require("../../utils/helpers/authHelper");
 const {
   downloadAndUploadGoogleAvatar,
 } = require("../../utils/helpers/fileUpload");
+const {
+  publicUserAttributes,
+  BCRYPT_ROUNDS,
+} = require("../../utils/staticValues");
+const { sendOtpMail } = require("../../utils/helpers/mailHelper");
 const sequelize = require("../../config/db");
 const UserSession = require("../../models/UserSession");
-const { sendOtpMail } = require("../../utils/helpers/mailHelper");
 
 async function registerWithGoogle(req, res) {
   try {
@@ -123,7 +119,7 @@ async function registerWithGoogle(req, res) {
       });
     }
 
-    const username = generateRandomUsername().toLowerCase();
+    const username = generateUniqueUsername().toLowerCase();
 
     const existingUsername = await User.findOne({ where: { username } });
     if (existingUsername) {
@@ -253,7 +249,7 @@ async function registerUser(req, res) {
 
     // Generate username if not provided
     if (!username) {
-      username = generateRandomUsername("user").toLowerCase();
+      username = generateUniqueUsername("user").toLowerCase();
     } else {
       username = username.toLowerCase();
     }
@@ -268,7 +264,9 @@ async function registerUser(req, res) {
 
     // Uniqueness checks
     if (hasEmail) {
-      const existingEmail = await User.findOne({ where: { email: email.username.toLowerCase() } });
+      const existingEmail = await User.findOne({
+        where: { email: email.username.toLowerCase() },
+      });
       if (existingEmail) {
         return res.status(409).json({
           success: false,
@@ -294,7 +292,7 @@ async function registerUser(req, res) {
 
     // Email verification setting
     const verifyEmailRegister = Boolean(
-      await getOption("verify_register_email", "true") === "true"
+      (await getOption("verify_register_email", "true")) === "true"
     );
 
     // EMAIL SIGNUP FLOW
@@ -364,7 +362,6 @@ async function registerUser(req, res) {
     }
 
     // PHONE SIGNUP FLOW
-    
     // Phone signup: direct create (no email involved)
     const user = await User.create({
       username,

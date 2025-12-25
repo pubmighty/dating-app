@@ -13,7 +13,11 @@ async function run() {
     await sequelize.authenticate();
 
     // Two-factor toggle
+<<<<<<< HEAD
     await set("verify_register_email", true);
+=======
+    await set("verify_gmail_register", "true");
+>>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
     await set("register_otp_time_min", 10);
     await set("forgot_otp_time_min", 10);
     await set("default_per_page_packages", 10);

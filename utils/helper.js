@@ -1,20 +1,15 @@
-const UserSession = require("../models/UserSession");
 const Option = require("../models/Option");
-const crypto = require("crypto");
 const path = require("path");
-const geoip = require("geoip-lite");
 const maxmind = require("maxmind");
 const { Op } = require("sequelize");
-const { transporter } = require("../config/mail");
 const Chat = require("../models/Chat");
-
-const { returnMailTemplate } = require("./helpers/mailUIHelper");
 const UAParser = require("ua-parser-js");
 
 // global variables
 let lookup;
 const dbPath = path.join(__dirname, "/ip-db/GeoLite2-City.mmdb");
 
+<<<<<<< HEAD
 
 function generateOtp() {
   // Generate a random 6-digit OTP
@@ -94,6 +89,8 @@ function getRealIp(req) {
   return req.ip || req.connection.remoteAddress;
 }
 
+=======
+>>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
 async function getLocation(ip) {
   if (!lookup) {
     try {
@@ -129,6 +126,62 @@ async function getLocation(ip) {
   }
 }
 
+/**
+ * Fetches a single option by name.
+ * @param {string} optionName - Name of the option.
+ * @returns {Promise<string>} - Returns the option value.
+ */
+async function getOption(optionName, dValue = null) {
+  try {
+    const option = await Option.findOne({ where: { name: optionName } });
+
+    if (!option) {
+      // no row => use default
+      return dValue;
+    }
+
+    const raw = option.value;
+
+    // if value is null/empty, fallback
+    if (raw === null || raw === undefined || raw === "") {
+      return dValue;
+    }
+
+    return raw; // IMPORTANT: return DB value
+  } catch (error) {
+    console.error("Error fetching option:", error);
+    return dValue;
+  }
+}
+
+/**
+ * Fetches multiple options by their IDs.
+ * @param {Array<number>} ids - List of option IDs to fetch.
+ * @returns {Promise<Array>} - Returns the options as an array.
+ */
+const getOptionsByIds = async (ids) => {
+  return await Option.findAll({
+    where: { id: { [Op.in]: ids } },
+    attributes: ["id", "name", "value"],
+  });
+};
+
+function getRealIp(req) {
+  // Check for Cloudflare's header first
+  const cfIp = req.headers["cf-connecting-ip"];
+  if (cfIp) return cfIp;
+
+  // Check for X-Forwarded-For header (usually used by proxies)
+  const forwardedIps = req.headers["x-forwarded-for"];
+  if (forwardedIps) {
+    const ips = forwardedIps.split(",");
+    return ips[0].trim(); // Return the first IP in the list
+  }
+
+  // Fallback to req.ip, which is the IP of the client directly connected to the server
+  return req.ip || req.connection.remoteAddress;
+}
+
 function getUserAgentData(req) {
   const ua = req.headers["user-agent"] || "";
   const parsed = new UAParser(ua).getResult();
@@ -143,6 +196,7 @@ function getUserAgentData(req) {
     userAgent: ua,
   };
 }
+<<<<<<< HEAD
 
 
 function isValidEmail(email) {
@@ -216,6 +270,8 @@ async function isUserSessionValid(req) {
     };
   }
 }
+=======
+>>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
 
 function getDobRangeFromAges(minAge, maxAge) {
   const today = new Date();
@@ -235,17 +291,30 @@ function getDobRangeFromAges(minAge, maxAge) {
     maxDob: youngestDob,
   };
 }
-function normalizeParticipants(userIdA, userIdB) {
-  const id1 = Number(userIdA);
-  const id2 = Number(userIdB);
 
-  if (id1 === id2) {
-    throw new Error("Cannot create chat with the same user");
+function maskPhone(phone) {
+  if (!phone || phone.length < 4) return phone;
+
+  const str = phone.toString();
+  const first = str.slice(0, 2);
+  const last = str.slice(-1);
+
+  return `${first}${"*".repeat(str.length - 3)}${last}`;
+}
+
+function maskEmail(email) {
+  if (!email || !email.includes("@")) return email;
+
+  const [name, domain] = email.split("@");
+
+  if (domain.length <= 2) {
+    return `${name}@**`;
   }
 
-  return id1 < id2
-    ? { participant1Id: id1, participant2Id: id2 }
-    : { participant1Id: id2, participant2Id: id1 };
+  const firstChar = domain[0];
+  const lastChar = domain.slice(-1);
+
+  return `${name}@${"*".repeat(domain.length - 2)}${lastChar}`;
 }
 
 async function getOrCreateChatBetweenUsers(userIdA, userIdB, transaction) {
@@ -283,6 +352,7 @@ async function getOrCreateChatBetweenUsers(userIdA, userIdB, transaction) {
 
   return chat;
 }
+
 function validateCallParticipants(chat, callerId, receiverId) {
   const p1 = chat.participant_1_id;
   const p2 = chat.participant_2_id;
@@ -333,6 +403,7 @@ function randomFileName(ext = "webp") {
 module.exports = {
   getRealIp,
   getOption,
+<<<<<<< HEAD
   getOptionsByIds,
   generateUniqueUsername,
   generateOtp,
@@ -341,10 +412,20 @@ module.exports = {
   isValidEmail,
   isValidPhone,
   isUserSessionValid,
+=======
+  getLocation,
+  getUserAgentData,
+>>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
   getDobRangeFromAges,
   getOrCreateChatBetweenUsers,
   validateCallParticipants,
   calculateCallCost,
   typingTime,
+<<<<<<< HEAD
   randomFileName,
+=======
+  maskPhone,
+  maskEmail,
+  getOptionsByIds
+>>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
 };

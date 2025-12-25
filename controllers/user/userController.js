@@ -8,6 +8,8 @@ const {
   getOption,
   isUserSessionValid,
   getDobRangeFromAges,
+  maskEmail,
+  maskPhone
 } = require("../../utils/helper");
 const {
   fileUploader,
@@ -18,6 +20,7 @@ const {
 } = require("../../utils/helpers/fileUpload");
 const { Op, Sequelize } = require("sequelize");
 const { compressImage } = require("../../utils/helpers/imageCompressor");
+const { logActivity } = require("../../utils/helpers/activityLogHelper");
 
 async function updateUserProfile(req, res) {
   const transaction = await sequelize.transaction();
@@ -97,7 +100,7 @@ async function updateUserProfile(req, res) {
       abortEarly: true,
       stripUnknown: true,
     });
-
+  const changedFields = Object.keys(value || {});
     if (error) {
       await transaction.rollback();
       return res.status(400).json({
@@ -224,7 +227,19 @@ async function updateUserProfile(req, res) {
       created_at: user.created_at,
       updated_at: user.updated_at,
     };
-
+   try {
+      await logActivity(req, {
+        userId: user.id,
+        action: "profile update success",
+        entityType: "user",
+        entityId: user.id,
+        metadata: {
+          changed_fields: changedFields,
+        },
+      });
+    } catch (e) {
+      console.error("ActivityLog failed (ignored):", e?.message || e);
+    }
     return res.status(200).json({
       success: true,
       message: "Profile updated successfully.",
@@ -607,7 +622,6 @@ async function getPersonById(req, res) {
   const { id } = value;
 
   try {
-    //  Fetch BOT user by ID
     const botUser = await User.findOne({
       where: {
         id,
@@ -627,11 +641,15 @@ async function getPersonById(req, res) {
       });
     }
 
-    //  return full info
+    const personData = botUser.toJSON();
+    // mask sensitive fields
+    personData.email = maskEmail(personData.email);
+    personData.phone = maskPhone(personData.phone);
+
     return res.json({
       success: true,
-      message: " person fetched successfully.",
-      data: botUser,
+      message: "person fetched successfully.",
+      data: personData,
     });
   } catch (err) {
     console.error("error during getPersonById:", err);

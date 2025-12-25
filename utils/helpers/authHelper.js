@@ -10,7 +10,11 @@ const {
   getLocation,
 } = require("../helper");
 
+<<<<<<< HEAD
 // 1) Create user session
+=======
+// Create user session
+>>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
 async function handleUserSessionCreation(req, user, transaction = null) {
   const ip = getRealIp(req);
   const locationData = await getLocation(ip);
@@ -80,7 +84,7 @@ async function handleUserSessionCreation(req, user, transaction = null) {
   return { token, expiresAt };
 }
 
-// 2) Validate user session
+// Validate user session
 async function isUserSessionValid(req) {
   try {
     const authHeader = req.headers["authorization"];
@@ -139,25 +143,80 @@ async function isUserSessionValid(req) {
   }
 }
 
+<<<<<<< HEAD
 function generateRandomUsername() {
   const prefix = "user";
   const randomNum = Math.floor(100000 + Math.random() * 900000); // 6-digit random number
   return `${prefix}${randomNum}`;
+=======
+// Generate a random username
+async function generateUniqueUsername(base) {
+  const cleaned = (base || "user").toLowerCase().replace(/[^a-z0-9_.]/g, "");
+  let candidate =
+    cleaned.length >= 3
+      ? cleaned.slice(0, 30)
+      : `user${crypto.randomInt(1000, 9999)}`;
+  let i = 0;
+
+  while (true) {
+    const exists = await User.findOne({ where: { username: candidate } });
+    if (!exists) return candidate;
+    i += 1;
+    candidate = (cleaned || "user").slice(0, 24) + i;
+  }
+>>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
 }
 
 function generateRandomPassword(length = 10) {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$!&";
+<<<<<<< HEAD
   let pass = "";
   for (let i = 0; i < length; i++) {
     pass += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return pass;
+=======
+
+  const randomValues = new Uint32Array(length);
+  window.crypto.getRandomValues(randomValues);
+
+  let password = "";
+  for (let i = 0; i < length; i++) {
+    password += chars[randomValues[i] % chars.length];
+  }
+
+  return password;
+}
+
+function isValidEmail(email) {
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  return emailRegex.test(email); // Returns true if it's a valid email, false otherwise
+}
+
+function isValidPhone(phone) {
+  const phoneRegex = /^[0-9]{8,15}$/;
+  return phoneRegex.test(phone);
+}
+
+// Generate a random 6-digit OTP
+function generateOtp() {
+  const otp = crypto.randomInt(100000, 1000000); // Generates a number between 100000 and 999999
+  return otp.toString(); // Return the OTP as a string
+>>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
 }
 
 module.exports = {
   handleUserSessionCreation,
   isUserSessionValid,
+<<<<<<< HEAD
   generateRandomUsername,
   generateRandomPassword,
+=======
+  generateUniqueUsername,
+  generateRandomPassword,
+  isValidEmail,
+  isValidPhone,
+  generateOtp,
+>>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
 };
