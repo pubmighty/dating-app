@@ -14,7 +14,6 @@ const {
   verifyGooglePlayPurchase,
 } = require("../../controllers/user/googleBillingController");
 
-
 //options setting
 router.get("/setting", utilController.getAllOptions);
 
@@ -93,7 +92,7 @@ router.post(
 router.get("/media", mediaController.getMyMedia);
 router.post("/media/:id", mediaController.deleteMyMedia);
 
-//google billing 
+//google billing
 router.post("/billing/google-play/verify", verifyGooglePlayPurchase);
 
 module.exports = router;
