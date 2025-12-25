@@ -137,6 +137,33 @@ router.post("/reject", matchingController.rejectUser);
  */
 router.get("/matches", matchingController.getUserMatches);
 
+/**
+ * 1. /coins/packages
+ *    - Fetches available coin packages for purchase.
+ *    - By default returns only active packages.
+ *    - Supports optional filtering by:
+ *        • is_popular (popular packages)
+ *        • only_ads_free (packages that remove ads)
+ *    - Supports pagination with safe limits.
+ *    - Supports sorting by price, coins, popularity, display order, or creation date.
+ *    - Uses stable ordering to avoid duplicate/missing records during pagination.
+ *    - Designed for storefront-style listing (no user-specific data leakage).
+ */
+router.get("/coins/packages", coinController.getCoinPackages);
+
+/**
+ * 2. /coins/purchases
+ *    - Fetches coin purchase history for the logged-in user.
+ *    - Returns only purchases belonging to the authenticated user.
+ *    - Supports optional filtering by purchase status
+ *      (pending, completed, failed, refunded).
+ *    - Supports pagination and safe sorting.
+ *    - Joins coin package metadata in a single query (no N+1 queries).
+ *    - Preserves history even if a coin package is later deleted.
+ *    - Returns consistent pagination metadata for client-side rendering.
+ */
+router.get("/coins/purchases", coinController.getUserCoinPurchases);
+
 //chatting between user1 & user2
 router.post(
   "/chats/:chatId/messages",
@@ -150,10 +177,6 @@ router.post("/chats/pin", chatController.pinChats);
 router.post("/chats/:chatId/block", chatController.blockChat);
 router.post("/chats/:chatId/read", chatController.markChatMessagesRead);
 router.post("/chats/delete", chatController.deleteChat);
-
-//coin
-router.get("/coins/purchases", coinController.getUserCoinPurchases);
-router.get("/coin-packages", userController.getPackages);
 
 //user + bot
 router.get("/persons", userController.getAllPersons);
