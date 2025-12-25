@@ -9,88 +9,6 @@ const UAParser = require("ua-parser-js");
 let lookup;
 const dbPath = path.join(__dirname, "/ip-db/GeoLite2-City.mmdb");
 
-<<<<<<< HEAD
-
-function generateOtp() {
-  // Generate a random 6-digit OTP
-  const otp = crypto.randomInt(100000, 1000000); // Generates a number between 100000 and 999999
-  return otp.toString(); // Return the OTP as a string
-}
-
-async function generateUniqueUsername(base) {
-  const cleaned = (base || "user").toLowerCase().replace(/[^a-z0-9_.]/g, "");
-  let candidate =
-    cleaned.length >= 3
-      ? cleaned.slice(0, 30)
-      : `user${crypto.randomInt(1000, 9999)}`;
-  let i = 0;
-
-  while (true) {
-    const exists = await User.findOne({ where: { username: candidate } });
-    if (!exists) return candidate;
-    i += 1;
-    candidate = (cleaned || "user").slice(0, 24) + i;
-  }
-}
-
-/**
- * Fetches a single option by name.
- * @param {string} optionName - Name of the option.
- * @returns {Promise<string>} - Returns the option value.
- */
-async function getOption(optionName, dValue = null) {
-  try {
-    const option = await Option.findOne({ where: { name: optionName } });
-
-    if (!option) {
-      // no row => use default
-      return dValue;
-    }
-
-    const raw = option.value;
-
-    // if value is null/empty, fallback
-    if (raw === null || raw === undefined || raw === "") {
-      return dValue;
-    }
-
-    return raw; // IMPORTANT: return DB value
-  } catch (error) {
-    console.error("Error fetching option:", error);
-    return dValue;
-  }
-}
-
-/**
- * Fetches multiple options by their IDs.
- * @param {Array<number>} ids - List of option IDs to fetch.
- * @returns {Promise<Array>} - Returns the options as an array.
- */
-const getOptionsByIds = async (ids) => {
-  return await Option.findAll({
-    where: { id: { [Op.in]: ids } },
-    attributes: ["id", "name", "value"],
-  });
-};
-
-function getRealIp(req) {
-  // Check for Cloudflare's header first
-  const cfIp = req.headers["cf-connecting-ip"];
-  if (cfIp) return cfIp;
-
-  // Check for X-Forwarded-For header (usually used by proxies)
-  const forwardedIps = req.headers["x-forwarded-for"];
-  if (forwardedIps) {
-    const ips = forwardedIps.split(",");
-    return ips[0].trim(); // Return the first IP in the list
-  }
-
-  // Fallback to req.ip, which is the IP of the client directly connected to the server
-  return req.ip || req.connection.remoteAddress;
-}
-
-=======
->>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
 async function getLocation(ip) {
   if (!lookup) {
     try {
@@ -196,82 +114,6 @@ function getUserAgentData(req) {
     userAgent: ua,
   };
 }
-<<<<<<< HEAD
-
-
-function isValidEmail(email) {
-  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-  return emailRegex.test(email); // Returns true if it's a valid email, false otherwise
-}
-function isValidPhone(phone) {
-  const phoneRegex = /^[0-9]{8,15}$/;
-  return phoneRegex.test(phone);
-}
-
-async function isUserSessionValid(req) {
-  try {
-    const authHeader = req.headers["authorization"];
-    if (!authHeader?.startsWith("Bearer ")) {
-      return {
-        success: false,
-        message: "Missing or invalid Authorization header",
-        data: null,
-      };
-    }
-
-    const token = authHeader.split(" ")[1];
-    const session = await UserSession.findOne({
-      where: { session_token: token, status: 1 }, // correct column + numeric
-    });
-
-    if (!session) {
-      return { success: false, message: "Invalid session", data: null };
-    }
-
-    const now = new Date();
-    if (session.expiresAt && session.expiresAt < now) {
-      await session.update({ status: 2 }); // 2 = inactive/expired
-      return { success: false, message: "Session expired", data: null };
-    }
-    const SLIDING_IDLE_SEC =
-      parseInt(
-        await getOption("min_time_to_update_last_activity_at_minute", 30)
-      ) *
-      60 *
-      1000; // Convert to milliseconds
-
-    // Sliding idle TTL
-    if (SLIDING_IDLE_SEC > 0) {
-      const lastActivityAt = session.lastActivityAt;
-      if (lastActivityAt) {
-        const timeDifference = now - new Date(lastActivityAt);
-
-        if (timeDifference >= SLIDING_IDLE_SEC) {
-          // If 30 minutes have passed, update lastActivityAt
-          await session.update({ lastActivityAt: now });
-          console.log("Updated lastActivityAt to current time.");
-        }
-      } else {
-        await session.update({ lastActivityAt: now });
-      }
-    }
-
-    return {
-      success: true,
-      message: "Sesssion is valid",
-      data: session.user_id,
-    };
-  } catch (err) {
-    console.error("Auth error:", err);
-    return {
-      success: false,
-      message: "Server error during auth",
-      data: null,
-    };
-  }
-}
-=======
->>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
 
 function getDobRangeFromAges(minAge, maxAge) {
   const today = new Date();
@@ -403,29 +245,15 @@ function randomFileName(ext = "webp") {
 module.exports = {
   getRealIp,
   getOption,
-<<<<<<< HEAD
   getOptionsByIds,
-  generateUniqueUsername,
-  generateOtp,
   getLocation,
   getUserAgentData,
-  isValidEmail,
-  isValidPhone,
-  isUserSessionValid,
-=======
-  getLocation,
-  getUserAgentData,
->>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
   getDobRangeFromAges,
   getOrCreateChatBetweenUsers,
   validateCallParticipants,
   calculateCallCost,
   typingTime,
-<<<<<<< HEAD
   randomFileName,
-=======
   maskPhone,
   maskEmail,
-  getOptionsByIds
->>>>>>> 41da8d7b0d08c1a11965b9e06f9990888ad9df9b
 };

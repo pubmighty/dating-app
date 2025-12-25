@@ -104,6 +104,14 @@ router.post("/forgot-password", authController.forgotPassword);
 */
 router.post("/forgot-password/verify", authController.forgotPasswordVerify);
 
+
+//user interaction {like, reject, match}
+router.post("/like", matchingController.likeUser);
+router.post("/reject", matchingController.rejectUser);
+router.post("/match", matchingController.matchUser);
+router.get("/matches", matchingController.getUserMatches);
+
+
 //chatting between user1 & user2
 router.post(
   "/chats/:chatId/messages",
@@ -118,11 +126,6 @@ router.post("/chats/:chatId/block", chatController.blockChat);
 router.post("/chats/:chatId/read", chatController.markChatMessagesRead);
 router.post("/chats/delete", chatController.deleteChat);
 
-//user interaction {like, reject, match}
-router.post("/like", matchingController.likeUser);
-router.post("/reject", matchingController.rejectUser);
-router.post("/match", matchingController.matchUser);
-router.get("/matches", matchingController.getUserMatches);
 
 //coin
 router.get("/coins/purchases", coinController.getUserCoinPurchases);

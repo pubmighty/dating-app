@@ -11,6 +11,7 @@ const {
   generateRandomPassword,
   isValidEmail,
   isValidPhone,
+  generateOtp,
 } = require("../../utils/helpers/authHelper");
 const {
   downloadAndUploadGoogleAvatar,
