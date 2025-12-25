@@ -33,10 +33,7 @@ const Message = sequelize.define(
       type: DataTypes.ENUM("text", "image", "video", "audio", "file"),
       defaultValue: "text",
     },
-    media_url: {
-      type: DataTypes.STRING(255),
-      allowNull: true,
-    },
+
     is_paid: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
