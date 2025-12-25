@@ -9,7 +9,6 @@ const MessageFile = require("../../models/MessageFile");
 const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
 const { generateBotReplyForChat } = require("../../utils/helpers/aiHelper");
 const {
-  isUserSessionValid,
   getOption,
   typingTime,
 } = require("../../utils/helper");
@@ -19,6 +18,7 @@ const {
   cleanupTempFiles,
 } = require("../../utils/helpers/fileUpload");
 const { moveUploadedFile } = require("../../utils/helpers/mediaHelper");
+const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 
 const { compressImage } = require("../../utils/helpers/imageCompressor");
 

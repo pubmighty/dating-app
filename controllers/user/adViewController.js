@@ -5,7 +5,8 @@ const sequelize = require("../../config/db");
 const AdView = require("../../models/AdView");
 const User = require("../../models/User")
 const Option = require("../../models/Option");
-const { getRealIp, isUserSessionValid, getOption, getLocation} = require("../../utils/helper");
+const { getRealIp, getOption, getLocation} = require("../../utils/helper");
+const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 
 
 function getTodayRange() {

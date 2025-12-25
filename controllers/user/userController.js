@@ -6,7 +6,6 @@ const UserSetting = require("../../models/UserSetting");
 const UserInteraction = require("../../models/UserInteraction");
 const {
   getOption,
-  isUserSessionValid,
   getDobRangeFromAges,
   maskEmail,
   maskPhone
@@ -21,6 +20,7 @@ const {
 const { Op, Sequelize } = require("sequelize");
 const { compressImage } = require("../../utils/helpers/imageCompressor");
 const { logActivity } = require("../../utils/helpers/activityLogHelper");
+const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 
 async function updateUserProfile(req, res) {
   const transaction = await sequelize.transaction();

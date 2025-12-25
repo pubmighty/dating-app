@@ -7,7 +7,7 @@ const Message = require("../../models/Message");
 const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
 const CoinPurchaseTransaction = require("../../models/CoinPurchaseTransaction");
 const CoinPackage = require("../../models/CoinPackage");
-const { isUserSessionValid, getOption } = require("../../utils/helper");
+const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 
 async function getUserCoinPurchases(req, res) {
   try {

@@ -5,10 +5,10 @@ const User = require("../../models/User");
 const UserInteraction = require("../../models/UserInteraction");
 const {
   getOption,
-  isUserSessionValid,
   getOrCreateChatBetweenUsers,
 } = require("../../utils/helper");
 const Chats = require("../../models/Chat");
+const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 
 async function likeUser(req, res) {
   const transaction = await sequelize.transaction();

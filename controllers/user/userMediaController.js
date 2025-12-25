@@ -3,12 +3,12 @@ const Joi = require("joi");
 
 const User = require("../../models/User");
 const UserMedia = require("../../models/UserMedia");
-const { isUserSessionValid } = require("../../utils/helper"); // adjust path if needed
 const {
   uploadProfileMedia,
   deleteProfileMediaFile,
   buildProfileMediaUrl,
 } = require("../../utils/helpers/mediaHelper");
+const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 
 async function uploadUserMedia(req, res) {
   try {

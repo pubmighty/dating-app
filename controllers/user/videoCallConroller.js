@@ -7,8 +7,8 @@ const User = require("../../models/User");
 const Message = require("../../models/Message"); // for transactions
 const VideoCall = require("../../models/VideoCall");
 const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
-
-const { isUserSessionValid, getOption } = require("../../utils/helper");
+const { isUserSessionValid } = require("../../utils/helpers/authHelper");
+const { getOption } = require("../../utils/helper");
 
 // small helper
 function now() {

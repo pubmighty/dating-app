@@ -3,8 +3,8 @@ const sequelize = require("../../config/db");
 const User = require("../../models/User");
 const CoinPackage = require("../../models/CoinPackage");
 const CoinPurchaseTransaction = require("../../models/CoinPurchaseTransaction");
-const { isUserSessionValid } = require("../../utils/helper");
 const { verifyInAppPurchase } = require("../../utils/helpers/googlePlayClient");
+const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 
 async function verifyGooglePlayPurchase(req, res) {
   const t = await sequelize.transaction();
