@@ -1,3 +1,4 @@
+const { Op } = require("sequelize");
 const Chat = require("../../models/Chat");
 const User = require("../../models/User");
 

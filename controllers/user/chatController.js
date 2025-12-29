@@ -1189,7 +1189,7 @@ async function getUserChats(req, res) {
       include: [
         {
           model: User,
-          as: "p1", // bot user
+          as: "participant1", // bot user
           attributes: [
             "id",
             "username",
@@ -1223,7 +1223,7 @@ async function getUserChats(req, res) {
 
     const chatList = rows.map((chat) => {
       const isP1 = chat.participant_1_id === userId;
-      const otherUser = isP1 ? chat.p2 : chat.p1;
+      const otherUser = isP1 ? chat.participant2 : chat.participant1;
 
       const isPinned = isP1 ? chat.is_pin_p1 : chat.is_pin_p2;
       const unread = isP1 ? chat.unread_count_p1 : chat.unread_count_p2;

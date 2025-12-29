@@ -203,7 +203,7 @@ async function likeUser(req, res) {
 
     return res.status(200).json({
       success: true,
-      message: isBot ? "You got matched!" : "Liked successfully.",
+      message: isTargetBot ? "You got matched!" : "Liked successfully.",
       data: {
         target_user_id: targetUserId,
         target_type: targetUser.type,
