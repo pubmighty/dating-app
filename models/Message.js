@@ -5,7 +5,7 @@ const Message = sequelize.define(
   "Message",
   {
     id: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.BIGINT.UNSIGNED,
       autoIncrement: true,
       primaryKey: true,
     },
@@ -25,7 +25,7 @@ const Message = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: true,
     },
-    reply_id: {
+    reply_to_message_id: {
       type: DataTypes.INTEGER,
       allowNull: true,
     },
