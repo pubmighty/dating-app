@@ -276,6 +276,24 @@ function getUtcDayRange(date = new Date()) {
   return { start, end };
 }
 
+function toInt(v, fallback) {
+  const n = Number.parseInt(String(v ?? ""), 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clampInt(v, min, max, fallback=0) {
+  const n = toInt(v, fallback);
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
+}
+
+// integer ceil division: ceil(a / b) for positive ints
+function ceilDiv(a, b) {
+  const A = clampInt(a, 0);
+  const B = clampInt(b, 1);
+  return Math.floor((A + B - 1) / B); // all int math
+}
 
 module.exports = {
   getRealIp,
@@ -299,4 +317,7 @@ module.exports = {
   normalizeText,
   getIdempotencyKey,
   getUtcDayRange,
+  toInt,
+  ceilDiv,
+  clampInt,
 };

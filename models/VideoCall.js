@@ -59,7 +59,6 @@ const VideoCall = sequelize.define(
       defaultValue: 0,
     },
 
-
     started_at: {
       type: DataTypes.DATE,
       allowNull: true,
@@ -80,6 +79,16 @@ const VideoCall = sequelize.define(
     tableName: "pb_video_calls",
     timestamps: false,
     underscored: true,
+    indexes: [
+      {
+        name: "idx_type_receiver_id",
+        fields: ["receiver_id"],
+      },
+      {
+        name: "idx_type_caller_id",
+        fields: ["caller_id"],
+      },
+    ],
   }
 );
 

@@ -531,19 +531,200 @@ router.get("/ads/status", adsController.getAdStatus);
  */
 router.post("/ads/complete", adsController.completeAdView);
 
-//video call
+/**
+ * POST /chats/:chatId/video-calls/initiate/bot
+ * ------------------------------------------------------------
+ * Initiates a video or audio call from a bot user to
+ * the authenticated user within an existing chat.
+ *
+ * Purpose:
+ * - Allows system-controlled or AI bot users to initiate
+ *   a call toward a real user.
+ * - Used for bot interactions, AI assistants, or system calls.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated session.
+ * - The authenticated user must be participant_2 (P2) of :chatId.
+ * - participant_1 (P1) is assumed to be a bot user
+ *   (server-enforced via chat relationship).
+ *
+ * Behavior:
+ * - Creates a new VideoCall record with:
+ *   - caller_id = bot user (P1)
+ *   - receiver_id = authenticated user (P2)
+ * - Does NOT deduct any coins from either side.
+ * - Prevents multiple active calls for the same chat.
+ *
+ * Notes:
+ * - Coin charging is intentionally skipped for bot calls.
+ * - Active call states are enforced server-side.
+ */
+router.post(
+  "/chats/:chatId/video-calls/initiate/bot",
+  videoCallConroller.initiateVideoCallByBot
+);
+
+/**
+ * POST /chats/:chatId/video-calls/initiate
+ * ------------------------------------------------------------
+ * Initiates a video or audio call between two chat participants.
+ *
+ * Purpose:
+ * - Starts a user-to-user video/audio call.
+ * - Reserves the call session before it is answered.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated session.
+ * - The authenticated user must be a participant of :chatId.
+ *
+ * Billing & Coins:
+ * - Pre-charges the first minute of the call from the caller.
+ * - Ensures the caller has at least the minimum required balance.
+ * - Coin deduction is atomic and transaction-safe.
+ *
+ * Behavior:
+ * - Prevents multiple simultaneous active calls in the same chat.
+ * - Creates a VideoCall record with status = "initiated".
+ * - Stores prepaid coin amount in `coins_charged`.
+ *
+ * Notes:
+ * - Additional minutes are charged when the call ends.
+ * - All billing uses integer-only calculations (no decimals).
+ */
 router.post(
   "/chats/:chatId/video-calls/initiate",
   videoCallConroller.initiateVideoCall
 );
-router.post("/video-calls/:callId/accept", videoCallConroller.acceptVideoCall);
-router.post("/video-calls/:callId/reject", videoCallConroller.rejectVideoCall);
-router.post("/video-calls/:callId/end", videoCallConroller.endVideoCall);
+
+/**
+ * GET /video-calls
+ * ------------------------------------------------------------
+ * Fetches paginated video/audio call history for the
+ * authenticated user.
+ *
+ * Purpose:
+ * - Allows users to view their past calls.
+ * - Supports incoming, outgoing, or all calls.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated session.
+ * - Only returns calls where the user is caller or receiver.
+ *
+ * Query Parameters:
+ * - page (optional): Page number (default: 1).
+ * - limit (optional): Results per page (default: 20, max capped).
+ * - type (optional):
+ *   - "incoming" → calls received by user
+ *   - "outgoing" → calls initiated by user
+ *   - "all" → both
+ *
+ * Behavior:
+ * - Results are ordered by creation time (latest first).
+ * - Pagination is enforced server-side to protect performance.
+ *
+ * Notes:
+ * - Returns minimal fields required for history listing.
+ * - Designed for scale with proper indexing.
+ */
 router.get(
-  "/video-calls/:callId/status",
-  videoCallConroller.getVideoCallStatus
+  "/video-calls",
+  videoCallConroller.getVideoCallHistory
 );
-router.get("/video-calls", videoCallConroller.getVideoCallHistory);
+
+/**
+ * POST /video-calls/:callId/accept
+ * ------------------------------------------------------------
+ * Accepts an incoming video or audio call.
+ *
+ * Purpose:
+ * - Allows the receiver of a call to accept it.
+ * - Transitions the call into an active/connected state.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated session.
+ * - Only the receiver of :callId is allowed to accept the call.
+ *
+ * Behavior:
+ * - Valid only when call status is "initiated" or "ringing".
+ * - Updates call status to "answered".
+ * - Sets `started_at` timestamp.
+ * - Generates SDK room ID if not already present.
+ *
+ * Billing:
+ * - No coins are deducted during acceptance.
+ * - Billing is handled during initiation and finalization.
+ *
+ * Idempotency:
+ * - If the call is already accepted, returns success without changes.
+ */
+router.post(
+  "/video-calls/:callId/accept",
+  videoCallConroller.acceptVideoCall
+);
+
+/**
+ * POST /video-calls/:callId/reject
+ * ------------------------------------------------------------
+ * Rejects an incoming video or audio call.
+ *
+ * Purpose:
+ * - Allows the receiver to decline a call before it is answered.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated session.
+ * - Only the receiver of :callId is allowed to reject the call.
+ *
+ * Behavior:
+ * - Valid only when call status is "initiated" or "ringing".
+ * - Updates call status to "rejected".
+ * - Sets `ended_at` timestamp and end_reason.
+ *
+ * Idempotency:
+ * - If the call is already rejected, returns success safely.
+ *
+ * Notes:
+ * - No coin refund logic is applied here by default.
+ * - Refund behavior (if required) must be handled explicitly.
+ */
+router.post(
+  "/video-calls/:callId/reject",
+  videoCallConroller.rejectVideoCall
+);
+/**
+ * POST /video-calls/:callId/end
+ * ------------------------------------------------------------
+ * Ends an active or pending video/audio call.
+ *
+ * Purpose:
+ * - Finalizes the call lifecycle.
+ * - Calculates duration and performs final billing.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated session.
+ * - Either caller or receiver of :callId may end the call.
+ *
+ * Billing Logic:
+ * - First minute is already prepaid during initiation.
+ * - Calculates total call duration in seconds.
+ * - Bills additional minutes (integer-only) beyond the prepaid minute.
+ * - Deducts remaining coins from the caller atomically.
+ *
+ * Behavior:
+ * - Updates call status to "ended".
+ * - Stores duration, total coins charged, and end timestamp.
+ *
+ * Idempotency:
+ * - If the call is already ended, returns existing final state.
+ *
+ * Notes:
+ * - No floating-point arithmetic is used in billing.
+ * - Designed to be race-condition safe under concurrent requests.
+ */
+router.post(
+  "/video-calls/:callId/end",
+  videoCallConroller.endVideoCall
+);
+
 
 //google billing
 router.post("/billing/google-play/verify", verifyGooglePlayPurchase);

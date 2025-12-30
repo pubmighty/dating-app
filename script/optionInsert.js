@@ -33,6 +33,12 @@ async function run() {
     await set("max_chat_files_per_message", 1);
     await set("max_pinned_chats", 10);
 
+    await set("max_daily_ad_views", 1);
+    await set("ad_reward_coins", 10);
+
+    await set("video_call_cost_per_minute", 50);
+    await set("video_call_minimum_start_balance", 50);
+
     console.log("Options inserted/verified");
     process.exit(0);
   } catch (e) {

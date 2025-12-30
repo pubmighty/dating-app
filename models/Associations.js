@@ -7,6 +7,7 @@ const CoinPurchaseTransaction = require("./CoinPurchaseTransaction");
 const UserMedia = require("./UserMedia");
 const ActivityLog = require("./ActivityLog");
 const MessageFile = require("./MessageFile");
+const VideoCall = require("./VideoCall");
 
 function setupAssociations() {
   User.hasMany(UserInteraction, {
@@ -130,6 +131,19 @@ function setupAssociations() {
   User.hasMany(ActivityLog, {
     foreignKey: "user_id",
     as: "activity_logs",
+  });
+
+  VideoCall.belongsTo(User, {
+    foreignKey: "caller_id",
+    as: "caller",
+  });
+  VideoCall.belongsTo(User, {
+    foreignKey: "receiver_id",
+    as: "receiver",
+  });
+  VideoCall.belongsTo(Chat, {
+    foreignKey: "chat_id",
+    as: "chat",
   });
 }
 
