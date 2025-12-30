@@ -415,7 +415,7 @@ async function sendMessage(req, res) {
 
           // Upload file (with message reference for tracking)
           const storedFile = await uploadFile(
-            file.path,
+            file,
             destFolder,
             detected.ext,
             uploader_ip,

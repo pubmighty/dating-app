@@ -17,7 +17,7 @@ const fileUploader = multer({
   storage: multer.diskStorage({
     destination: function (req, file, cb) {
       // ../tmp (sibling of public)
-      const tmpDir = path.join(__dirname, "..", "tmp");
+      const tmpDir = path.join(__dirname, "../../", "tmp");
       try {
         fs.mkdirSync(tmpDir, { recursive: true });
       } catch (e) {
@@ -38,7 +38,7 @@ async function uploadImage(file, folder) {
 
   // Unique safe name
   const filename = `PM-${Date.now()}-${Math.round(Math.random() * 1e9)}.webp`;
-  const uploadPath = path.resolve(__dirname, "..", "public", folder, filename);
+  const uploadPath = path.resolve(__dirname, "../../", "public", folder, filename);
 
   try {
     // Ensure directory exists
@@ -163,7 +163,7 @@ async function uploadFile(
   if (!file || !file.path) throw new Error("Missing file");
 
   const tempPath = path.resolve(file.path);
-  const publicDir = path.resolve(__dirname, "..", "public");
+  const publicDir = path.resolve(__dirname, "../../", "public");
   const destDir = path.join(publicDir, folder || "");
   await fs.ensureDir(destDir);
 
@@ -384,7 +384,7 @@ async function deleteFile(fileName, folder, id = null, recordType = "chat") {
     if (!fileName || !folder) return false;
 
     // Full absolute path to file
-    const filePath = path.resolve(__dirname, "..", "public", folder, fileName);
+    const filePath = path.resolve(__dirname, "../../", "public", folder, fileName);
 
     // Check existence
     const exists = await fs.pathExists(filePath);
@@ -430,7 +430,7 @@ async function deleteFolderRecursive(folderRelative) {
     if (!folderRelative || typeof folderRelative !== "string") return false;
 
     // Normalize and construct absolute path under /public
-    const publicRoot = path.resolve(__dirname, "..", "public");
+    const publicRoot = path.resolve(__dirname, "../../", "public");
     const targetPath = path.resolve(publicRoot, folderRelative);
 
     // Safety: ensure targetPath stays within /public (prevent ../ traversal)
@@ -484,7 +484,7 @@ async function verifyFileType(
     }
 
     // Correct temp path relative to utils/fileUpload.js
-    const tempBase = path.resolve(__dirname, "..", "tmp");
+    const tempBase = path.resolve(__dirname, "../../", "tmp");
     const resolvedPath = path.resolve(file.path);
 
     // Ensure file is inside /tmp (defend against traversal/prefix tricks)
@@ -564,7 +564,7 @@ async function safeRemove(tempPath) {
   // 2) Fallback: move to /deleted-files
   try {
     const baseDir = path.dirname(tempPath);
-    const deletedDir = path.join(baseDir, "..", "deleted-files");
+    const deletedDir = path.join(baseDir, "../../", "deleted-files");
     await fs.ensureDir(deletedDir);
 
     const fileName = path.basename(tempPath);

@@ -57,6 +57,23 @@ const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
       "You make this chat more fun!",
     ];
 
+    // Centralized allowlist (kept in code, not ENUM)
+const ALLOWED_EXTS = [
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "csv",
+  "txt",
+  "rtf",
+];
+
 module.exports = {
     publicFeedUserAttributes,
     publicUserAttributes,
@@ -64,4 +81,5 @@ module.exports = {
     MAX_AVATAR_BYTES,
     ALLOWED_MIME,
     fallbackMessages,
+    ALLOWED_EXTS
 }

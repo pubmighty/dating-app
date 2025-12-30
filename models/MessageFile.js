@@ -1,5 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db");
+const { ALLOWED_EXTS } = require("../utils/staticValues");
 
 const MessageFile = sequelize.define(
   "MessageFile",

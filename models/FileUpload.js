@@ -1,22 +1,8 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db");
+const { ALLOWED_EXTS } = require("../utils/staticValues");
 
-// Centralized allowlist (kept in code, not ENUM)
-const ALLOWED_EXTS = [
-  "png",
-  "jpg",
-  "jpeg",
-  "webp",
-  "gif",
-  "pdf",
-  "doc",
-  "docx",
-  "xls",
-  "xlsx",
-  "csv",
-  "txt",
-  "rtf",
-];
+
 
 const FileUpload = sequelize.define(
   "FileUpload",
