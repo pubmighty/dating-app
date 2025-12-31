@@ -2,6 +2,7 @@
 const { Op } = require("sequelize");
 const crypto = require("crypto");
 
+const AdminSession = require("../../models/Admin/AdminSession");
 const UserSession = require("../../models/UserSession");
 const {
   getOption,
@@ -202,7 +203,162 @@ function generateOtp() {
   const otp = crypto.randomInt(100000, 1000000); // Generates a number between 100000 and 999999
   return otp.toString(); // Return the OTP as a string
 }
+async function isAdminSessionValid(req) {
+  try {
+    const authHeader = req.headers["authorization"];
+    if (!authHeader?.startsWith("Bearer")) {
+      return {
+        success: false,
+        message: "Missing or invalid Authorization header",
+        data: null,
+      };
+    }
 
+    const token = authHeader.split(" ")[1];
+
+    const session = await AdminSession.findOne({
+      where: { session_token: token, status: 1 },
+    });
+
+    if (!session) {
+      return { success: false, message: "Invalid session", data: null };
+    }
+
+    const now = new Date();
+    if (session.expiresAt && session.expiresAt < now) {
+      await session.update({ status: 2 });
+      return { success: false, message: "Session expired", data: null };
+    }
+    const SLIDING_IDLE_SEC =
+      parseInt(await getOption("admin_min_update_interval", 30)) * 60 * 1000; // Convert to milliseconds
+
+    // Sliding idle TTL
+    if (SLIDING_IDLE_SEC > 0) {
+      const lastActivityAt = session.lastActivityAt;
+      if (lastActivityAt) {
+        const timeDifference = now - new Date(lastActivityAt);
+
+        if (timeDifference >= SLIDING_IDLE_SEC) {
+          // If 30 minutes have passed, update lastActivityAt
+          await session.update({ lastActivityAt: now });
+          console.log("Updated lastActivityAt to current time.");
+        }
+      } else {
+        await session.update({ lastActivityAt: now });
+      }
+    }
+
+    return {
+      success: true,
+      message: "Sesssion is valid",
+      data: session.admin_id,
+    };
+  } catch (err) {
+    console.error("Auth error:", err);
+    return {
+      success: false,
+      message: "Server error during auth",
+      data: null,
+    };
+  }
+}
+
+async function handleAdminSessionCreation(user, req, transaction = null) {
+  // 1. gather context
+  const ip = getRealIp(req);
+  const locationData = await getLocation(ip);
+  const userAgentData = await getUserAgentData(req);
+
+  // options (your getOption currently always returns default, but that's fine)
+  const maxSessionDays = parseInt(
+    await getOption("max_admin_session_duration_days", 7),
+    10
+  );
+  const maxSessionSeconds = maxSessionDays * 24 * 3600;
+
+  const token = crypto.randomBytes(32).toString("base64url");
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + maxSessionSeconds * 1000);
+
+  // 2. mark already-expired active sessions for THIS admin as inactive
+  await AdminSession.update(
+    { status: 2 },
+    {
+      where: {
+        admin_id: user.id, // <-- was userId
+        status: 1,
+        expiresAt: { [Op.lt]: now },
+      },
+      transaction,
+    }
+  );
+
+  // 3. count current sessions for this admin
+  const activeCount = await AdminSession.count({
+    where: { admin_id: user.id },
+    transaction,
+  });
+
+  const maxUserSessions = parseInt(
+    await getOption("max_admin_sessions", 4),
+    10
+  );
+
+  // common payload for create/update
+  const sessionPayload = {
+    admin_id: user.id,
+    session_token: token,
+    ip: ip,
+    userAgent: userAgentData.userAgent,
+    country: locationData.countryCode,
+    os: userAgentData.os,
+    browser: userAgentData.browser,
+    status: 1,
+    expiresAt: expiresAt,
+  };
+
+  if (activeCount < maxUserSessions) {
+    // 4a. create new session
+    await AdminSession.create(sessionPayload, { transaction });
+    return { token, expiresAt };
+  }
+
+  // 4b. otherwise reuse oldest
+  const oldestActive = await AdminSession.findOne({
+    where: { admin_id: user.id },
+    order: [["expiresAt", "ASC"]],
+    transaction,
+  });
+
+  if (!oldestActive) {
+    // fallback: create
+    await AdminSession.create(sessionPayload, { transaction });
+    return { token, expiresAt };
+  }
+
+  await oldestActive.update(sessionPayload, { transaction });
+  return { token, expiresAt };
+}
+
+// Helper function to detect suspicious login
+async function detectSuspiciousAdminLogin(user, req) {
+  const userAgent = req.headers["user-agent"] || "Unknown";
+  const locationData = await getLocation(getRealIp(req));
+  const location_city = locationData.city;
+  const location_country = locationData.country;
+
+  const oldSession = await AdminSession.findOne({
+    where: {
+      admin_id: user.id,
+      status: 1,
+      user_agent: userAgent,
+      country: location_city,
+    },
+    order: [["created_at", "DESC"]],
+  });
+
+  return !oldSession; // If no old session found, it's suspicious
+}
 module.exports = {
   handleUserSessionCreation,
   isUserSessionValid,
@@ -211,4 +367,7 @@ module.exports = {
   isValidEmail,
   isValidPhone,
   generateOtp,
+  isAdminSessionValid,
+  handleAdminSessionCreation,
+  detectSuspiciousAdminLogin,
 };
