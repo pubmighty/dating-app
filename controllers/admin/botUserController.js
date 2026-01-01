@@ -1,14 +1,15 @@
 const Joi = require("joi");
 const sequelize = require("../../config/db");
 const bcrypt = require("bcryptjs");
-
+const FileUpload = require("../../models/FileUpload");
 const User = require("../../models/User");
 const UserSetting = require("../../models/UserSetting");
-
-const { getRealIp, normalizeInterests } = require("../../utils/helper");
+const {  cleanupTempFiles, verifyFileType,uploadFile, deleteFile  } = require("../../utils/helpers/fileUpload");
+const { getOption } = require("../../utils/helper"); 
+const { getRealIp,normalizeFiles } = require("../../utils/helper");
 const { logActivity } = require("../../utils/helpers/activityLogHelper");
 const { publicUserAttributes, BCRYPT_ROUNDS } = require("../../utils/staticValues");
-const { isAdminSessionValid } = require("../../utils/helpers/authHelper");
+const { isAdminSessionValid,generateUniqueUsername } = require("../../utils/helpers/authHelper");
 async function addBotUser(req, res) {
   try {
     const adminSession = await isAdminSessionValid(req);
@@ -19,6 +20,27 @@ async function addBotUser(req, res) {
       return res.status(401).json({ success: false, message: "Invalid admin session" });
     }
 
+    // 1) If file exists, process BEFORE Joi validation
+    let uploadedAvatar = null;
+    if (req.file) {
+      const isFileGood = await verifyFileType(req.file, [
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+      ]);
+
+      if (!isFileGood) {
+        return res.status(400).json({ success: false, message: "Invalid file type", data: null });
+      }
+
+      const result = await uploadImage(req.file, "uploads/avatar/user");
+      uploadedAvatar = result || null;
+    }
+
+    // 2) Joi schema (add avatar optional)
     const schema = Joi.object({
       username: Joi.string().trim().min(3).max(40).pattern(/^[a-zA-Z0-9._-]+$/).optional(),
       email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).optional().allow(null, ""),
@@ -32,8 +54,10 @@ async function addBotUser(req, res) {
         .pattern(/[0-9]/)
         .required(),
 
-      gender: Joi.string().valid("male", "female", "other", "prefer_not_to_say").required(),
+      // NEW: avatar (from uploadImage result)
+      avatar: Joi.string().trim().max(500).optional().allow(null, ""),
 
+      gender: Joi.string().valid("male", "female", "other", "prefer_not_to_say").required(),
       city: Joi.string().trim().max(100).required(),
       state: Joi.string().trim().max(100).required(),
       country: Joi.string().trim().max(100).required(),
@@ -64,7 +88,13 @@ async function addBotUser(req, res) {
         .required(),
     }).required();
 
-    const { error, value } = schema.validate(req.body, {
+    // Merge avatar from upload (server-trusted) over body (client-controlled)
+    const payload = {
+      ...req.body,
+      ...(uploadedAvatar ? { avatar: uploadedAvatar } : {}),
+    };
+
+    const { error, value } = schema.validate(payload, {
       abortEarly: true,
       stripUnknown: true,
       convert: true,
@@ -89,40 +119,14 @@ async function addBotUser(req, res) {
         ? String(value.phone_number).trim()
         : null;
 
-    //  bot must have complete profile
-    const requiredBotFields = [
-      "gender",
-      "dob",
-      "bio",
-      "city",
-      "state",
-      "country",
-      "looking_for",
-      "height",
-      "education",
-      "interests",
-    ];
-
-    const missing = requiredBotFields.filter((k) => {
-      const val = value[k];
-      if (val === undefined || val === null) return true;
-      if (typeof val === "string" && val.trim() === "") return true;
-      if (Array.isArray(val) && val.length === 0) return true;
-      return false;
-    });
-
-    if (missing.length) {
-      return res.status(400).json({
-        success: false,
-        message: `Bot profile incomplete. Missing: ${missing.join(", ")}`,
-        data: null,
-      });
-    }
-
-    // normalizeInterests -> CSV string
+    // Normalize interests -> CSV
     const interests = normalizeInterests(value.interests);
     if (!interests || typeof interests !== "string") {
-      return res.status(400).json({ success: false, message: "Bot interests are required (max 6).", data: null });
+      return res.status(400).json({
+        success: false,
+        message: "Bot interests are required (max 6).",
+        data: null,
+      });
     }
 
     const interestCount = interests
@@ -131,27 +135,34 @@ async function addBotUser(req, res) {
       .filter(Boolean).length;
 
     if (interestCount === 0) {
-      return res.status(400).json({ success: false, message: "Bot interests are required (max 6).", data: null });
+      return res.status(400).json({
+        success: false,
+        message: "Bot interests are required (max 6).",
+        data: null,
+      });
     }
 
-    // Username generation
-    let username = value.username ? String(value.username).toLowerCase() : null;
+    // Username (you can switch to generateUniqueUsername if you want)
+    let username = value.username ? String(value.username).trim().toLowerCase() : null;
+    if (!username) {
+      return res.status(400).json({ success: false, message: "Username is required for bot.", data: null });
+    }
 
     // Uniqueness checks
-    const existingUsername = await User.findOne({ where: { username } });
+    const existingUsername = await User.findOne({ where: { username, is_deleted: 0 }, attributes: ["id"] });
     if (existingUsername) {
       return res.status(409).json({ success: false, message: "This username is already registered." });
     }
 
     if (email) {
-      const existingEmail = await User.findOne({ where: { email } });
+      const existingEmail = await User.findOne({ where: { email, is_deleted: 0 }, attributes: ["id"] });
       if (existingEmail) {
         return res.status(409).json({ success: false, message: "This email is already registered." });
       }
     }
 
     if (phone) {
-      const existingPhone = await User.findOne({ where: { phone } });
+      const existingPhone = await User.findOne({ where: { phone, is_deleted: 0 }, attributes: ["id"] });
       if (existingPhone) {
         return res.status(409).json({ success: false, message: "This phone number is already registered." });
       }
@@ -169,10 +180,12 @@ async function addBotUser(req, res) {
         ip_address: getRealIp(req),
 
         type: "bot",
-        is_bot: 1,
         is_verified: true,
         bot_profile_completed: 1,
         created_by_admin_id: adminId,
+
+        // NEW
+        avatar: value.avatar && String(value.avatar).trim() ? value.avatar : null,
 
         gender: value.gender,
         dob: value.dob,
@@ -204,7 +217,7 @@ async function addBotUser(req, res) {
         action: "admin created bot user",
         entityType: "user",
         entityId: createdUser.id,
-        metadata: { type: "bot", username: createdUser.username, is_bot: true },
+        metadata: { type: "bot", username: createdUser.username },
       });
     } catch (_) {}
 
@@ -236,11 +249,31 @@ async function updateBotUserProfile(req, res) {
       return res.status(400).json({ success: false, message: "Invalid userId", data: null });
     }
 
-    // IMPORTANT: Bot controller should NOT allow bot conversion fields
+    // 1) If file exists, process BEFORE Joi validation
+    let uploadedAvatar = null;
+    if (req.file) {
+      const isFileGood = await verifyFileType(req.file, [
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+      ]);
+
+      if (!isFileGood) {
+        return res.status(400).json({ success: false, message: "Invalid file type", data: null });
+      }
+
+      const result = await uploadImage(req.file, "uploads/avatar/user");
+      uploadedAvatar = result || null;
+    }
+
     const updateSchema = Joi.object({
       username: Joi.string().trim().min(3).max(40).pattern(/^[a-zA-Z0-9._-]+$/).optional().allow(null, ""),
       email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).optional().allow(null, ""),
       phone: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).optional().allow(null, ""),
+      avatar: Joi.string().trim().max(500).optional().allow(null, ""),
       gender: Joi.string().valid("male", "female", "other", "prefer_not_to_say").optional().allow(null),
       city: Joi.string().trim().max(100).optional().allow(null, ""),
       state: Joi.string().trim().max(100).optional().allow(null, ""),
@@ -263,16 +296,25 @@ async function updateBotUserProfile(req, res) {
 
       height: Joi.string().trim().max(250).optional().allow(null, ""),
       education: Joi.string().trim().max(200).optional().allow(null, ""),
+      interests: Joi.alternatives()
+        .try(
+          Joi.array().items(Joi.string().trim().max(50)).max(6),
+          Joi.string().trim().max(400)
+        )
+        .optional()
+        .allow(null, ""),
 
-      // interests stored as CSV in DB? if yes, accept string only here
-      interests: Joi.string().trim().max(400).optional().allow(null, ""),
-
-      // admin toggles (safe)
       is_verified: Joi.boolean().optional(),
       is_active: Joi.boolean().optional(),
     }).min(1);
 
-    const { error, value } = updateSchema.validate(req.body || {}, {
+    // Merge avatar from upload over body
+    const payload = {
+      ...req.body,
+      ...(uploadedAvatar ? { avatar: uploadedAvatar } : {}),
+    };
+
+    const { error, value } = updateSchema.validate(payload || {}, {
       abortEarly: true,
       stripUnknown: true,
       convert: true,
@@ -286,6 +328,11 @@ async function updateBotUserProfile(req, res) {
       });
     }
 
+    // Normalize interests
+    if (Object.prototype.hasOwnProperty.call(value, "interests")) {
+      value.interests = normalizeInterests(value.interests);
+    }
+
     const changedFields = Object.keys(value);
 
     const updatedUser = await sequelize.transaction(async (transaction) => {
@@ -296,18 +343,69 @@ async function updateBotUserProfile(req, res) {
         throw err;
       }
 
-      // Ensure it is Bot user
-      const isBot = Number(user.is_bot) === 1 || String(user.type) === "bot";
-      if (isBot) {
+      // Bot user
+      const isBot = String(user.type) === "bot";
+      if (!isBot) {
         const err = new Error("This endpoint is only for Bot users.");
         err.statusCode = 400;
         throw err;
+      }
+
+      // prevent duplicates if updating username/email/phone
+      if (Object.prototype.hasOwnProperty.call(value, "username") && value.username) {
+        const uname = String(value.username).trim().toLowerCase();
+        const exists = await User.findOne({
+          where: { username: uname, is_deleted: 0, id: { [Op.ne]: user.id } },
+          transaction,
+          attributes: ["id"],
+        });
+        if (exists) {
+          const err = new Error("This username is already registered.");
+          err.statusCode = 409;
+          throw err;
+        }
+        value.username = uname;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(value, "email")) {
+        const em = value.email && String(value.email).trim() ? String(value.email).trim().toLowerCase() : null;
+        if (em) {
+          const exists = await User.findOne({
+            where: { email: em, is_deleted: 0, id: { [Op.ne]: user.id } },
+            transaction,
+            attributes: ["id"],
+          });
+          if (exists) {
+            const err = new Error("This email is already registered.");
+            err.statusCode = 409;
+            throw err;
+          }
+        }
+        value.email = em;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(value, "phone")) {
+        const ph = value.phone && String(value.phone).trim() ? String(value.phone).trim() : null;
+        if (ph) {
+          const exists = await User.findOne({
+            where: { phone: ph, is_deleted: 0, id: { [Op.ne]: user.id } },
+            transaction,
+            attributes: ["id"],
+          });
+          if (exists) {
+            const err = new Error("This phone number is already registered.");
+            err.statusCode = 409;
+            throw err;
+          }
+        }
+        value.phone = ph;
       }
 
       const updatableFields = [
         "username",
         "email",
         "phone",
+        "avatar",
         "gender",
         "city",
         "state",
@@ -336,9 +434,7 @@ async function updateBotUserProfile(req, res) {
         throw err;
       }
 
-      // Force keep Bot identity
-      updates.type = "Bot";
-      updates.is_bot = 0;
+      // DO NOT change type here (removed)
 
       await user.update(updates, { transaction });
       return user;
@@ -347,7 +443,7 @@ async function updateBotUserProfile(req, res) {
     try {
       await logActivity(req, {
         userId: adminId,
-        action: "admin updated Bot user profile",
+        action: "admin updated bot user profile",
         entityType: "user",
         entityId: updatedUser.id,
         metadata: { changed_fields: changedFields },
@@ -370,6 +466,7 @@ async function updateBotUserProfile(req, res) {
     });
   }
 }
+
 
 async function deleteBotUser(req, res) {
   try {
@@ -424,7 +521,7 @@ async function getBotUserById(req, res) {
       where: {
         id: userId,
         is_deleted: 0,
-        type: "bot", 
+        type: "bot",
       },
       attributes: { exclude: ["password"] },
     });
@@ -437,10 +534,18 @@ async function getBotUserById(req, res) {
       });
     }
 
+    const files = await FileUpload.findAll({
+      where: { user_id: user.id },
+      order: [["id", "DESC"]],
+    });
+
     return res.status(200).json({
       success: true,
       message: "Bot user fetched successfully",
-      data: { user },
+      data: {
+        user,
+        files,
+      },
     });
   } catch (err) {
     console.error("Error getBotUserById:", err);
@@ -451,6 +556,7 @@ async function getBotUserById(req, res) {
     });
   }
 }
+
 
 async function getAllUsers(req, res) {
   try {
@@ -474,7 +580,7 @@ async function getAllUsers(req, res) {
 
       // sorting
       sortBy: Joi.string()
-        .valid("created_at", "updated_at", "username", "email", "status", "last_active")
+        .valid("created_at", "modified_at", "username", "email", "status", "last_active")
         .default("created_at"),
       sortOrder: Joi.string().valid("ASC", "DESC").default("DESC"),
     });
@@ -542,10 +648,192 @@ async function getAllUsers(req, res) {
     });
   }
 }
+
+async function uploadBotMedia(req, res) {
+  try {
+    // 1) Validate admin session
+    const adminSession = await isAdminSessionValid(req);
+    if (!adminSession.success) return res.status(401).json(adminSession);
+
+    const adminId = Number(adminSession.data);
+    if (!adminId || Number.isNaN(adminId)) {
+      return res.status(401).json({ success: false, message: "Invalid admin session", data: null });
+    }
+
+    // 2) Validate target userId
+    const targetUserId = Number(req.params.userId);
+    if (!targetUserId || Number.isNaN(targetUserId)) {
+      return res.status(400).json({ success: false, message: "Invalid userId", data: null });
+    }
+
+    // 3) Ensure target user exists AND is bot
+    const targetUser = await User.findOne({
+      where: { id: targetUserId, is_deleted: 0, type: "bot" },
+      attributes: ["id", "username", "type", "is_deleted"],
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Bot user not found.",
+        data: null,
+      });
+    }
+
+    // 4) Normalize incoming files
+    const incomingFiles = normalizeFiles(req);
+    if (!incomingFiles.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No files provided.",
+        data: null,
+      });
+    }
+
+    const MAX_FILES = parseInt(await getOption("max_files_per_user", 5), 10);
+
+    // Replace-all flow => count cap check BEFORE upload
+    if (incomingFiles.length > MAX_FILES) {
+      await cleanupTempFiles(incomingFiles);
+      return res.status(400).json({
+        success: false,
+        message: `Too many files. Max ${MAX_FILES} files allowed.`,
+        data: { new_files: incomingFiles.length, max: MAX_FILES },
+      });
+    }
+
+    // 5) Verify files (magic bytes)
+    const verified = [];
+    for (const f of incomingFiles) {
+      const v = await verifyFileType(f);
+      if (!v || !v.ok) {
+        await cleanupTempFiles(incomingFiles);
+        return res.status(400).json({
+          success: false,
+          message:
+            "One or more files are invalid. Allowed: PNG, JPG, WEBP, HEIC/HEIF, GIF, PDF, DOC/X, XLS/X, CSV, TXT, RTF.",
+          data: null,
+        });
+      }
+      verified.push(v);
+    }
+
+    // 6) Metadata
+    const folder = `uploads/media/user/${targetUserId}`;
+    const uploader_ip = getRealIp(req);
+    const user_agent = String(req.headers["user-agent"] || "").slice(0, 300);
+
+    // 7) Transaction replace-all (lock + delete + upload)
+    const result = await sequelize.transaction(async (transaction) => {
+      // Lock existing rows to avoid replace races
+      const existing = await FileUpload.findAll({
+        where: { user_id: targetUserId },
+        attributes: ["id", "name", "folders"],
+        transaction,
+      });
+
+      // Delete old (storage + DB)
+      for (const row of existing) {
+        try {
+          await deleteFile(row.name, row.folders, row.id, "user");
+        } catch (e) {
+          const err = new Error("Failed to remove existing media. Try again.");
+          err.statusCode = 500;
+          throw err;
+        }
+      }
+
+      // Upload new
+      const uploadedRows = [];
+      try {
+        for (let i = 0; i < incomingFiles.length; i++) {
+          const f = incomingFiles[i];
+          const v = verified[i];
+          const detectedExt = v?.ext || null;
+
+          const uploadRes = await uploadFile(
+            f,
+            folder,
+            detectedExt,
+            uploader_ip,
+            user_agent,
+            targetUserId,
+            "user",
+            transaction // pass only if uploadFile supports transaction
+          );
+
+          uploadedRows.push(uploadRes);
+        }
+      } catch (uploadErr) {
+        // cleanup newly uploaded (best-effort)
+        for (const up of uploadedRows) {
+          try {
+            await deleteFile(up.name, up.folders, up.id, "user");
+          } catch (_) {}
+        }
+        throw uploadErr;
+      }
+
+      // read back as source of truth
+      const dbRows = await FileUpload.findAll({
+        where: { user_id: targetUserId },
+        order: [["created_at", "DESC"]],
+        transaction,
+      });
+
+      return { dbRows };
+    });
+
+    // 8) Always cleanup temp files
+    await cleanupTempFiles(incomingFiles);
+
+    // 9) Activity log
+    try {
+      await logActivity(req, {
+        userId: adminId,
+        action: "admin updated bot user profile media",
+        entityType: "user_media",
+        entityId: targetUserId,
+        metadata: {
+          userId: targetUserId,
+          username: targetUser.username,
+          type: "bot",
+          files_count: result.dbRows?.length || 0,
+        },
+      });
+    } catch (_) {}
+
+    return res.status(200).json({
+      success: true,
+      message: "Bot user profile media updated successfully.",
+      data: {
+        user_id: targetUserId,
+        folder,
+        files: result.dbRows,
+      },
+    });
+  } catch (err) {
+    console.error("Error during uploadBotUserProfileMediaByAdmin:", err);
+
+    // cleanup temp files on error too
+    try {
+      const incomingFiles = normalizeFiles(req);
+      if (incomingFiles?.length) await cleanupTempFiles(incomingFiles);
+    } catch (_) {}
+
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      message: err.statusCode ? err.message : "Something went wrong while uploading media.",
+      data: null,
+    });
+  }
+}
+
 module.exports = {
   addBotUser,
   updateBotUserProfile,
   deleteBotUser,
   getBotUserById,
-  getAllUsers
+  getAllUsers,
+  uploadBotMedia
 };

@@ -3,7 +3,7 @@ const authController = require("../../controllers/admin/authController");
 const adminController = require("../../controllers/admin/adminController");
 const realUserController=require("../../controllers/admin/realUserController")
 const botUserController=require("../../controllers/admin/botUserController")
-// auth
+const { fileUploader } = require("../../utils/helpers/fileUpload");
 //add coid packages 
 router.post("/coin-packages/add", adminController.addCoinPackage);
 
@@ -30,7 +30,7 @@ router.get("/users", realUserController.getAllUsers);
  * - Ensures the user belongs to real (human) users category.
  * - Does NOT expose sensitive authentication-related fields.
  */
-router.get("/real/:userId", realUserController.getRealUsers);
+router.get("/real/:userId", realUserController.getUserById);
 
 
 /**
@@ -92,9 +92,7 @@ router.get("/bots", botUserController.getAllUsers);
  * - Accepts bot configuration such as name, gender, avatar, and behavior.
  * - Automatically marks the user as a bot internally.
  */
-router.post("/bot", botUserController.addBotUser);
-
-
+router.post("/bot", fileUploader.single("avatar"), botUserController.addBotUser);
 /**
  * GET /bot/:userId
  * ------------------------------------------------------------
@@ -116,9 +114,7 @@ router.get("/bot/:userId", botUserController.getBotUserById);
  * - Can update images, bio, interaction logic, or visibility.
  * - Validates bot existence before updating.
  */
-router.post("/bot/:userId", botUserController.updateBotUserProfile);
-
-
+router.post("/bot/:userId", fileUploader.single("avatar"), botUserController.updateBotUserProfile);
 /**
  *  POST /bot/delete/:userId
  * ------------------------------------------------------------
@@ -129,6 +125,21 @@ router.post("/bot/:userId", botUserController.updateBotUserProfile);
  * - Action is logged for system integrity and audit purposes.
  */
 router.post("/bot/delete/:userId", botUserController.deleteBotUser);
+
+router.post(
+  "/real/:userId/media",
+  fileUploader.array("files", 5),
+  realUserController.uploadUserMedia
+);
+
+
+router.post(
+  "/bot/:userId/media",
+  fileUploader.array("files", 5),
+  botUserController.uploadBotMedia
+);
+
+
 
 router.post("/login", authController.adminLogin);
 router.post("/login/verify", authController.verifyAdminLogin);
