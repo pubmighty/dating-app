@@ -87,6 +87,33 @@ const CoinPackage = sequelize.define(
       allowNull: false,
       defaultValue: "active",
     },
+
+    // ---- GOOGLE PLAY BILLING MAPPING ----
+    provider: {
+      // so later we can support multiple providers
+      type: DataTypes.ENUM("google_play"),
+      allowNull: false,
+      defaultValue: "google_play",
+    },
+
+    google_product_id: {
+      // MUST match Play Console productId (SKU) e.g. "coins_pack_500"
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+
+    currency: {
+      // informational (Play returns localized pricing anyway)
+      type: DataTypes.STRING(10),
+      allowNull: false,
+      defaultValue: "INR",
+    },
+
+    metadata: {
+      // Store any extra config in JSON
+      type: DataTypes.JSON,
+      allowNull: true,
+    },
   },
   {
     tableName: "pb_coin_packages",
@@ -96,6 +123,7 @@ const CoinPackage = sequelize.define(
       { fields: ["status"] },
       { fields: ["is_popular"] },
       { fields: ["display_order"] },
+      { unique: true, fields: ["google_product_id"] }, // critical mapping
     ],
   }
 );

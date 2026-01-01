@@ -35,6 +35,22 @@ const CoinPurchaseTransaction = sequelize.define(
       allowNull: true,
     },
 
+    provider: {
+      type: DataTypes.ENUM("google_play"),
+      allowNull: false,
+      defaultValue: "google_play",
+    },
+
+    // Google order id looks like: "GPA.1234-5678-9012-34567"
+    order_id: { type: DataTypes.STRING(128), allowNull: true },
+
+    // Our package name: com.company.app (good for auditing)
+    package_name: { type: DataTypes.STRING(200), allowNull: true },
+
+    // Product id (SKU) that was bought
+    product_id: { type: DataTypes.STRING(100), allowNull: true },
+
+    // Our internal transaction reference or any provider ref
     transaction_id: {
       type: DataTypes.STRING(100),
       allowNull: true,
@@ -54,14 +70,16 @@ const CoinPurchaseTransaction = sequelize.define(
 
     purchase_token: {
       type: DataTypes.STRING(255),
-    },
-    date: {
-      type: DataTypes.DATE,
       allowNull: false,
-      defaultValue: DataTypes.NOW,
     },
 
-    created_at: {
+    // Store the raw Google response for debugging/audits
+    provider_payload: {
+      type: DataTypes.JSON,
+      allowNull: true,
+    },
+
+    date: {
       type: DataTypes.DATE,
       allowNull: false,
       defaultValue: DataTypes.NOW,
@@ -70,12 +88,17 @@ const CoinPurchaseTransaction = sequelize.define(
   {
     tableName: "pb_coin_purchase_transactions",
     underscored: true,
-    timestamps: false,
+    timestamps: true,
     indexes: [
       { fields: ["user_id"] },
       { fields: ["coin_pack_id"] },
       { fields: ["status"] },
+      { fields: ["payment_status"] },
       { fields: ["date"] },
+      { unique: true, fields: ["purchase_token"] }, // CRITICAL anti-fraud / idempotency
+      { fields: ["order_id"] },
+      { fields: ["product_id"] },
+      { fields: ["provider"] },
     ],
   }
 );

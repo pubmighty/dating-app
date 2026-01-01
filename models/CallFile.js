@@ -2,13 +2,17 @@ const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db");
 const { ALLOWED_EXTS } = require("../utils/staticValues");
 
-const FileUpload = sequelize.define(
-  "FileUpload",
+const CallFile = sequelize.define(
+  "CallFile",
   {
     id: {
-      type: DataTypes.BIGINT.UNSIGNED,
-      autoIncrement: true,
+      type: DataTypes.INTEGER,
       primaryKey: true,
+      autoIncrement: true,
+    },
+
+    user_id: {
+      type: DataTypes.BIGINT.UNSIGNED,
       allowNull: false,
     },
 
@@ -45,40 +49,23 @@ const FileUpload = sequelize.define(
       allowNull: false,
     },
 
-    user_id: {
-      type: DataTypes.BIGINT.UNSIGNED,
-      allowNull: true,
-    },
-
-    uploader_ip: {
-      type: DataTypes.STRING(45),
-      allowNull: true,
-    },
-    user_agent: {
-      type: DataTypes.STRING(300),
-      allowNull: true,
+    status: {
+      type: DataTypes.TINYINT.UNSIGNED,
+      allowNull: false,
+      defaultValue: 1,
     },
   },
   {
+    tableName: "pb_call_files",
     timestamps: true,
-    underscored: true,
-    tableName: "pb_file_uploads",
-    indexes: [
-      {
-        name: "idx_unique_name_folders",
-        unique: true,
-        fields: ["name", "folders"],
-      },
-      {
-        name: "idx_file_type",
-        fields: ["file_type"],
-      },
-      {
-        name: "idx_user",
-        fields: ["user_id"],
-      },
-    ],
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+
+    indexes: [{ 
+      name: "idx_user_status",
+      fields: ["user_id", "status"] 
+    }],
   }
 );
 
-module.exports = FileUpload;
+module.exports = CallFile;

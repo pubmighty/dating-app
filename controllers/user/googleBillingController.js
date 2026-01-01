@@ -3,227 +3,183 @@ const sequelize = require("../../config/db");
 const User = require("../../models/User");
 const CoinPackage = require("../../models/CoinPackage");
 const CoinPurchaseTransaction = require("../../models/CoinPurchaseTransaction");
-const { verifyInAppPurchase } = require("../../utils/helpers/googlePlayClient");
 const { isUserSessionValid } = require("../../utils/helpers/authHelper");
+const { google } = require("googleapis");
+const {
+  GOOGLE_PLAY_SERVICE_ACCOUNT_JSON,
+  PACKAGE_NAME,
+} = require("../../utils/staticValues");
 
+function getAndroidPublisher() {
+  const auth = new google.auth.GoogleAuth({
+    credentials: JSON.parse(GOOGLE_PLAY_SERVICE_ACCOUNT_JSON),
+    scopes: ["https://www.googleapis.com/auth/androidpublisher"],
+  });
+
+  return google.androidpublisher({ version: "v3", auth });
+}
+
+/**
+ * POST /billing/google-play/verify
+ * - Verifies purchaseToken with Google
+ * - Credits coins only if verified + not already processed
+ * - Uses DB transaction + unique purchase_token to prevent double grants
+ */
 async function verifyGooglePlayPurchase(req, res) {
   const t = await sequelize.transaction();
 
   try {
-    //  Validate body
+    // 1) Validate session (NEVER accept user_id from body)
+    const sessionResult = await isUserSessionValid(req);
+    if (!sessionResult.success) {
+      await t.rollback();
+      return res.status(401).json(sessionResult);
+    }
+    const userId = sessionResult.user.id;
+
+    // 2) Validate input
     const schema = Joi.object({
-      coin_pack_id: Joi.number().integer().required(),
-      purchase_token: Joi.string().min(10).max(255).required(),
-      product_id: Joi.string().min(3).max(100).optional().allow(null, ""),
-      order_id: Joi.string().max(200).optional().allow(null, ""),
+      productId: Joi.string().trim().required(),
+      purchaseToken: Joi.string().trim().required(),
     });
 
-    const { error, value } = schema.validate(req.body, {
-      abortEarly: true,
-      stripUnknown: true,
-    });
-
+    const { error, value } = schema.validate(req.body, { abortEarly: true });
     if (error) {
       await t.rollback();
-      return res
-        .status(400)
-        .json({ success: false, message: error.details[0].message });
+      return res.status(400).json({ success: false, message: error.message });
     }
 
-    // Session check
-    const session = await isUserSessionValid(req);
-    if (!session.success) {
-      await t.rollback();
-      return res.status(401).json(session);
+    const { productId, purchaseToken } = value;
+
+    // 3) Idempotency: already processed token => OK (don’t grant again)
+    const already = await CoinPurchaseTransaction.findOne({
+      where: { purchase_token: purchaseToken, payment_status: "completed" },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (already) {
+      await t.commit();
+      return res.json({
+        success: true,
+        message: "Already processed.",
+        txId: already.id,
+      });
     }
-    const userId = Number(session.data);
 
-    const packageName = process.env.GOOGLE_PLAY_PACKAGE_NAME;
-    if (!packageName) {
-      await t.rollback();
-      return res
-        .status(500)
-        .json({ success: false, message: "GOOGLE_PLAY_PACKAGE_NAME missing" });
-    }
-
-    const { coin_pack_id, purchase_token, product_id, order_id } = value;
-
-    //  Load pack (must be active)
+    // 4) Map productId -> your pack (server authoritative)
     const pack = await CoinPackage.findOne({
-      where: { id: coin_pack_id, status: "active" },
+      where: {
+        provider: "google_play",
+        google_product_id: productId,
+        status: "active",
+      },
       transaction: t,
       lock: t.LOCK.UPDATE,
     });
 
     if (!pack) {
       await t.rollback();
-      return res.status(404).json({
-        success: false,
-        message: "Coin package not found or inactive",
-      });
-    }
-
-    //  Determine productId to verify (prefer DB mapping)
-    const productIdToVerify = pack.play_product_id || product_id;
-    if (!productIdToVerify) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message:
-          "play_product_id missing. Set coin_packages.play_product_id for this pack.",
-      });
-    }
-
-    //  Idempotency: if token already processed, do NOT credit again
-    const existing = await CoinPurchaseTransaction.findOne({
-      where: { purchase_token },
-      transaction: t,
-      lock: t.LOCK.UPDATE,
-    });
-
-    if (existing && existing.status === "completed") {
-      await t.rollback();
-      return res.json({
-        success: true,
-        message: "Already processed",
-        data: {
-          purchase_db_id: existing.id,
-          status: existing.status,
-        },
-      });
-    }
-
-    //  Create pending transaction first.
-    const txRow = existing
-      ? existing
-      : await CoinPurchaseTransaction.create(
-          {
-            user_id: userId,
-            coin_pack_id: pack.id,
-            coins_received: pack.coins,
-            amount: pack.final_price,
-            payment_method: "google_play",
-            transaction_id: order_id || null,
-
-            play_product_id: productIdToVerify,
-            purchase_token,
-
-            status: "pending",
-            payment_status: "pending",
-            date: new Date(),
-            created_at: new Date(),
-          },
-          { transaction: t }
-        );
-
-    // Verify with Google
-    const gp = await verifyInAppPurchase({
-      packageName,
-      productId: productIdToVerify,
-      purchaseToken: purchase_token,
-    });
-
-    // Save raw google response for debugging/refunds
-    await txRow.update(
-      {
-        raw_google_response: gp,
-        purchase_state: gp.purchaseState,
-        is_acknowledged: gp.acknowledgementState === 1,
-        transaction_id: gp.orderId || txRow.transaction_id,
-      },
-      { transaction: t }
-    );
-
-    // purchaseState: 0 purchased, 1 canceled, 2 pending
-    if (gp.purchaseState !== 0) {
-      await txRow.update(
-        {
-          status: gp.purchaseState === 2 ? "pending" : "failed",
-          payment_status: gp.purchaseState === 2 ? "pending" : "failed",
-        },
-        { transaction: t }
-      );
-
-      await t.commit();
-      return res.status(400).json({
-        success: false,
-        message:
-          gp.purchaseState === 2
-            ? "Purchase is pending. Try again later."
-            : "Purchase not completed or cancelled.",
-        data: { purchaseState: gp.purchaseState },
-      });
-    }
-
-    //  Credit user coins in same DB transaction
-    const user = await User.findByPk(userId, {
-      transaction: t,
-      lock: t.LOCK.UPDATE,
-    });
-    if (!user) {
-      await t.rollback();
       return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+        .status(400)
+        .json({ success: false, message: "Invalid productId." });
     }
 
-    const currentCoins = Number(user.coins || 0);
-    const addCoins = Number(pack.coins || 0);
-    const newBalance = currentCoins + addCoins;
+    // 5) Verify with Google
+    const androidpublisher = getAndroidPublisher();
 
-    await user.update(
-      {
-        coins: newBalance,
-        updated_at: new Date(),
-      },
-      { transaction: t }
-    );
+    const gpRes = await androidpublisher.purchases.products.get({
+      packageName: PACKAGE_NAME,
+      productId,
+      token: purchaseToken,
+    });
 
-    //  Mark completed
-    await txRow.update(
+    const gp = gpRes.data;
+
+    // IMPORTANT: treat anything except "Purchased" as not grantable
+    // purchaseState commonly: 0 purchased, 1 canceled, 2 pending
+    if (gp.purchaseState !== 0) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Purchase not in purchased state.",
+        purchaseState: gp.purchaseState,
+      });
+    }
+
+    // 6) Create tx row (pending->completed)
+    // NOTE: amount is informational here; Play pricing is not something you should trust from DB.
+    const tx = await CoinPurchaseTransaction.create(
       {
+        user_id: userId,
+        coin_pack_id: pack.id,
+        coins_received: pack.coins,
+        amount: String(pack.final_price),
+        payment_method: "google_play",
+        provider: "google_play",
+
+        order_id: gp.orderId || null,
+        package_name: PACKAGE_NAME,
+        product_id: productId,
+
+        transaction_id: gp.orderId || null,
+        purchase_token: purchaseToken,
+
         status: "completed",
         payment_status: "completed",
+        provider_payload: gp,
+        date: new Date(),
       },
       { transaction: t }
     );
 
-    //  sold_count++
-    await pack.update(
-      { sold_count: Number(pack.sold_count || 0) + 1 },
-      { transaction: t }
+    // 7) Grant coins
+    await User.increment(
+      { coins: pack.coins },
+      { where: { id: userId }, transaction: t }
     );
+
+    // 8) Update sold_count
+    await CoinPackage.increment(
+      { sold_count: 1 },
+      { where: { id: pack.id }, transaction: t }
+    );
+
+    // 9) Acknowledge purchase (prevents auto-refund issues)
+    // For consumables you’ll usually CONSUME on client after grant.
+    // Still acknowledging is safe if not yet acknowledged.
+    try {
+      await androidpublisher.purchases.products.acknowledge({
+        packageName: PACKAGE_NAME,
+        productId,
+        token: purchaseToken,
+        requestBody: {},
+      });
+    } catch (ackErr) {
+      // Don’t fail the whole transaction if ack fails; log it and handle later.
+      // (But DO log it)
+    }
 
     await t.commit();
-
-    //  Tell Android to consume/ack now
     return res.json({
       success: true,
-      message: "Purchase verified and coins credited",
-      data: {
-        purchase_db_id: txRow.id,
-        coin_pack_id: pack.id,
-        play_product_id: productIdToVerify,
-        credited_coins: addCoins,
-        new_balance: newBalance,
-
-        // coin packs should be consumed by Android after success
-        should_consume: true,
-
-        google: {
-          orderId: gp.orderId || null,
-          acknowledgementState: gp.acknowledgementState,
-          consumptionState: gp.consumptionState,
-          purchaseState: gp.purchaseState,
-        },
-      },
+      message: "Coins granted.",
+      txId: tx.id,
+      coins: pack.coins,
     });
-  } catch (err) {
-    console.error("verifyGooglePlayPurchase error:", err);
+  } catch (e) {
     await t.rollback();
-    return res
-      .status(500)
-      .json({ success: false, message: "Internal server error" });
+
+    // If unique purchase_token constraint triggers, treat as already processed
+    if (String(e?.name) === "SequelizeUniqueConstraintError") {
+      return res.json({ success: true, message: "Already processed." });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: String(e?.message || e),
+    });
   }
 }
 

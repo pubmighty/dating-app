@@ -3,7 +3,7 @@ const path = require("path");
 const maxmind = require("maxmind");
 const { Op } = require("sequelize");
 const UAParser = require("ua-parser-js");
-
+const noReplyMail = "no-reply@gplinks.org";
 // global variables
 let lookup;
 const dbPath = path.join(__dirname, "/ip-db/GeoLite2-City.mmdb");
@@ -250,6 +250,99 @@ const toNullableInt = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+function normalizeText(t) {
+  return String(t || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "")
+    .slice(0, 50);
+}
+
+function getIdempotencyKey(req) {
+  // Client SHOULD send a stable key per ad completion attempt.
+  const k = req.headers["idempotency-key"];
+  if (typeof k === "string") {
+    const v = k.trim();
+    if (v.length >= 8 && v.length <= 128) return v;
+  }
+  // fallback: still helps prevent accidental duplicates within a single flow,
+  // but real idempotency requires client to send a stable key.
+  return crypto.randomUUID();
+}
+
+function getUtcDayRange(date = new Date()) {
+  const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 0, 0, 0, 0));
+  const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999));
+  return { start, end };
+}
+
+function toInt(v, fallback) {
+  const n = Number.parseInt(String(v ?? ""), 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clampInt(v, min, max, fallback=0) {
+  const n = toInt(v, fallback);
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
+}
+
+// integer ceil division: ceil(a / b) for positive ints
+function ceilDiv(a, b) {
+  const A = clampInt(a, 0);
+  const B = clampInt(b, 1);
+  return Math.floor((A + B - 1) / B); // all int math
+}
+
+function generateOtpExpiration(time) {
+  return new Date(Date.now() + time * 60 * 1000); // 10 minutes from now
+}
+
+async function verifyTwoFAToken(user, token) {
+  try {
+    if (!user) {
+      // console.warn("User object is missing.");
+      return false;
+    }
+
+    // Handle user status (suspended)
+    if (user.status === 3) {
+      return false;
+    }
+
+    // Extract the 2FA secret from the user object
+    const userSecret = user.two_fa_secret;
+    if (!userSecret) {
+      // console.warn("User does not have a 2FA secret.");
+      return false;
+    }
+
+    // Validate the 2FA token
+    const isVerified = validateTwoFAToken(userSecret, token);
+
+    if (isVerified) {
+      // console.info("2FA token verified successfully.");
+      return true;
+    } else {
+      // console.warn("Invalid 2FA token.");
+      return false;
+    }
+  } catch (error) {
+    console.error("Error verifying 2FA token:", error.message);
+    return false;
+  }
+}
+function verifyAdminRole(admin, work) {
+  if (!admin || !admin.role) return false;
+
+  if (admin.role === "superAdmin") {
+    return true;
+  }
+
+  return false;
+}
+
 module.exports = {
   getRealIp,
   getOption,
@@ -269,4 +362,14 @@ module.exports = {
   normalizeFiles,
   safeTrim,
   toNullableInt,
+  normalizeText,
+  getIdempotencyKey,
+  getUtcDayRange,
+  toInt,
+  ceilDiv,
+  clampInt,
+  generateOtpExpiration,
+  noReplyMail,
+  verifyTwoFAToken,
+  verifyAdminRole,
 };

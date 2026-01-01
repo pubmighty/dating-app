@@ -80,6 +80,7 @@ async function getCoinPackages(req, res) {
         "is_ads_free",
         "validity_days",
         "display_order",
+        "google_product_id",
       ],
       order: [
         [sort_by, order],
@@ -189,6 +190,7 @@ async function getUserCoinPurchases(req, res) {
             "final_price",
             "is_popular",
             "is_ads_free",
+            "google_product_id",
           ],
         },
       ],

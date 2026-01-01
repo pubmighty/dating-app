@@ -17,6 +17,11 @@ const AdView = sequelize.define(
       allowNull: false,
     },
 
+    idempotency_key: {
+      type: DataTypes.STRING(300),
+      allowNull: true,
+    },
+
     ad_provider: {
       type: DataTypes.STRING(50),
       allowNull: false,

@@ -3,50 +3,34 @@ const { Op } = require("sequelize");
 const sequelize = require("../../config/db");
 const AdView = require("../../models/AdView");
 const User = require("../../models/User")
-const { getRealIp, getOption, getLocation} = require("../../utils/helper");
+const { getRealIp, getOption, getLocation, normalizeText, getIdempotencyKey, getUtcDayRange} = require("../../utils/helper");
 const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 
 
-function getTodayRange() {
-  const now = new Date();
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-
-  const end = new Date(now);
-  end.setHours(23, 59, 59, 999);
-
-  return { start, end };
-}
-
+/**
+ * GET /ads/status
+ */
 async function getAdStatus(req, res) {
   try {
-    //  Validate user session
     const sessionResult = await isUserSessionValid(req);
-    if (!sessionResult.success) {
-      return res.status(401).json(sessionResult);
-    }
+    if (!sessionResult.success) return res.status(401).json(sessionResult);
+
     const userId = Number(sessionResult.data);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(401).json({ success: false, message: "Invalid session." });
+    }
 
-    // Load config values
-    const maxDaily = parseInt(
-      await getOption("max_daily_ad_views", 5),
-      10
-    );
-    const rewardCoins = parseInt(
-      await getOption("ad_reward_coins", 5),
-      10
-    );
+    // EXACT values per request (no caching)
+    const maxDaily = parseInt(await getOption("max_daily_ad_views", 5), 10);
+    const rewardCoins = parseInt(await getOption("ad_reward_coins", 5), 10);
 
-    const { start, end } = getTodayRange();
+    const { start, end } = getUtcDayRange();
 
-    //  Count today's completed ad views for this user
     const usedToday = await AdView.count({
       where: {
         user_id: userId,
         is_completed: true,
-        viewed_at: {
-          [Op.between]: [start, end],
-        },
+        viewed_at: { [Op.between]: [start, end] },
       },
     });
 
@@ -64,7 +48,7 @@ async function getAdStatus(req, res) {
       },
     });
   } catch (err) {
-    console.error("getAdStatus error:", err);
+    console.error("Error during getAdStatus:", err);
     return res.status(500).json({
       success: false,
       message: "Something went wrong while fetching ad status.",
@@ -72,113 +56,129 @@ async function getAdStatus(req, res) {
   }
 }
 
+/**
+ * POST /ads/complete
+ */
 async function completeAdView(req, res) {
-  const transaction = await sequelize.transaction();
+  const t = await sequelize.transaction({
+    isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED,
+  });
 
   try {
-    // Validate user session
     const sessionResult = await isUserSessionValid(req);
     if (!sessionResult.success) {
-      await transaction.rollback();
+      await t.rollback();
       return res.status(401).json(sessionResult);
     }
-    const userId = Number(sessionResult.data);
 
-    // Validate request body
+    const userId = Number(sessionResult.data);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      await t.rollback();
+      return res.status(401).json({ success: false, message: "Invalid session." });
+    }
+
     const schema = Joi.object({
       ad_provider: Joi.string().max(50).required(),
     });
 
-    const { error, value } = schema.validate(req.body, {
-      abortEarly: true,
-      convert: true,
+    const { error, value } = schema.validate(req.body, { abortEarly: true, convert: true });
+    if (error) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: error.details[0].message });
+    }
+
+    const ad_provider = normalizeText(value.ad_provider);
+    if (!ad_provider) {
+      await t.rollback();
+      return res.status(400).json({ success: false, message: "Invalid ad_provider." });
+    }
+
+    // EXACT values per request (no caching)
+    const maxDaily = parseInt(await getOption("max_daily_ad_views", 5), 10);
+    const rewardCoins = parseInt(await getOption("ad_reward_coins", 5), 10);
+
+    const { start, end } = getUtcDayRange();
+
+    // Idempotency protection
+    const idempotencyKey = getIdempotencyKey(req);
+
+    // Lock user row to serialize completions per-user (prevents double reward under concurrency)
+    const user = await User.findByPk(userId, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!user) {
+      await t.rollback();
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    // If request retried with same idempotency key, return stable result
+    const existing = await AdView.findOne({
+      where: { user_id: userId, idempotency_key: idempotencyKey },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
     });
 
-    if (error) {
-      await transaction.rollback();
-      return res.status(400).json({
-        success: false,
-        message: error.details[0].message,
+    if (existing) {
+      await t.commit();
+      return res.status(200).json({
+        success: true,
+        message: "Ad already completed.",
+        data: {
+          coinsEarned: existing.coins_earned || 0,
+          newBalance: Number(user.coins || 0),
+          maxDaily,
+          idempotencyKey,
+        },
       });
     }
 
-    const { ad_provider } = value;
-
-    // Load config
-    const maxDaily = parseInt(
-      await getOption("max_daily_ad_views", 5),
-      10
-    );
-    const rewardCoins = parseInt(
-      await getOption("ad_reward_coins", 5),
-      10
-    );
-
-    const { start, end } = getTodayRange();
-
-    // Re-check today's completed views inside transaction
+    // Re-check limit inside transaction (safe due to user lock)
     const usedToday = await AdView.count({
       where: {
         user_id: userId,
         is_completed: true,
-        viewed_at: {
-          [Op.between]: [start, end],
-        },
+        viewed_at: { [Op.between]: [start, end] },
       },
-      transaction,
+      transaction: t,
     });
 
     if (usedToday >= maxDaily) {
-      await transaction.rollback();
-      return res.status(400).json({
+      await t.rollback();
+      return res.status(429).json({
         success: false,
         message: "Daily ad limit reached. Come back tomorrow!",
       });
     }
 
-    // Get IP & country
-    const ip = getRealIp(req);
-    let countryCode = null;
+    const ip = getRealIp(req) || null;
 
+    let countryCode = null;
     if (ip) {
       const location = await getLocation(ip);
       countryCode =
-        location.countryCode && location.countryCode !== "Unk"
-          ? location.countryCode
-          : null;
+        location?.countryCode && location.countryCode !== "Unk" ? location.countryCode : null;
     }
 
-    // Fetch user
-    const user = await User.findByPk(userId, { transaction });
-    if (!user) {
-      await transaction.rollback();
-      return res.status(404).json({
-        success: false,
-        message: "User not found.",
-      });
-    }
-
-    // Insert AdView row (pb_adViews)
+    // Create AdView row
     await AdView.create(
       {
         user_id: userId,
         ad_provider,
         coins_earned: rewardCoins,
         is_completed: true,
-        ip_address: ip || null,
+        ip_address: ip,
         country: countryCode,
+        viewed_at: new Date(),
+        idempotency_key: idempotencyKey,
       },
-      { transaction }
+      { transaction: t }
     );
 
-    //Update user coins
-    const previousBalance = user.coins || 0;
+    // Update balance (safe due to user row lock)
+    const previousBalance = Number(user.coins || 0);
     const newBalance = previousBalance + rewardCoins;
 
     user.coins = newBalance;
-    await user.save({ transaction });
+    await user.save({ transaction: t });
 
-    // Log activity (if logger exists)
     if (typeof logActivity === "function") {
       await logActivity(
         {
@@ -188,16 +188,16 @@ async function completeAdView(req, res) {
           meta: {
             ad_provider,
             coins_earned: rewardCoins,
-            ip_address: ip || null,
+            ip_address: ip,
             country: countryCode,
+            idempotency_key: idempotencyKey,
           },
         },
-        transaction
+        t
       );
     }
 
-    // Commit transaction
-    await transaction.commit();
+    await t.commit();
 
     const newUsedToday = usedToday + 1;
     const remaining = Math.max(maxDaily - newUsedToday, 0);
@@ -212,11 +212,14 @@ async function completeAdView(req, res) {
         usedToday: newUsedToday,
         remaining,
         canWatchMore: remaining > 0,
+        idempotencyKey,
       },
     });
   } catch (err) {
-    console.error("completeAdView error:", err);
-    await transaction.rollback();
+    console.error("Error during completeAdView:", err);
+    try {
+      await t.rollback();
+    } catch (_) {}
     return res.status(500).json({
       success: false,
       message: "Something went wrong while completing ad view.",

@@ -1,63 +1,64 @@
+require("dotenv").config();
+
 const publicFeedUserAttributes = [
-"id",
-"username",
-"email",
-"phone",
-"gender",
-"city",
-"state",
-"country",
-"address",
-"avatar",
-"dob",
-"bio",
-"interests",
-"looking_for",
-"total_likes",
-"total_matches",
-"total_rejects",
-"height",
-"education",
-"is_verified",
+  "id",
+  "username",
+  "email",
+  "phone",
+  "gender",
+  "city",
+  "state",
+  "country",
+  "address",
+  "avatar",
+  "dob",
+  "bio",
+  "interests",
+  "looking_for",
+  "total_likes",
+  "total_matches",
+  "total_rejects",
+  "height",
+  "education",
+  "is_verified",
 ];
 
 const publicUserAttributes = [
-"id",
-"username",
-"email",
-"phone",
-"gender",
-"city",
-"state",
-"country",
-"address",
-"avatar",
-"dob",
-"bio",
-"interests",
-"looking_for",
-"coins",
-"total_likes",
-"total_matches",
-"total_rejects",
-"height",
-"education",
-"is_verified",
+  "id",
+  "username",
+  "email",
+  "phone",
+  "gender",
+  "city",
+  "state",
+  "country",
+  "address",
+  "avatar",
+  "dob",
+  "bio",
+  "interests",
+  "looking_for",
+  "coins",
+  "total_likes",
+  "total_matches",
+  "total_rejects",
+  "height",
+  "education",
+  "is_verified",
 ];
 const BCRYPT_ROUNDS = 12;
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2MB hard limit
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-    const fallbackMessages = [
-      "Hey! I'm here 🙂",
-      "I was thinking about you just now.",
-      "Tell me more, I'm really curious.",
-      "That sounds interesting, go on 🙂",
-      "You make this chat more fun!",
-    ];
+const fallbackMessages = [
+  "Hey! I'm here 🙂",
+  "I was thinking about you just now.",
+  "Tell me more, I'm really curious.",
+  "That sounds interesting, go on 🙂",
+  "You make this chat more fun!",
+];
 
-    // Centralized allowlist (kept in code, not ENUM)
 const ALLOWED_EXTS = [
   "png",
   "jpg",
@@ -74,12 +75,18 @@ const ALLOWED_EXTS = [
   "rtf",
 ];
 
+const PACKAGE_NAME = process.env.ANDROID_PACKAGE_NAME;
+const GOOGLE_PLAY_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON;
+
+
 module.exports = {
-    publicFeedUserAttributes,
-    publicUserAttributes,
-    BCRYPT_ROUNDS,
-    MAX_AVATAR_BYTES,
-    ALLOWED_MIME,
-    fallbackMessages,
-    ALLOWED_EXTS
-}
+  publicFeedUserAttributes,
+  publicUserAttributes,
+  BCRYPT_ROUNDS,
+  MAX_AVATAR_BYTES,
+  ALLOWED_MIME,
+  fallbackMessages,
+  ALLOWED_EXTS,
+  PACKAGE_NAME,
+  GOOGLE_PLAY_SERVICE_ACCOUNT_JSON,
+};
