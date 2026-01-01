@@ -24,6 +24,7 @@ const { sendOtpMail } = require("../../utils/helpers/mailHelper");
 const sequelize = require("../../config/db");
 const UserSession = require("../../models/UserSession");
 const { Op } = require("sequelize");
+const FileUpload = require("../../models/FileUpload");
 
 async function registerWithGoogle(req, res) {
   try {
@@ -109,6 +110,11 @@ async function registerWithGoogle(req, res) {
       );
 
       await existingUser.reload({ attributes: publicUserAttributes });
+      const files = await FileUpload.findAll({
+        where: {
+          user_id: existingUser.id
+        }
+      });
 
       return res.status(200).json({
         success: true,
@@ -117,6 +123,7 @@ async function registerWithGoogle(req, res) {
           user: existingUser,
           token,
           token_expires_at: expires_at,
+          files
         },
       });
     }
@@ -665,7 +672,11 @@ async function loginUser(req, res) {
     const { token, expires_at } = await handleUserSessionCreation(req, user);
 
     await user.reload({ attributes: publicUserAttributes });
-
+    const files = await FileUpload.findAll({
+      where: {
+        user_id: user.id
+      }
+    });
     return res.status(200).json({
       success: true,
       message: "Login successful",
@@ -673,6 +684,7 @@ async function loginUser(req, res) {
         user: user,
         token,
         tokenexpires_at: expires_at,
+        files
       },
     });
   } catch (err) {

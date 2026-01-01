@@ -12,6 +12,7 @@ const {
   verifyFileType,
   deleteFile,
   cleanupTempFiles,
+  uploadFile,
 } = require("../../utils/helpers/fileUpload");
 const { logActivity } = require("../../utils/helpers/activityLogHelper");
 const { isUserSessionValid } = require("../../utils/helpers/authHelper");
@@ -38,11 +39,16 @@ async function getUserProfile(req, res) {
         message: "User not found.",
       });
     }
-
+    const files = await FileUpload.findAll({
+      where: {
+        user_id: user.id
+      }
+    });
     return res.status(200).json({
       success: true,
       message: "Profile fetched successfully.",
       data: user,
+      files
     });
   } catch (err) {
     console.error("Error during getUserProfile:", err);
@@ -290,7 +296,6 @@ async function uploadProfileMedia(req, res) {
         where: { user_id: userId },
         attributes: ["id", "name", "folders"],
         transaction,
-        lock: transaction.LOCK.UPDATE,
       });
 
       // 6) Delete old files (storage + DB row)
@@ -324,12 +329,12 @@ async function uploadProfileMedia(req, res) {
             user_agent,
             userId,
             "user",
-            transaction // <-- add only if your uploadFile supports it
           );
 
           uploadedRows.push(uploadRes);
         }
       } catch (uploadErr) {
+        console.warn(uploadErr)
         // Attempt to remove any newly uploaded files to avoid partial replace
         for (const up of uploadedRows) {
           try {
@@ -346,7 +351,6 @@ async function uploadProfileMedia(req, res) {
       const dbRows = await FileUpload.findAll({
         where: { user_id: userId },
         order: [["created_at", "DESC"]],
-        transaction,
       });
 
       return { dbRows };
@@ -671,7 +675,7 @@ async function changePassword(req, res) {
   } catch (err) {
     try {
       await t.rollback();
-    } catch (_) {}
+    } catch (_) { }
     console.error("Error during changePassword:", err);
     return res.status(500).json({
       success: false,

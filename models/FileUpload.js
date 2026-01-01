@@ -63,8 +63,7 @@ const FileUpload = sequelize.define(
   },
   {
     timestamps: true,
-    createdAt: "created_at",
-    updatedAt: "modified_at",
+    underscored: true,
     tableName: "pb_file_uploads",
     indexes: [
       {
