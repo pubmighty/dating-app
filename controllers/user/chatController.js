@@ -269,11 +269,11 @@ async function sendMessage(req, res) {
     await cleanupTempFiles(incomingFiles);
     return res.status(preErr.statusCode || 400).json({
       success: false,
-      message: preErr.message || "Invalid upload",
+      message: preErr.message || "Invalid uploads",
     });
   }
 
-  // 5) Main transaction: Create message FIRST, then upload files
+  // 5) Main transaction: Create message FIRST, then uploads files
   let createdMessage = null;
   let receiverId = null;
   let isBotReceiver = false;
@@ -371,7 +371,7 @@ async function sendMessage(req, res) {
       }
 
       // ========================================
-      // CREATE MESSAGE FIRST (before file upload)
+      // CREATE MESSAGE FIRST (before file uploads)
       // ========================================
       createdMessage = await Message.create(
         {
@@ -433,7 +433,7 @@ async function sendMessage(req, res) {
             userId,
           });
 
-          // Clean up temp file immediately after successful upload
+          // Clean up temp file immediately after successful uploads
           await cleanupTempFiles([file]);
         }
       }

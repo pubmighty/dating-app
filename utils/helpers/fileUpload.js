@@ -349,7 +349,7 @@ async function uploadFile(
     //     user_agent,
     //   });
     // } else {
-    //   // Persist upload record (FIXED FIELDS)
+    //   // Persist uploads record (FIXED FIELDS)
     //   fileUpload = await FileUpload.create({
     //     name: filename,
     //     folders: folder,
@@ -468,7 +468,7 @@ async function deleteFile(fileName, folder, id = null, recordType = "chat") {
 
 /**
  * Safely delete a folder (and all its contents) under /public.
- * Example: deleteFolderRecursive("upload/transaction/self-transfer/123/")
+ * Example: deleteFolderRecursive("uploads/transaction/self-transfer/123/")
  *
  * @param {string} folderRelative - Folder path relative to /public (no leading slash).
  * @returns {Promise<boolean>} - true if deleted (or didn’t exist), false on error.

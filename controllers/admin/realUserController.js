@@ -83,7 +83,7 @@ async function addRealUser(req, res) {
         .allow(null, ""),
     }).required();
 
-    // Merge avatar from upload over body
+    // Merge avatar from uploads over body
     const payload = {
       ...req.body,
       ...(uploadedAvatar ? { avatar: uploadedAvatar } : {}),
@@ -306,7 +306,7 @@ async function updateRealUserProfile(req, res) {
       is_active: Joi.boolean().optional(),
     }).min(1);
 
-    // Merge avatar from upload over body
+    // Merge avatar from uploads over body
     const payload = {
       ...req.body,
       ...(uploadedAvatar ? { avatar: uploadedAvatar } : {}),
@@ -642,7 +642,7 @@ async function uploadUserMedia(req, res) {
 
     const MAX_FILES = parseInt(await getOption("max_files_per_user", 5), 10);
 
-    // Replace-all flow => count cap check BEFORE upload
+    // Replace-all flow => count cap check BEFORE uploads
     if (incomingFiles.length > MAX_FILES) {
       await cleanupTempFiles(incomingFiles);
       return res.status(400).json({
@@ -673,7 +673,7 @@ async function uploadUserMedia(req, res) {
     const uploader_ip = getRealIp(req);
     const user_agent = String(req.headers["user-agent"] || "").slice(0, 300);
 
-    //  Transaction replace-all (lock + delete + upload)
+    //  Transaction replace-all (lock + delete + uploads)
     const result = await sequelize.transaction(async (transaction) => {
       // Lock existing rows to avoid replace races
       const existing = await FileUpload.findAll({

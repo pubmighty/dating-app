@@ -359,6 +359,52 @@ async function detectSuspiciousAdminLogin(user, req) {
 
   return !oldSession; // If no old session found, it's suspicious
 }
+
+async function verifyTwoFAToken(user, token) {
+  try {
+    if (!user) {
+      // console.warn("User object is missing.");
+      return false;
+    }
+
+    // Handle user status (suspended)
+    if (user.status === 3) {
+      return false;
+    }
+
+    // Extract the 2FA secret from the user object
+    const userSecret = user.two_fa_secret;
+    if (!userSecret) {
+      // console.warn("User does not have a 2FA secret.");
+      return false;
+    }
+
+    // Validate the 2FA token
+    const isVerified = validateTwoFAToken(userSecret, token);
+
+    if (isVerified) {
+      // console.info("2FA token verified successfully.");
+      return true;
+    } else {
+      // console.warn("Invalid 2FA token.");
+      return false;
+    }
+  } catch (error) {
+    console.error("Error verifying 2FA token:", error.message);
+    return false;
+  }
+}
+function verifyAdminRole(admin, work) {
+  if (!admin || !admin.role) return false;
+
+  if (admin.role === "superAdmin") {
+    return true;
+  }
+
+  return false;
+}
+
+
 module.exports = {
   handleUserSessionCreation,
   isUserSessionValid,
@@ -370,4 +416,6 @@ module.exports = {
   isAdminSessionValid,
   handleAdminSessionCreation,
   detectSuspiciousAdminLogin,
+  verifyTwoFAToken,
+  verifyAdminRole,
 };

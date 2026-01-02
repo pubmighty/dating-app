@@ -125,7 +125,7 @@ async function updateUserProfile(req, res) {
         .optional(),
     }).min(1);
 
-    // Merge avatar from upload (server-trusted) over body (client-controlled)
+    // Merge avatar from uploads (server-trusted) over body (client-controlled)
     const payload = {
       ...req.body,
       ...(uploadedAvatar ? { avatar: uploadedAvatar } : {}),
@@ -252,7 +252,7 @@ async function uploadProfileMedia(req, res) {
   const MAX_FILES = parseInt(await getOption("max_files_per_user", 5), 10);
 
   // Your flow is "replace all", so keptCount is always 0
-  // Count cap check BEFORE any upload
+  // Count cap check BEFORE any uploads
   if (incomingFiles.length > MAX_FILES) {
     await cleanupTempFiles(incomingFiles);
     return res.status(400).json({

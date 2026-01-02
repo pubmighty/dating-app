@@ -143,7 +143,7 @@ async function registerWithGoogle(req, res) {
 
     const avatarName = await downloadAndUploadGoogleAvatar(
       avatar,
-      "upload/avatar"
+      "uploads/avatar"
     );
 
     const user = await User.create({

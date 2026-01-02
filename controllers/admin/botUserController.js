@@ -88,7 +88,7 @@ async function addBotUser(req, res) {
         .required(),
     }).required();
 
-    // Merge avatar from upload (server-trusted) over body (client-controlled)
+    // Merge avatar from uploads (server-trusted) over body (client-controlled)
     const payload = {
       ...req.body,
       ...(uploadedAvatar ? { avatar: uploadedAvatar } : {}),
@@ -308,7 +308,7 @@ async function updateBotUserProfile(req, res) {
       is_active: Joi.boolean().optional(),
     }).min(1);
 
-    // Merge avatar from upload over body
+    // Merge avatar from uploads over body
     const payload = {
       ...req.body,
       ...(uploadedAvatar ? { avatar: uploadedAvatar } : {}),
@@ -692,7 +692,7 @@ async function uploadBotMedia(req, res) {
 
     const MAX_FILES = parseInt(await getOption("max_files_per_user", 5), 10);
 
-    // Replace-all flow => count cap check BEFORE upload
+    // Replace-all flow => count cap check BEFORE uploads
     if (incomingFiles.length > MAX_FILES) {
       await cleanupTempFiles(incomingFiles);
       return res.status(400).json({
@@ -723,7 +723,7 @@ async function uploadBotMedia(req, res) {
     const uploader_ip = getRealIp(req);
     const user_agent = String(req.headers["user-agent"] || "").slice(0, 300);
 
-    // 7) Transaction replace-all (lock + delete + upload)
+    // 7) Transaction replace-all (lock + delete + uploads)
     const result = await sequelize.transaction(async (transaction) => {
       // Lock existing rows to avoid replace races
       const existing = await FileUpload.findAll({

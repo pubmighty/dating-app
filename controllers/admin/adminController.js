@@ -99,7 +99,7 @@ async function addAdmin(req, res) {
 
       const stored = await uploadFile(
         req.file,
-        "upload/admin",
+        "uploads/admin",
 
         null,
         req.ip,
@@ -273,7 +273,7 @@ async function editAdmin(req, res) {
 
       const stored = await uploadFile(
         req.file,
-        "upload/admin",
+        "uploads/admin",
 
         null,
         req.ip,
@@ -282,7 +282,7 @@ async function editAdmin(req, res) {
         "normal", // IMPORTANT
         null // IMPORTANT
       );
-      if (admin.avtar) await deleteFile(admin.avtar, "upload/admin");
+      if (admin.avtar) await deleteFile(admin.avtar, "uploads/admin");
       payload.avtar = stored.filename;
     }
 
@@ -551,10 +551,10 @@ async function addCoinPackage(req, res) {
       validity_days: value.validity_days,
       display_order: value.display_order,
       status: value.status,
-      cover: null, // set below if file upload exists
+      cover: null, // set below if file uploads exists
     };
 
-    // 6) Optional cover upload (real-life)
+    // 6) Optional cover uploads (real-life)
     if (req.file) {
       const ok = await verifyFileType(req.file);
       if (!ok) {
@@ -563,8 +563,8 @@ async function addCoinPackage(req, res) {
           .json({ success: false, msg: "Invalid file type" });
       }
 
-      // store in a folder like upload/coin-packages
-      const stored = await uploadFile(req.file, "upload/coin-packages");
+      // store in a folder like uploads/coin-packages
+      const stored = await uploadFile(req.file, "uploads/coin-packages");
       payload.cover = stored.filename;
     }
 

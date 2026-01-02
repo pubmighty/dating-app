@@ -232,7 +232,7 @@ router.get("/profile", userController.getUserProfile);
  *
  * - Requires a valid authenticated session.
  * - Accepts multipart/form-data.
- * - Supports optional avatar upload via "avatar" field.
+ * - Supports optional avatar uploads via "avatar" field.
  * - Avatar file is first validated server-side (magic bytes, size, type).
  * - Existing avatar (if any) is safely replaced (storage + DB).
  * - Profile fields are partially updatable (only provided fields are changed).

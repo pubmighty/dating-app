@@ -3,16 +3,14 @@ const Joi = require("joi");
 const { captchaVerification } = require("../../utils/helpers/captchaHelper");
 const {
   getOption,
-  verifyTwoFAToken,
-
   getLocation,
   getRealIp,
-  noReplyMail,
 } = require("../../utils/helper");
 const {
   isValidEmail,
   generateOtp,
   handleAdminSessionCreation,
+  verifyTwoFAToken,
 } = require("../../utils/helpers/authHelper");
 const Admin = require("../../models/Admin/Admin");
 const sequelize = require("../../config/db");
@@ -26,6 +24,7 @@ const {
 } = require("../../utils/helpers/mailUIHelper");
 
 const { transporter } = require("../../config/mail");
+const { noReplyMail } = require("../../utils/staticValues");
 
 async function adminLogin(req, res) {
   // validate

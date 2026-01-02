@@ -315,49 +315,43 @@ function ceilDiv(a, b) {
   return Math.floor((A + B - 1) / B); // all int math
 }
 
-async function verifyTwoFAToken(user, token) {
-  try {
-    if (!user) {
-      // console.warn("User object is missing.");
-      return false;
-    }
+ const toMoney = (v) => {
+      if (v === "" || v == null) return null;
+      const n = Number(v);
+      if (!Number.isFinite(n)) return null;
+      // round to 2 decimals safely
+      return Math.round(n * 100) / 100;
+    };
 
-    // Handle user status (suspended)
-    if (user.status === 3) {
-      return false;
-    }
+    const computeFinalPrice = (price, discountType, discountValue) => {
+      const p = toMoney(price);
+      const d = toMoney(discountValue) ?? 0;
 
-    // Extract the 2FA secret from the user object
-    const userSecret = user.two_fa_secret;
-    if (!userSecret) {
-      // console.warn("User does not have a 2FA secret.");
-      return false;
-    }
+      if (p == null || p < 0) return { ok: false, msg: "price must be a valid number >= 0" };
+      if (d < 0) return { ok: false, msg: "discount_value must be >= 0" };
 
-    // Validate the 2FA token
-    const isVerified = validateTwoFAToken(userSecret, token);
+      if (discountType === "percentage") {
+        if (d > 100) return { ok: false, msg: "discount_value must be between 0 and 100 for percentage" };
+        const final = toMoney(p - (p * d) / 100);
+        return { ok: true, final_price: final < 0 ? 0 : final };
+      }
 
-    if (isVerified) {
-      // console.info("2FA token verified successfully.");
-      return true;
-    } else {
-      // console.warn("Invalid 2FA token.");
-      return false;
-    }
-  } catch (error) {
-    console.error("Error verifying 2FA token:", error.message);
-    return false;
-  }
-}
-function verifyAdminRole(admin, work) {
-  if (!admin || !admin.role) return false;
+      if (discountType === "flat") {
+        if (d > p) return { ok: false, msg: "discount_value cannot exceed price for flat discount" };
+        const final = toMoney(p - d);
+        return { ok: true, final_price: final < 0 ? 0 : final };
+      }
 
-  if (admin.role === "superAdmin") {
-    return true;
-  }
+      return { ok: false, msg: "Invalid discount_type" };
+    };
 
-  return false;
-}
+       const parseBool = (v) => {
+      if (v === true || v === false) return v;
+      const s = String(v).trim().toLowerCase();
+      if (s === "true" || s === "1") return true;
+      if (s === "false" || s === "0") return false;
+      return null;
+    };
 
 module.exports = {
   getRealIp,
@@ -384,8 +378,6 @@ module.exports = {
   toInt,
   ceilDiv,
   clampInt,
-
-  noReplyMail,
-  verifyTwoFAToken,
-  verifyAdminRole,
+  computeFinalPrice, toMoney,
+  parseBool
 };
