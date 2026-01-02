@@ -44,6 +44,35 @@ async function run() {
     await set("users_per_page_admin", 10);
     await set("bots_per_page_admin", 10);
 
+    await set("admin_login_captcha", "altcha");
+    await set("admin_login_captcha_enabled", "false");
+
+    await set("is_recaptcha_enable", "false");
+    await set("is_hcaptcha_enable", "false");
+    await set("is_cloudflare_turnstile_enable", "false");
+    await set("is_svg_image_enable", "false");
+    await set("is_altcha_enable", "false");
+
+    await set("recaptcha_secret_key", "");
+    await set("recaptcha_client_key", "");
+
+    await set("hcaptcha_secret_key", "");
+    await set("hcaptcha_client_key", "");
+
+    await set("cloudflare_turnstile_secret_key", "");
+    await set("cloudflare_turnstile_client_key", "");
+
+    await set("altcha_captcha_key", "");
+    await set("altcha_captcha_challenge_number", 1000000);
+
+    await set("admin_otp_expires_login_minutes", 10);
+    await set("max_admin_session_duration_days", 7);
+
+    await set("admin_otp_valid_minutes", 10);
+
+    await set("admin_forgot_password_captcha", "altcha");
+    await set("admin_forgot_password_captcha_enabled", "false");
+
     console.log("Options inserted/verified");
     process.exit(0);
   } catch (e) {

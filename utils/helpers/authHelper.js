@@ -1,7 +1,7 @@
 // helpers/userAuthHelper.js
 const { Op } = require("sequelize");
 const crypto = require("crypto");
-
+const speakeasy = require("speakeasy");
 const AdminSession = require("../../models/Admin/AdminSession");
 const UserSession = require("../../models/UserSession");
 const {
@@ -225,7 +225,7 @@ async function isAdminSessionValid(req) {
     }
 
     const now = new Date();
-    if (session.expiresAt && session.expiresAt < now) {
+    if (session.expires_at && session.expires_at < now) {
       await session.update({ status: 2 });
       return { success: false, message: "Session expired", data: null };
     }
@@ -278,7 +278,7 @@ async function handleAdminSessionCreation(user, req, transaction = null) {
 
   const token = crypto.randomBytes(32).toString("base64url");
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + maxSessionSeconds * 1000);
+  const expires_at = new Date(now.getTime() + maxSessionSeconds * 1000);
 
   // 2. mark already-expired active sessions for THIS admin as inactive
   await AdminSession.update(
@@ -287,7 +287,7 @@ async function handleAdminSessionCreation(user, req, transaction = null) {
       where: {
         admin_id: user.id, // <-- was userId
         status: 1,
-        expiresAt: { [Op.lt]: now },
+        expires_at: { [Op.lt]: now },
       },
       transaction,
     }
@@ -314,30 +314,30 @@ async function handleAdminSessionCreation(user, req, transaction = null) {
     os: userAgentData.os,
     browser: userAgentData.browser,
     status: 1,
-    expiresAt: expiresAt,
+    expires_at: expires_at,
   };
 
   if (activeCount < maxUserSessions) {
     // 4a. create new session
     await AdminSession.create(sessionPayload, { transaction });
-    return { token, expiresAt };
+    return { token, expires_at };
   }
 
   // 4b. otherwise reuse oldest
   const oldestActive = await AdminSession.findOne({
     where: { admin_id: user.id },
-    order: [["expiresAt", "ASC"]],
+    order: [["expires_at", "ASC"]],
     transaction,
   });
 
   if (!oldestActive) {
     // fallback: create
     await AdminSession.create(sessionPayload, { transaction });
-    return { token, expiresAt };
+    return { token, expires_at };
   }
 
   await oldestActive.update(sessionPayload, { transaction });
-  return { token, expiresAt };
+  return { token, expires_at };
 }
 
 // Helper function to detect suspicious login
@@ -358,6 +358,25 @@ async function detectSuspiciousAdminLogin(user, req) {
   });
 
   return !oldSession; // If no old session found, it's suspicious
+}
+
+/**
+ * Validates a 2FA token against the user's secret.
+ * @param {string} userSecret - The 2FA secret of the user (base32-encoded).
+ * @param {string} token - The 2FA token provided by the user.
+ * @returns {boolean} - Returns true if the token is valid, false otherwise.
+ */
+function validateTwoFAToken(userSecret, token) {
+  if (!userSecret || !token) {
+    return false;
+  }
+
+  return speakeasy.totp.verify({
+    secret: userSecret,
+    encoding: "base32",
+    token,
+    window: 1, // Accept tokens from 30 seconds before and after the current time
+  });
 }
 
 async function verifyTwoFAToken(user, token) {

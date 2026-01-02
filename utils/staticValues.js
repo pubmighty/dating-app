@@ -76,9 +76,23 @@ const ALLOWED_EXTS = [
 ];
 
 const PACKAGE_NAME = process.env.ANDROID_PACKAGE_NAME;
-const GOOGLE_PLAY_SERVICE_ACCOUNT_JSON = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON;
+const GOOGLE_PLAY_SERVICE_ACCOUNT_JSON =
+  process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON;
 const noReplyMail = process.env.NO_REPLY_MAIL;
 
+const publicAdminAttributes = [
+  "id",
+  "email",
+  "username",
+  "first_name",
+  "last_name",
+  "role",
+  "status",
+  "two_fa",
+  "two_fa_method",
+  "created_at",
+  "updated_at",
+];
 
 module.exports = {
   publicFeedUserAttributes,
@@ -91,4 +105,5 @@ module.exports = {
   PACKAGE_NAME,
   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON,
   noReplyMail,
+  publicAdminAttributes,
 };

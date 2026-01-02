@@ -1,10 +1,177 @@
 const router = require("express").Router();
-const authController = require("../../controllers/admin/authController");
 const adminController = require("../../controllers/admin/adminController");
 const { fileUploader } = require("../../utils/helpers/fileUpload");
+const authController = require("../../controllers/admin/authController");
 const userController = require("../../controllers/admin/userController");
 const botController = require("../../controllers/admin/botController");
 const coinPackageController = require("../../controllers/admin/coinPackageController");
+
+/**
+ * POST /login
+ * ------------------------------------------------------------
+ * Authenticates an admin user using credentials.
+ *
+ * Purpose:
+ * - Initiates the admin authentication flow.
+ * - Validates admin credentials (email/username + password).
+ *
+ * Security & Authorization:
+ * - Accessible publicly (no prior authentication required).
+ * - Rate-limited to prevent brute-force attacks.
+ * - Uses secure password hashing comparison.
+ *
+ * Payload:
+ * - email | username: string (required)
+ * - password: string (required)
+ *
+ * Behavior:
+ * - Verifies admin existence and active status.
+ * - Rejects invalid credentials with generic error messages.
+ * - Generates a temporary authentication context (pre-OTP).
+ * - Does NOT finalize login until OTP verification succeeds.
+ *
+ * Notes:
+ * - No session or token is issued at this stage.
+ * - Intended to be followed by POST /login/verify.
+ */
+router.post("/login", authController.adminLogin);
+/**
+ * POST /login/verify
+ * ------------------------------------------------------------
+ * Verifies the OTP for an admin login attempt.
+ *
+ * Purpose:
+ * - Completes the admin login process.
+ * - Confirms ownership of the admin account via OTP.
+ *
+ * Security & Authorization:
+ * - Requires a valid pending login attempt.
+ * - OTP is time-bound and single-use.
+ *
+ * Payload:
+ * - otp: string | number (required)
+ * - reference_id / session_id: string (required)
+ *
+ * Behavior:
+ * - Validates OTP against stored login challenge.
+ * - Invalidates OTP after successful verification.
+ * - Creates authenticated admin session or issues auth token.
+ * - Records login metadata (IP, device, timestamp).
+ *
+ * Failure Cases:
+ * - Expired OTP
+ * - Invalid OTP
+ * - Missing or invalid login context
+ */
+router.post("/login/verify", authController.verifyAdminLogin);
+
+/**
+ * POST /forgot-password
+ * ------------------------------------------------------------
+ * Initiates the admin password recovery flow.
+ *
+ * Purpose:
+ * - Allows an admin to recover access to their account.
+ * - Sends a verification OTP for password reset.
+ *
+ * Security & Authorization:
+ * - Accessible publicly.
+ * - Rate-limited to prevent enumeration attacks.
+ *
+ * Payload:
+ * - email | username: string (required)
+ *
+ * Behavior:
+ * - Validates admin account existence.
+ * - Generates a secure, time-limited OTP.
+ * - Sends OTP via configured communication channel.
+ * - Does NOT reveal whether the account exists.
+ *
+ * Notes:
+ * - No password change happens at this stage.
+ * - Must be followed by POST /forgot-password/verify.
+ */
+router.post("/forgot-password", authController.forgotAdminPassword);
+/**
+ * POST /forgot-password/verify
+ * ------------------------------------------------------------
+ * Verifies OTP and updates admin password.
+ *
+ * Purpose:
+ * - Completes the admin password reset process.
+ * - Securely replaces the old password.
+ *
+ * Security & Authorization:
+ * - Requires a valid password-reset OTP.
+ * - OTP is single-use and time-limited.
+ *
+ * Payload:
+ * - otp: string | number (required)
+ * - new_password: string (required)
+ * - reference_id / session_id: string (required)
+ *
+ * Behavior:
+ * - Validates OTP and reset context.
+ * - Hashes and stores the new password securely.
+ * - Invalidates all existing admin sessions.
+ * - Prevents reuse of old passwords if enforced.
+ *
+ * Warning:
+ * - This operation immediately revokes previous sessions.
+ */
+router.post(
+  "/forgot-password/verify",
+  authController.verifyAdminForgotPassword
+);
+
+/**
+ * POST /resend-send-otp
+ * ------------------------------------------------------------
+ * Resends an OTP for admin authentication flows.
+ *
+ * Purpose:
+ * - Allows admin to request a new OTP
+ *   if the previous one expired or was not received.
+ *
+ * Security & Authorization:
+ * - Rate-limited to prevent abuse.
+ * - Requires a valid pending auth or reset context.
+ *
+ * Payload:
+ * - reference_id / session_id: string (required)
+ *
+ * Behavior:
+ * - Invalidates any previously issued OTP.
+ * - Generates and sends a new OTP.
+ * - Enforces cooldown between resend attempts.
+ *
+ * Notes:
+ * - Used for both login and password recovery flows.
+ */
+router.post("/resend-send-otp", authController.sendOTPAgainForAdmin);
+/**
+ * POST /altcha-captcha-challenge
+ * ------------------------------------------------------------
+ * Generates a CAPTCHA challenge for admin authentication.
+ *
+ * Purpose:
+ * - Protects admin authentication endpoints from bots.
+ * - Provides proof-of-work or challenge-response verification.
+ *
+ * Security & Authorization:
+ * - Publicly accessible.
+ * - Designed to be validated before sensitive auth actions.
+ *
+ * Behavior:
+ * - Generates a new ALTCHA challenge.
+ * - Returns challenge data required by the frontend.
+ * - Challenge is validated during login or OTP requests.
+ *
+ * Notes:
+ * - Does not authenticate or identify the user.
+ * - Used as an additional security layer only.
+ */
+router.post("/altcha-captcha-challenge", authController.altchaCaptchaChallenge);
 
 /**
  * GET /users
@@ -327,11 +494,7 @@ router.get("/bots/:userId", botController.getBot);
  * - Soft-deleted users still reserve their email/username/phone.
  * - This endpoint creates only bots, not real users.
  */
-router.post(
-  "/bots/add",
-  fileUploader.single("avatar"),
-  botController.addBot
-);
+router.post("/bots/add", fileUploader.single("avatar"), botController.addBot);
 
 /**
  * POST /bots/:userId
@@ -655,12 +818,6 @@ router.post(
   "/coin-packages/:coinPackageId/delete",
   coinPackageController.deleteCoinPackage
 );
-
-router.post("/login", authController.adminLogin);
-router.post("/login/verify", authController.verifyAdminLogin);
-router.post("/resend-send-otp", authController.sendOTPAgain);
-router.post("/forgot-password", authController.forgotAdminPassword);
-router.post("/forgot-password/verify", authController.verifyForgotPassword);
 
 // admins
 router.get("/admins", adminController.getAdmins);
