@@ -39,6 +39,9 @@ async function run() {
     await set("video_call_cost_per_minute", 50);
     await set("video_call_minimum_start_balance", 50);
 
+    await set("max_pages_admin", 1000);
+    await set("coin_packages_per_page", 10);
+
     console.log("Options inserted/verified");
     process.exit(0);
   } catch (e) {
