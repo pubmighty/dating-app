@@ -4,6 +4,7 @@ const maxmind = require("maxmind");
 const { Op } = require("sequelize");
 const UAParser = require("ua-parser-js");
 const noReplyMail = "no-reply@gplinks.org";
+const crypto = require("crypto");
 // global variables
 let lookup;
 const dbPath = path.join(__dirname, "/ip-db/GeoLite2-City.mmdb");
@@ -368,6 +369,20 @@ function escapeLike(input) {
   // but escaping still prevents unintended wildcard expansion.
   return String(input).replace(/[\\%_]/g, (m) => `\\${m}`);
 }
+
+function generateServerDeviceId(req, userId) {
+  const ua = req.headers["user-agent"] || "unknown";
+  const ip =
+    req.headers["x-forwarded-for"]?.split(",")[0] ||
+    req.socket?.remoteAddress ||
+    "0.0.0.0";
+
+  return crypto
+    .createHash("sha256")
+    .update(`${userId}|${ua}|${ip}`)
+    .digest("hex");
+}
+
 module.exports = {
   getRealIp,
   getOption,
@@ -397,4 +412,5 @@ module.exports = {
   toMoney,
   parseBool,
   escapeLike,
+  generateServerDeviceId
 };

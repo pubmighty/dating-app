@@ -13,7 +13,7 @@ const {
   verifyGooglePlayPurchase,
 } = require("../../controllers/user/googleBillingController");
 const utilController = require("../../controllers/user/utilController");
-
+const notificationToken =require("../../controllers/user/notificationTokenController")
 /**
  * GET /setting
  *
@@ -86,6 +86,14 @@ router.post("/register/verify", authController.verifyRegister);
  *    - Must NOT reveal whether email or password was incorrect.
  */
 router.post("/login", authController.loginUser);
+
+/**
+ *  /logout
+ *    - Clears user credentials.
+ *    - Issues session tokens on success.
+ *    - clears the session of the user.
+ */
+router.post("/logout", authController.logoutUser);
 
 /**
  * 5. /forgot-password
@@ -789,5 +797,16 @@ router.post(
  * - Android app using Google Play Billing Library ONLY.
  */
 router.post("/billing/google-play/verify", verifyGooglePlayPurchase);
+
+ //POST /api/user/notification-token
+// ---------------------------------
+// Saves or updates the FCM notification token for the logged-in user.
+// - Requires a valid user session (checked inside controller)
+// - Deactivates old token for same device
+// - Upserts (userId + uniqueDeviceId)
+router.post(
+  "/notification-token",
+  notificationToken.addNotificationToken
+);
 
 module.exports = router;

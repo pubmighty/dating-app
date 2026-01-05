@@ -423,6 +423,33 @@ function verifyAdminRole(admin, work) {
   return false;
 }
 
+async function clearUserSessionByToken(req) {
+  try {
+    const authHeader = String(req?.headers?.authorization || "").trim();
+
+    if (!authHeader.toLowerCase().startsWith("bearer ")) {
+      return { success: false, message: "Authorization token missing" };
+    }
+
+    const sessionToken = authHeader.slice(7).trim();
+    if (!sessionToken) {
+      return { success: false, message: "Invalid session token" };
+    }
+
+    const deleted = await UserSession.destroy({
+      where: { session_token: sessionToken },
+    });
+
+    if (!deleted) {
+      return { success: false, message: "Session not found or already removed" };
+    }
+
+    return { success: true, message: "Session destroyed" };
+  } catch (err) {
+    console.error("clearUserSessionByToken error:", err);
+    return { success: false, message: "Failed to logout session" };
+  }
+}
 
 module.exports = {
   handleUserSessionCreation,
@@ -437,4 +464,5 @@ module.exports = {
   detectSuspiciousAdminLogin,
   verifyTwoFAToken,
   verifyAdminRole,
+  clearUserSessionByToken
 };

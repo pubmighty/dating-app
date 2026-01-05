@@ -12,6 +12,8 @@ const {
   isValidEmail,
   isValidPhone,
   generateOtp,
+  isUserSessionValid,
+  clearUserSessionByToken
 } = require("../../utils/helpers/authHelper");
 const {
   downloadAndUploadGoogleAvatar,
@@ -993,6 +995,77 @@ async function forgotPasswordVerify(req, res) {
     });
   }
 }
+async function logoutUser(req, res) {
+  try {
+    
+     const session = await isUserSessionValid(req);
+    if (!session?.success) return res.status(401).json(session);
+
+    const userId = Number(session.data);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid session",
+        data: null,
+      });
+    }
+
+    //  Extract session_token
+    const authHeader = String(req.headers.authorization || "");
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(400).json({
+        success: false,
+        message: "Authorization token missing",
+        data: null,
+      });
+    }
+
+    const sessionToken = authHeader.slice(7).trim();
+    if (!sessionToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid session token",
+        data: null,
+      });
+    }
+
+    // Mark session expired (status=2)
+    const [updated] = await UserSession.update(
+      {
+        status: 2,
+        last_activity_at: new Date(),
+      },
+      {
+        where: {
+          user_id: userId,
+          session_token: sessionToken,
+          status: 1,
+        },
+      }
+    );
+
+    if (!updated) {
+      return res.status(400).json({
+        success: false,
+        message: "Session already expired or not found",
+        data: null,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Logout successful",
+      data: null,
+    });
+  } catch (err) {
+    console.error("Error during [logoutUser]:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Logout failed",
+      data: null,
+    });
+  }
+}
 
 module.exports = {
   registerWithGoogle,
@@ -1001,4 +1074,5 @@ module.exports = {
   loginUser,
   forgotPassword,
   forgotPasswordVerify,
+  logoutUser,
 };

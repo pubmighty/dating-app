@@ -106,8 +106,8 @@ async function updateUserProfile(req, res) {
       looking_for: Joi.string()
         .valid(
           "Long Term",
-          "Long Term, Open To Short",
-          "Short Term, Open To Long",
+          "Long Term Open To Short",
+          "Short Term Open To Long",
           "Short Term Fun",
           "New Friends",
           "Still Figuring Out"
