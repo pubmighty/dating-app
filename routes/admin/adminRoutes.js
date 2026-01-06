@@ -819,10 +819,157 @@ router.post(
   coinPackageController.deleteCoinPackage
 );
 
-// admins
-router.get("/admins", adminController.getAdmins);
-router.post("/add", fileUploader.single("avtar"), adminController.addAdmin);
-router.post("/:id", fileUploader.single("avtar"), adminController.editAdmin);
-router.get("/:id", adminController.getAdminById);
+/**
+ * GET /manage-admins
+ * ------------------------------------------------------------
+ * Retrieves a paginated list of admin accounts with
+ * filtering and sorting support.
+ *
+ * Purpose:
+ * - Allows authorized admins to view and manage other admins.
+ * - Supports searching, filtering, and ordering at scale.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to list/manage admins.
+ * - Suspended or inactive admins are denied access.
+ *
+ * Query Parameters:
+ * - page: number (optional, default: 1)
+ * - sortBy: string (optional)
+ *   Allowed: id, username, email, role, status, createdAt, updatedAt
+ * - sortDir: string (optional)
+ *   Allowed: asc | desc
+ * - username: string (optional, prefix search)
+ * - email: string (optional, prefix search)
+ * - role: string (optional)
+ *   Allowed: superAdmin | staff | paymentManager | support
+ * - status: number (optional)
+ *   Allowed: 0 | 1 | 2 | 3
+ * - twoFactorEnabled: number (optional)
+ *   Allowed: 0 | 1 | 2
+ *
+ * Behavior:
+ * - Uses safe, allow-listed sorting fields to prevent SQL injection.
+ * - Applies index-friendly prefix searches for username and email.
+ * - Caps pagination limits to prevent abuse.
+ * - Excludes sensitive fields (passwords, secrets, tokens).
+ */
+router.get("/manage-admins", adminController.getAdmins);
+
+/**
+ * GET /manage-admins/:id
+ * ------------------------------------------------------------
+ * Retrieves a single admin by ID.
+ *
+ * Purpose:
+ * - Allows authorized admins to view details of a specific admin.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to view admin details.
+ * - Suspended or inactive admins are denied access.
+ *
+ * Path Parameters:
+ * - id: number (required)
+ *
+ * Behavior:
+ * - Returns 404 if the admin does not exist.
+ * - Excludes sensitive fields (passwords, 2FA secrets, tokens).
+ */
+router.get("/manage-admins/:id", adminController.getAdmin);
+
+/**
+ * POST /manage-admins/add
+ * ------------------------------------------------------------
+ * Creates a new admin account.
+ *
+ * Purpose:
+ * - Allows privileged admins to add new administrators or staff.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to create admins.
+ *
+ * Payload:
+ * - username: string (required)
+ * - email: string (required)
+ * - password: string (required)
+ * - first_name: string (optional)
+ * - last_name: string (optional)
+ * - role: string (optional)
+ *   Allowed: superAdmin | staff | paymentManager | support
+ * - status: number (optional)
+ *   Allowed: 0 | 1 | 2 | 3
+ * - twoFactorEnabled: number (optional)
+ *   Allowed: 0 | 1 | 2
+ *
+ * Multipart Form Data:
+ * - avtar: file (optional)
+ *   Admin profile avatar image.
+ *
+ * Behavior:
+ * - Validates input strictly using schema validation.
+ * - Ensures username and email uniqueness.
+ * - Hashes password securely before storage.
+ * - Stores avatar image if provided.
+ * - Creates the admin inside a transaction to avoid race conditions.
+ *
+ * Warning:
+ * - This endpoint grants elevated system access.
+ * - Restrict usage to trusted roles only.
+ */
+router.post(
+  "/manage-admins/add",
+  fileUploader.single("avtar"),
+  adminController.addAdmin
+);
+
+/**
+ * POST /manage-admins/:id
+ * ------------------------------------------------------------
+ * Updates an existing admin account.
+ *
+ * Purpose:
+ * - Allows authorized admins to modify admin details.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to edit admins.
+ * - Suspended or inactive admins are denied access.
+ *
+ * Path Parameters:
+ * - id: number (required)
+ *
+ * Payload:
+ * - username: string (optional)
+ * - email: string (optional)
+ * - password: string (optional)
+ * - first_name: string (optional)
+ * - last_name: string (optional)
+ * - role: string (optional)
+ * - status: number (optional)
+ * - twoFactorEnabled: number (optional)
+ *
+ * Multipart Form Data:
+ * - avtar: file (optional)
+ *   Updated admin profile avatar image.
+ *
+ * Behavior:
+ * - Updates only provided fields.
+ * - Re-validates uniqueness for username and email.
+ * - Re-hashes password if updated.
+ * - Handles avatar replacement and cleanup safely.
+ * - Clears 2FA secrets if two-factor authentication is disabled.
+ *
+ * Warning:
+ * - Changing roles or disabling 2FA affects system security.
+ * - All changes should be auditable.
+ */
+router.post(
+  "/manage-admins/:id",
+  fileUploader.single("avtar"),
+  adminController.editAdmin
+);
 
 module.exports = router;

@@ -6,6 +6,7 @@ const {
   getOption,
   getRealIp,
   normalizeFiles,
+  normalizeInterests,
 } = require("../../utils/helper");
 const {
   uploadImage,

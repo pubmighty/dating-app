@@ -106,7 +106,7 @@ const User = sequelize.define(
       defaultValue: 0,
     },
     height: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.STRING(10),
       allowNull: true,
     },
     total_matches: {

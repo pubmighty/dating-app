@@ -13,309 +13,21 @@ const Admin = require("../../models/Admin/Admin");
 const CoinPackage = require("../../models/CoinPackage");
 const { verifyAdminRole } = require("../../utils/helper");
 
-async function addAdmin(req, res) {
-  try {
-    const schema = Joi.object({
-      username: Joi.string().max(150).trim().required(),
-      email: Joi.string().email().max(255).trim().required(),
-      password: Joi.string().min(8).max(255).required(),
-      first_name: Joi.string().allow("", null).max(100).optional(),
-      last_name: Joi.string().allow("", null).max(100).optional(),
-      role: Joi.string()
-        .valid("superAdmin", "staff", "paymentManager", "support")
-        .default("staff"),
-
-      status: Joi.number().integer().valid(0, 1, 2, 3).default(1),
-
-      twoFactorEnabled: Joi.number().integer().valid(0, 1, 2).default(0),
-    });
-
-    const { error, value } = schema.validate(req.body, {
-      abortEarly: true,
-      stripUnknown: true,
-      convert: true,
-    });
-
-    if (error) {
-      return res
-        .status(400)
-        .json({ success: false, msg: error.details[0].message });
-    }
-
-    if (!value.username || !value.email || !value.password) {
-      return res.status(400).json({
-        success: false,
-        msg: "username, email, and password are required.",
-      });
-    }
-
-    const session = await isAdminSessionValid(req, res);
-    if (!session?.success || !session?.data) {
-      return res.status(401).json({ success: false, msg: "Unauthorized" });
-    }
-
-    const adminId = session.data;
-
-    const caller = await Admin.findByPk(adminId);
-    if (!caller) {
-      return res.status(401).json({ success: false, msg: "Unauthorized" });
-    }
-
-    if (!verifyAdminRole(caller, "addAdmin")) {
-      return res.status(403).json({ success: false, msg: "Forbidden" });
-    }
-
-    // Normalize username/email
-    value.email = String(value.email).toLowerCase().trim();
-    value.username = String(value.username).trim();
-
-    // Check uniqueness
-    const existing = await Admin.findOne({
-      where: {
-        [Op.or]: [{ email: value.email }, { username: value.username }],
-      },
-      attributes: ["id", "email", "username"],
-    });
-
-    if (existing) {
-      const clash = existing.email === value.email ? "email" : "username";
-      return res.status(409).json({
-        success: false,
-        msg: `An admin with this ${clash} already exists.`,
-      });
-    }
-
-    // Hash password
-    value.password = await bcrypt.hash(value.password, 10);
-
-    // Handle avatar
-    if (req.file) {
-      const ok = await verifyFileType(req.file);
-      if (!ok) {
-        return res
-          .status(400)
-          .json({ success: false, msg: "Invalid file type" });
-      }
-
-      const stored = await uploadFile(
-        req.file,
-        "uploads/admin",
-
-        null,
-        req.ip,
-        req.headers["user-agent"],
-        admin.id, // or session admin id
-        "normal", // IMPORTANT
-        null // IMPORTANT
-      );
-      value.avatar = stored.filename;
-    }
-
-    // Unified 2FA: 0=off,1=app,2=email
-    const twoFactorEnabled =
-      typeof value.twoFactorEnabled === "number" ? value.twoFactorEnabled : 0;
-
-    const createPayload = {
-      username: value.username,
-      email: value.email,
-      password: value.password,
-      first_name: (value.first_name || "").trim() || null,
-      last_name: (value.last_name || "").trim() || null,
-      role: value.role,
-      status: value.status,
-      avtar: value.avatar ?? null,
-      two_fa: twoFactorEnabled,
-    };
-
-    const created = await sequelize.transaction(async (t) => {
-      const row = await Admin.create(createPayload, { transaction: t });
-      return Admin.findByPk(row.id, {
-        attributes: { exclude: ["password"] },
-        transaction: t,
-      });
-    });
-
-    return res.status(201).json({
-      success: true,
-      msg: "Admin created successfully.",
-      data: created,
-    });
-  } catch (err) {
-    console.error("Error in addAdmin:", err);
-
-    if (err?.name === "SequelizeUniqueConstraintError") {
-      const field = err?.errors?.[0]?.path || "unique field";
-      return res.status(409).json({
-        success: false,
-        msg: `Duplicate value for ${field}.`,
-      });
-    }
-
-    return res
-      .status(500)
-      .json({ success: false, msg: "Internal server error" });
-  }
-}
-
-async function editAdmin(req, res) {
-  try {
-    const { error: pErr, value: p } = Joi.object({
-      id: Joi.number().integer().positive().required(),
-    }).validate(req.params, { abortEarly: true, stripUnknown: true });
-
-    if (pErr)
-      return res
-        .status(400)
-        .json({ success: false, msg: pErr.details[0].message });
-
-    const session = await isAdminSessionValid(req, res);
-    if (!session?.success || !session?.data) {
-      return res
-        .status(401)
-        .json({ success: false, msg: session?.msg || "Unauthorized" });
-    }
-
-    const caller = await Admin.findByPk(session.data);
-    if (!caller)
-      return res.status(401).json({ success: false, msg: "Unauthorized" });
-
-    if (!verifyAdminRole(caller, "editAdmin")) {
-      return res.status(403).json({ success: false, msg: "Forbidden" });
-    }
-
-    const admin = await Admin.findByPk(p.id);
-    if (!admin)
-      return res.status(404).json({ success: false, msg: "Admin not found" });
-
-    const schema = Joi.object({
-      username: Joi.string().max(150).trim(),
-      email: Joi.string().email().max(255).trim(),
-      password: Joi.string().min(8).max(255).allow(null, ""),
-
-      first_name: Joi.string().max(256).allow(null, ""),
-      last_name: Joi.string().max(256).allow(null, ""),
-
-      role: Joi.string().valid(
-        "superAdmin",
-        "staff",
-        "paymentManager",
-        "support"
-      ),
-      status: Joi.number().integer().valid(0, 1, 2, 3),
-
-      twoFactorEnabled: Joi.number().integer().valid(0, 1, 2),
-    }).unknown(false);
-
-    const { error: bErr, value: body } = schema.validate(req.body || {}, {
-      abortEarly: true,
-      stripUnknown: true,
-      convert: true,
-    });
-
-    if (bErr)
-      return res
-        .status(400)
-        .json({ success: false, msg: bErr.details[0].message });
-
-    const payload = {};
-
-    const toNullIfEmpty = (v) => {
-      if (typeof v === "undefined") return undefined;
-      const s = String(v).trim();
-      return s === "" ? null : s;
-    };
-
-    if (Object.prototype.hasOwnProperty.call(body, "username")) {
-      const u = String(body.username || "").trim();
-      if (u) payload.username = u;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(body, "email")) {
-      const e = String(body.email || "").trim();
-      if (e) payload.email = e.toLowerCase();
-    }
-
-    if (Object.prototype.hasOwnProperty.call(body, "first_name")) {
-      payload.first_name = toNullIfEmpty(body.first_name);
-    }
-
-    if (Object.prototype.hasOwnProperty.call(body, "last_name")) {
-      payload.last_name = toNullIfEmpty(body.last_name);
-    }
-
-    if (Object.prototype.hasOwnProperty.call(body, "role"))
-      payload.role = body.role;
-    if (Object.prototype.hasOwnProperty.call(body, "status"))
-      payload.status = Number(body.status);
-
-    if (Object.prototype.hasOwnProperty.call(body, "twoFactorEnabled")) {
-      payload.two_fa = Number(body.twoFactorEnabled);
-      if (payload.two_fa === 0) {
-        payload.two_fa_method = null;
-        payload.two_fa_secret = null;
-      } else {
-        payload.two_fa_method = payload.two_fa === 1 ? "auth_app" : "email";
-      }
-    }
-
-    // password
-    if (typeof body.password === "string" && body.password.trim() !== "") {
-      payload.password = await bcrypt.hash(body.password.trim(), 10);
-    }
-
-    // avatar (column avtar)
-    if (req.file) {
-      const ok = await verifyFileType(req.file);
-      if (!ok)
-        return res
-          .status(400)
-          .json({ success: false, msg: "Invalid file type" });
-
-      const stored = await uploadFile(
-        req.file,
-        "uploads/admin",
-
-        null,
-        req.ip,
-        req.headers["user-agent"],
-        admin.id, // or session admin id
-        "normal", // IMPORTANT
-        null // IMPORTANT
-      );
-      if (admin.avtar) await deleteFile(admin.avtar, "uploads/admin");
-      payload.avtar = stored.filename;
-    }
-
-    const updated = await sequelize.transaction(async (t) => {
-      await admin.update(payload, { transaction: t });
-
-      const fresh = await Admin.findByPk(admin.id, {
-        attributes: { exclude: ["password"] },
-        transaction: t,
-      });
-
-      const j = fresh.toJSON();
-      j.twoFactorEnabled = Number(j.two_fa || 0);
-      return j;
-    });
-
-    return res.status(200).json({
-      success: true,
-      msg: "Admin updated successfully.",
-      data: updated,
-    });
-  } catch (err) {
-    console.error("Error in editAdmin:", err);
-    return res
-      .status(500)
-      .json({ success: false, msg: "Internal server error" });
-  }
-}
-
 async function getAdmins(req, res) {
   try {
-    const { error, value } = Joi.object({
+    const schema = Joi.object({
       page: Joi.number().integer().min(1).default(1),
+
+      username: Joi.string().trim().max(80).allow("", null),
+      email: Joi.string().trim().max(120).allow("", null),
+
+      role: Joi.string()
+        .valid("superAdmin", "staff", "paymentManager", "support")
+        .allow("", null),
+
+      status: Joi.number().integer().valid(0, 1, 2, 3).allow(null),
+      twoFactorEnabled: Joi.number().integer().valid(0, 1, 2).allow(null),
+
       sortBy: Joi.string()
         .valid(
           "id",
@@ -324,39 +36,49 @@ async function getAdmins(req, res) {
           "role",
           "status",
           "createdAt",
-          "updated_at"
+          "updatedAt"
         )
         .default("createdAt"),
+
       sortDir: Joi.string().valid("asc", "desc").default("desc"),
+    }).unknown(false);
 
-      username: Joi.string().allow("", null),
-      email: Joi.string().allow("", null),
-      role: Joi.string()
-        .valid("superAdmin", "staff", "paymentManager", "support")
-        .allow("", null),
-      status: Joi.number().integer().valid(0, 1, 2, 3),
-      twoFactorEnabled: Joi.number().integer().valid(0, 1, 2),
-    })
-      .unknown(false)
-      .validate(req.query, { abortEarly: true, stripUnknown: true });
+    const { error, value } = schema.validate(req.query, {
+      abortEarly: true,
+      stripUnknown: true,
+    });
 
-    if (error)
+    if (error) {
       return res
         .status(400)
         .json({ success: false, msg: error.details[0].message });
+    }
 
-    const session = await isAdminSessionValid(req, res);
+    // 2) Auth: validate session
+    const session = await isAdminSessionValid(req);
     if (!session?.success || !session?.data) {
       return res
         .status(401)
         .json({ success: false, msg: session?.msg || "Unauthorized" });
     }
 
-    const caller = await Admin.findByPk(session.data);
-    if (!caller)
+    // 3) Load authenticated admin (NOT "caller")
+    const authenticatedAdmin = await Admin.findByPk(session.data, {
+      attributes: ["id", "role", "status"],
+    });
+
+    if (!authenticatedAdmin) {
       return res.status(401).json({ success: false, msg: "Unauthorized" });
-    if (!verifyAdminRole(caller, "getAdmins"))
+    }
+
+    // Optional but recommended: block suspended admins
+    if (authenticatedAdmin.status !== 1) {
       return res.status(403).json({ success: false, msg: "Forbidden" });
+    }
+
+    if (!verifyAdminRole(authenticatedAdmin, "getAdmins")) {
+      return res.status(403).json({ success: false, msg: "Forbidden" });
+    }
 
     const {
       page,
@@ -369,125 +91,187 @@ async function getAdmins(req, res) {
       twoFactorEnabled,
     } = value;
 
+    // 4) Pagination safety
+    const rawLimit = Number.parseInt(await getOption("admin_per_page", 20), 10);
+
+    const MAX_LIMIT = 100;
+    const limit = Math.min(Math.max(1, rawLimit || 20), MAX_LIMIT);
+
+    const MAX_PAGES =
+      Number.parseInt(await getOption("maxPages", 1000), 10) || 1000;
+
+    const safePage = Math.min(page, MAX_PAGES);
+    const offset = (safePage - 1) * limit;
+
+    // 5) Filters (index-friendly)
     const where = {};
-    const sw = (k, v) => {
-      if (v && String(v).trim() !== "")
-        where[k] = { [Op.like]: `${String(v).trim()}%` };
+
+    const addPrefixLike = (column, value) => {
+      if (typeof value !== "string") return;
+      const v = value.trim();
+      if (!v) return;
+      where[column] = { [Op.like]: `${v}%` };
     };
 
-    sw("username", username);
-    sw("email", typeof email === "string" ? email.toLowerCase() : email);
-    sw("role", role);
+    addPrefixLike("username", username);
+    addPrefixLike("email", email);
 
+    if (role) where.role = role;
     if (typeof status === "number") where.status = status;
     if (typeof twoFactorEnabled === "number") where.two_fa = twoFactorEnabled;
 
-    const limit = parseInt(await getOption("admin_per_page", 10), 10) || 10;
-    const offset = (page - 1) * limit;
+    // 6) Safe sorting
+    const SORT_COLUMNS = {
+      id: "id",
+      username: "username",
+      email: "email",
+      role: "role",
+      status: "status",
+      createdAt: "createdAt",
+      updatedAt: "updatedAt",
+    };
 
-    const order = [[sortBy, String(sortDir).toUpperCase()]];
+    const order = [
+      [SORT_COLUMNS[sortBy] || "createdAt", sortDir === "asc" ? "ASC" : "DESC"],
+    ];
 
+    // 7) Query (never expose secrets)
     const { rows, count } = await Admin.findAndCountAll({
       where,
-      attributes: { exclude: ["password"] },
+      attributes: {
+        exclude: ["password"],
+      },
       order,
-      offset,
       limit,
-    });
-
-    const mapped = rows.map((r) => {
-      const j = r.toJSON();
-      j.twoFactorEnabled = Number(j.two_fa || 0);
-      return j;
+      offset,
     });
 
     return res.status(200).json({
       success: true,
       data: {
-        rows: mapped,
+        rows: rows,
         pagination: {
-          page,
+          page: safePage,
           limit,
           total: count,
-          totalPages: Math.ceil(count / limit) || 1,
+          totalPages: Math.max(1, Math.ceil(count / limit)),
         },
       },
     });
   } catch (err) {
-    console.error("Error in getAdmins:", err);
+    console.error("Error during getAdmins:", err);
     return res
       .status(500)
       .json({ success: false, msg: "Internal server error" });
   }
 }
 
-async function getAdminById(req, res) {
+async function getAdmin(req, res) {
   try {
-    const { error, value } = Joi.object({
+    // 1) Validate params (strict)
+    const paramsSchema = Joi.object({
       id: Joi.number().integer().positive().required(),
-    }).validate(req.params, { abortEarly: true, stripUnknown: true });
+    }).unknown(false);
 
-    if (error)
+    const { error, value } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      stripUnknown: true,
+    });
+
+    if (error) {
       return res
         .status(400)
         .json({ success: false, msg: error.details[0].message });
+    }
 
-    // Auth
-    const session = await isAdminSessionValid(req, res);
+    const targetAdminId = value.id;
+
+    // 2) Auth (do not pass res unless your helper truly needs it)
+    const session = await isAdminSessionValid(req);
     if (!session?.success || !session?.data) {
       return res
         .status(401)
         .json({ success: false, msg: session?.msg || "Unauthorized" });
     }
-    const caller = await Admin.findByPk(session.data);
-    if (!caller)
+
+    const authenticatedAdminId = session.data;
+
+    // Load authenticated admin with minimal fields
+    const authenticatedAdmin = await Admin.findByPk(authenticatedAdminId, {
+      attributes: ["id", "role", "status"],
+    });
+
+    if (!authenticatedAdmin) {
       return res.status(401).json({ success: false, msg: "Unauthorized" });
-    if (!verifyAdminRole(caller, "getAdminById")) {
+    }
+
+    // Block suspended admins from using admin APIs
+    if (authenticatedAdmin.status !== 1) {
       return res.status(403).json({ success: false, msg: "Forbidden" });
     }
 
-    const admin = await Admin.findByPk(value.id, {
-      attributes: { exclude: ["password"] },
+    if (!verifyAdminRole(authenticatedAdmin, "getAdminById")) {
+      return res.status(403).json({ success: false, msg: "Forbidden" });
+    }
+
+    // 3) Fetch target admin (exclude secrets)
+    const admin = await Admin.findByPk(targetAdminId, {
+      attributes: {
+        exclude: ["password"],
+      },
     });
-    if (!admin)
+
+    if (!admin) {
       return res.status(404).json({ success: false, msg: "Admin not found" });
+    }
 
     return res.status(200).json({ success: true, data: admin });
   } catch (err) {
-    console.error("Error in getAdminById:", err);
+    console.error("Error in getAdmin:", err?.message || err);
     return res
       .status(500)
       .json({ success: false, msg: "Internal server error" });
   }
 }
 
-async function addCoinPackage(req, res) {
+async function addAdmin(req, res) {
   try {
-    //  Validate body
+    // 1) Validate body
     const schema = Joi.object({
-      name: Joi.string().max(100).trim().required(),
-      description: Joi.string().allow("", null),
+      username: Joi.string()
+        .trim()
+        .min(3)
+        .max(50)
+        .pattern(/^[a-zA-Z0-9._-]+$/)
+        .required()
+        .messages({
+          "string.pattern.base":
+            "Username can contain only letters, numbers, dot, underscore, and hyphen.",
+        }),
 
-      coins: Joi.number().integer().min(1).required(),
+      email: Joi.string().trim().email().max(255).required(),
 
-      price: Joi.number().precision(2).min(0).required(),
+      password: Joi.string()
+        .min(8)
+        .max(255)
+        .pattern(/^(?=.*[A-Za-z])(?=.*\d).+$/)
+        .required()
+        .messages({
+          "string.pattern.base":
+            "Password must contain at least 1 letter and 1 number.",
+        }),
 
-      discount_type: Joi.string()
-        .valid("percentage", "flat")
-        .default("percentage"),
+      first_name: Joi.string().trim().max(100).allow("", null).optional(),
+      last_name: Joi.string().trim().max(100).allow("", null).optional(),
 
-      discount_value: Joi.number().precision(2).min(0).default(0),
+      role: Joi.string()
+        .valid("superAdmin", "staff", "paymentManager", "support")
+        .default("staff"),
 
-      // optional flags
-      is_popular: Joi.boolean().default(false),
-      is_ads_free: Joi.boolean().default(false),
+      status: Joi.number().integer().valid(0, 1, 2, 3).default(1),
 
-      validity_days: Joi.number().integer().min(0).default(0),
-      display_order: Joi.number().integer().min(0).default(0),
-
-      status: Joi.string().valid("active", "inactive").default("active"),
-
-      final_price: Joi.number().precision(2).min(0).optional(),
+      // 0=off,1=app,2=email
+      twoFactorEnabled: Joi.number().integer().valid(0, 1, 2).default(0),
     }).unknown(false);
 
     const { error, value } = schema.validate(req.body, {
@@ -502,59 +286,306 @@ async function addCoinPackage(req, res) {
         .json({ success: false, msg: error.details[0].message });
     }
 
-    const session = await isAdminSessionValid(req, res);
+    // 2) Auth
+    const session = await isAdminSessionValid(req);
     if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, msg: session?.msg || "Unauthorized" });
+    }
+
+    const authenticatedAdminId = session.data;
+
+    const authenticatedAdmin = await Admin.findByPk(authenticatedAdminId, {
+      attributes: ["id", "role", "status"],
+    });
+
+    if (!authenticatedAdmin) {
       return res.status(401).json({ success: false, msg: "Unauthorized" });
     }
 
-    const adminId = session.data;
-
-    // Verify admin exists
-    const caller = await Admin.findByPk(adminId);
-    if (!caller) {
-      return res.status(401).json({ success: false, msg: "Unauthorized" });
-    }
-
-    //  Permission check
-    if (!verifyAdminRole(caller, "addCoinPackage")) {
+    if (authenticatedAdmin.status !== 1) {
       return res.status(403).json({ success: false, msg: "Forbidden" });
     }
 
-    // Compute final_price (real-life: backend should be source of truth)
-    const computedFinal = calcFinalPrice(
-      value.price,
-      value.discount_type,
-      value.discount_value
-    );
+    if (!verifyAdminRole(authenticatedAdmin, "addAdmin")) {
+      return res.status(403).json({ success: false, msg: "Forbidden" });
+    }
 
-    if (computedFinal === null) {
-      return res.status(400).json({
+    // 3) Normalize inputs
+    const normalizedUsername = value.username.trim();
+    const normalizedEmail = value.email.trim().toLowerCase();
+
+    // 4) Create inside a transaction to avoid race conditions
+    const createdAdminSafe = await sequelize.transaction(async (t) => {
+      // Optional pre-check for better UX (still keep DB unique constraints!)
+      const existing = await Admin.findOne({
+        where: {
+          [Op.or]: [
+            { email: normalizedEmail },
+            { username: normalizedUsername },
+          ],
+        },
+        attributes: ["id", "email", "username"],
+        transaction: t,
+        lock: t.LOCK.UPDATE, // helps reduce race windows on some DBs
+      });
+
+      if (existing) {
+        const clash = existing.email === normalizedEmail ? "email" : "username";
+        const err = new Error(`An admin with this ${clash} already exists.`);
+        err.statusCode = 409;
+        throw err;
+      }
+
+      // Hash password (cost 12 is a better production default than 10)
+      const passwordHash = await bcrypt.hash(value.password, 12);
+
+      // Avatar upload (validate before upload)
+      let avatarFilename = null;
+
+      if (req.file) {
+        const ok = await verifyFileType(req.file);
+        if (!ok) {
+          const err = new Error("Invalid file type");
+          err.statusCode = 400;
+          throw err;
+        }
+
+        const stored = await uploadFile(req.file, "uploads/avatar/admin");
+
+        avatarFilename = stored?.filename || null;
+      }
+
+      // IMPORTANT: fix typos/inconsistencies:
+      // - use `avatar` not `avtar`
+      // - store 2FA in `two_fa`
+      const createPayload = {
+        username: normalizedUsername,
+        email: normalizedEmail,
+        password: passwordHash,
+        first_name: value.first_name ? value.first_name.trim() : null,
+        last_name: value.last_name ? value.last_name.trim() : null,
+        role: value.role,
+        status: value.status,
+        avatar: avatarFilename,
+        two_fa: value.twoFactorEnabled,
+      };
+
+      const createdRow = await Admin.create(createPayload, { transaction: t });
+
+      // Return safe fields only
+      const fresh = await Admin.findByPk(createdRow.id, {
+        attributes: {
+          exclude: ["password"],
+        },
+        transaction: t,
+      });
+
+      if (!fresh) {
+        const err = new Error("Failed to load created admin");
+        err.statusCode = 500;
+        throw err;
+      }
+
+      const safe = fresh.toJSON();
+      return safe;
+    });
+
+    return res.status(201).json({
+      success: true,
+      msg: "Admin created successfully.",
+      data: createdAdminSafe,
+    });
+  } catch (err) {
+    const statusCode = err?.statusCode || 500;
+
+    // Unique constraint fallback (MUST still exist at DB level)
+    if (err?.name === "SequelizeUniqueConstraintError") {
+      const field = err?.errors?.[0]?.path || "unique field";
+      return res.status(409).json({
         success: false,
-        msg: "Invalid price/discount values",
+        msg: `Duplicate value for ${field}.`,
       });
     }
 
-    const payload = {
-      name: value.name,
-      description: value.description ?? null,
-      coins: value.coins,
-      price: value.price,
-      discount_type: value.discount_type,
-      discount_value: value.discount_value,
-      final_price:
-        typeof value.final_price === "number"
-          ? value.final_price
-          : computedFinal,
-      sold_count: 0,
-      is_popular: value.is_popular,
-      is_ads_free: value.is_ads_free,
-      validity_days: value.validity_days,
-      display_order: value.display_order,
-      status: value.status,
-      cover: null, // set below if file uploads exists
+    if (statusCode === 409 || statusCode === 400) {
+      return res.status(statusCode).json({ success: false, msg: err.message });
+    }
+
+    console.error("Error during addAdmin:", err?.message || err);
+    return res
+      .status(500)
+      .json({ success: false, msg: "Internal server error" });
+  }
+}
+
+async function editAdmin(req, res) {
+  try {
+    // 1) Validate params (strict)
+    const paramsSchema = Joi.object({
+      id: Joi.number().integer().positive().required(),
+    }).unknown(false);
+
+    const { error: pErr, value: params } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      stripUnknown: true,
+    });
+
+    if (pErr) {
+      return res
+        .status(400)
+        .json({ success: false, msg: pErr.details[0].message });
+    }
+
+    const targetAdminId = params.id;
+
+    // 2) Auth
+    const session = await isAdminSessionValid(req);
+    if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, msg: session?.msg || "Unauthorized" });
+    }
+
+    const authenticatedAdminId = session.data;
+
+    const authenticatedAdmin = await Admin.findByPk(authenticatedAdminId, {
+      attributes: ["id", "role", "status"],
+    });
+
+    if (!authenticatedAdmin) {
+      return res.status(401).json({ success: false, msg: "Unauthorized" });
+    }
+
+    if (authenticatedAdmin.status !== 1) {
+      return res.status(403).json({ success: false, msg: "Forbidden" });
+    }
+
+    if (!verifyAdminRole(authenticatedAdmin, "editAdmin")) {
+      return res.status(403).json({ success: false, msg: "Forbidden" });
+    }
+
+    // 3) Load target admin (we need current avatar/2fa fields for cleanup)
+    const targetAdmin = await Admin.findByPk(targetAdminId);
+    if (!targetAdmin) {
+      return res.status(404).json({ success: false, msg: "Admin not found" });
+    }
+
+    // 4) Validate body (strict)
+    const bodySchema = Joi.object({
+      username: Joi.string()
+        .trim()
+        .min(3)
+        .max(50)
+        .pattern(/^[a-zA-Z0-9._-]+$/)
+        .messages({
+          "string.pattern.base":
+            "Username can contain only letters, numbers, dot, underscore, and hyphen.",
+        }),
+
+      email: Joi.string().trim().email().max(255),
+
+      password: Joi.string()
+        .min(8)
+        .max(255)
+        .allow("", null)
+        .pattern(/^(?=.*[A-Za-z])(?=.*\d).+$/)
+        .messages({
+          "string.pattern.base":
+            "Password must contain at least 1 letter and 1 number.",
+        }),
+
+      first_name: Joi.string().trim().max(100).allow("", null),
+      last_name: Joi.string().trim().max(100).allow("", null),
+
+      role: Joi.string().valid("superAdmin", "staff", "paymentManager", "support"),
+      status: Joi.number().integer().valid(0, 1, 2, 3),
+
+      // 0=off,1=app,2=email
+      twoFactorEnabled: Joi.number().integer().valid(0, 1, 2),
+    }).unknown(false);
+
+    const { error: bErr, value: body } = bodySchema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (bErr) {
+      return res
+        .status(400)
+        .json({ success: false, msg: bErr.details[0].message });
+    }
+
+    // 5) Build update payload (only set fields explicitly provided)
+    const updatePayload = {};
+
+    const setNullIfEmpty = (v) => {
+      if (typeof v === "undefined") return undefined;
+      if (v === null) return null;
+      const s = String(v).trim();
+      return s === "" ? null : s;
     };
 
-    // 6) Optional cover uploads (real-life)
+    if (Object.prototype.hasOwnProperty.call(body, "username")) {
+      const normalizedUsername = String(body.username || "").trim();
+      if (!normalizedUsername) {
+        return res
+          .status(400)
+          .json({ success: false, msg: "Username cannot be empty." });
+      }
+      updatePayload.username = normalizedUsername;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "email")) {
+      const normalizedEmail = String(body.email || "").trim().toLowerCase();
+      if (!normalizedEmail) {
+        return res
+          .status(400)
+          .json({ success: false, msg: "Email cannot be empty." });
+      }
+      updatePayload.email = normalizedEmail;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "first_name")) {
+      updatePayload.first_name = setNullIfEmpty(body.first_name);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "last_name")) {
+      updatePayload.last_name = setNullIfEmpty(body.last_name);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "role")) {
+      updatePayload.role = body.role;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "status")) {
+      updatePayload.status = Number(body.status);
+    }
+
+    // 2FA handling: keep consistent + wipe secrets when turning off
+    if (Object.prototype.hasOwnProperty.call(body, "twoFactorEnabled")) {
+      const tf = Number(body.twoFactorEnabled);
+      updatePayload.two_fa = tf;
+
+      if (tf === 0) {
+        updatePayload.two_fa_method = null;
+        updatePayload.two_fa_secret = null;
+      } else {
+        updatePayload.two_fa_method = tf === 1 ? "auth_app" : "email";
+        // note: do NOT generate new secret here; that's a separate flow
+      }
+    }
+
+    // Password: only update if non-empty string provided
+    if (typeof body.password === "string" && body.password.trim() !== "") {
+      updatePayload.password = await bcrypt.hash(body.password.trim(), 12);
+    }
+
+    // 6) Avatar upload (use ONE column name; you used avtar before—pick one)
+    // Here: we use `avatar`. If your DB column is `avtar`, change these 4 lines accordingly.
+    let newAvatarFilename = null;
     if (req.file) {
       const ok = await verifyFileType(req.file);
       if (!ok) {
@@ -563,34 +594,111 @@ async function addCoinPackage(req, res) {
           .json({ success: false, msg: "Invalid file type" });
       }
 
-      // store in a folder like uploads/coin-packages
-      const stored = await uploadFile(req.file, "uploads/coin-packages");
-      payload.cover = stored.filename;
+      const stored = await uploadFile(req.file, "uploads/avatar/admin");
+      newAvatarFilename = stored?.filename || null;
+
+      updatePayload.avatar = newAvatarFilename;
     }
 
-    // 7) Save to DB in transaction
-    const created = await sequelize.transaction(async (t) => {
-      const row = await CoinPackage.create(payload, { transaction: t });
-      return CoinPackage.findByPk(row.id, { transaction: t });
+    // 7) Transaction: uniqueness check + update + safe return
+    const updatedSafe = await sequelize.transaction(async (t) => {
+      // Uniqueness checks only if changing username/email
+      if (updatePayload.username || updatePayload.email) {
+        const or = [];
+        if (updatePayload.email) or.push({ email: updatePayload.email });
+        if (updatePayload.username) or.push({ username: updatePayload.username });
+
+        const conflict = await Admin.findOne({
+          where: {
+            [Op.and]: [
+              { id: { [Op.ne]: targetAdminId } },
+              { [Op.or]: or },
+            ],
+          },
+          attributes: ["id", "email", "username"],
+          transaction: t,
+          lock: t.LOCK.UPDATE,
+        });
+
+        if (conflict) {
+          const emailClash =
+            updatePayload.email && conflict.email === updatePayload.email;
+          const clashField = emailClash ? "email" : "username";
+          const err = new Error(`An admin with this ${clashField} already exists.`);
+          err.statusCode = 409;
+          throw err;
+        }
+      }
+
+      // Apply update
+      await targetAdmin.update(updatePayload, { transaction: t });
+
+      // Delete old avatar AFTER DB update succeeds (still inside tx)
+      // NOTE: file deletion is not transactional; still better than deleting first.
+      if (newAvatarFilename) {
+        const oldAvatar = targetAdmin.previous("avatar"); // Sequelize keeps previous values
+        if (oldAvatar) {
+          // best effort cleanup; don't fail request if cleanup fails
+          try {
+            await deleteFile(oldAvatar, "uploads/avatar/admin");
+          } catch (e) {
+            console.error("Avatar cleanup failed:", e?.message || e);
+          }
+        }
+      }
+
+      const fresh = await Admin.findByPk(targetAdminId, {
+        attributes: {
+          exclude: [
+            "password",
+            "two_fa_secret",
+            "otp_secret",
+            "recovery_codes",
+            "reset_token",
+            "resetToken",
+          ],
+        },
+        transaction: t,
+      });
+
+      if (!fresh) {
+        const err = new Error("Failed to load updated admin");
+        err.statusCode = 500;
+        throw err;
+      }
+
+      const safe = fresh.toJSON();
+      return safe;
     });
 
-    return res.status(201).json({
+    return res.status(200).json({
       success: true,
-      msg: "Coin package created successfully.",
-      data: created,
+      msg: "Admin updated successfully.",
+      data: updatedSafe,
     });
   } catch (err) {
-    console.error("Error in addCoinPackage:", err);
-    return res
-      .status(500)
-      .json({ success: false, msg: "Internal server error" });
+    const statusCode = err?.statusCode || 500;
+
+    if (err?.name === "SequelizeUniqueConstraintError") {
+      const field = err?.errors?.[0]?.path || "unique field";
+      return res.status(409).json({
+        success: false,
+        msg: `Duplicate value for ${field}.`,
+      });
+    }
+
+    if (statusCode === 409 || statusCode === 400) {
+      return res.status(statusCode).json({ success: false, msg: err.message });
+    }
+
+    console.error("Error during editAdmin:", err?.message || err);
+    return res.status(500).json({ success: false, msg: "Internal server error" });
   }
 }
 
 module.exports = {
+  getAdmins,
+  getAdmin,
   addAdmin,
   editAdmin,
-  getAdmins,
-  getAdminById,
-  addCoinPackage,
 };
