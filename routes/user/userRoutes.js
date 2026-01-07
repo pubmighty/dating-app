@@ -13,7 +13,9 @@ const {
   verifyGooglePlayPurchase,
 } = require("../../controllers/user/googleBillingController");
 const utilController = require("../../controllers/user/utilController");
-const notificationToken =require("../../controllers/user/notificationTokenController")
+const notificationController = require("../../controllers/user/notificationController");
+
+
 /**
  * GET /setting
  *
@@ -798,7 +800,7 @@ router.post(
  */
 router.post("/billing/google-play/verify", verifyGooglePlayPurchase);
 
- //POST /api/user/notification-token
+//POST /api/user/notification-token
 // ---------------------------------
 // Saves or updates the FCM notification token for the logged-in user.
 // - Requires a valid user session (checked inside controller)
@@ -806,7 +808,7 @@ router.post("/billing/google-play/verify", verifyGooglePlayPurchase);
 // - Upserts (userId + uniqueDeviceId)
 router.post(
   "/notifications/subscribe",
-  notificationToken.subscribeToNotification
+  notificationController.subscribeToNotification
 );
 
 module.exports = router;
