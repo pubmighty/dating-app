@@ -805,8 +805,8 @@ router.post("/billing/google-play/verify", verifyGooglePlayPurchase);
 // - Deactivates old token for same device
 // - Upserts (userId + uniqueDeviceId)
 router.post(
-  "/notification-token",
-  notificationToken.addNotificationToken
+  "/notifications/subscribe",
+  notificationToken.subscribeToNotification
 );
 
 module.exports = router;

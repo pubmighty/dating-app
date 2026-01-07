@@ -370,17 +370,8 @@ function escapeLike(input) {
   return String(input).replace(/[\\%_]/g, (m) => `\\${m}`);
 }
 
-function generateServerDeviceId(req, userId) {
-  const ua = req.headers["user-agent"] || "unknown";
-  const ip =
-    req.headers["x-forwarded-for"]?.split(",")[0] ||
-    req.socket?.remoteAddress ||
-    "0.0.0.0";
-
-  return crypto
-    .createHash("sha256")
-    .update(`${userId}|${ua}|${ip}`)
-    .digest("hex");
+function generateServerDeviceId() {
+  return crypto.randomUUID(); // RFC 4122 compliant UUID v4
 }
 
 module.exports = {

@@ -1,16 +1,24 @@
 const Joi = require("joi");
 const NotificationToken = require("../../models/NotificationToken");
-const { isUserSessionValid, clearUserSession } = require("../../utils/helpers/authHelper");
+const {
+  isUserSessionValid,
+  clearUserSession,
+} = require("../../utils/helpers/authHelper");
 const { generateServerDeviceId } = require("../../utils/helper");
 const { Op } = require("sequelize");
 
-async function addNotificationToken(req, res) {
-  //  Validate input
-  const schema = Joi.object({
-    token: Joi.string().trim().required(),
+async function subscribeToNotification(req, res) {
+  // 1) Validate input
+  const bodySchema = Joi.object({
+    token: Joi.string().trim().min(10).max(4096).required().messages({
+      "string.empty": "Token is required.",
+      "string.min": "Token looks too short.",
+      "string.max": "Token is too long.",
+      "any.required": "Token is required.",
+    }),
   });
 
-  const { error, value } = schema.validate(req.body, {
+  const { error, value } = bodySchema.validate(req.body || {}, {
     abortEarly: true,
     stripUnknown: true,
     convert: true,
@@ -43,48 +51,13 @@ async function addNotificationToken(req, res) {
     const token = String(value.token || "").trim();
 
     // Generate device ID on server
-    const uniqueDeviceId = generateServerDeviceId(req, userId);
+    const uniqueDeviceId = generateServerDeviceId();
 
-    //  If device exists for this user => update only (NO new row)
-    const existing = await NotificationToken.findOne({
-      where: { userId, uniqueDeviceId },
-    });
-
-    // Always deactivate any token rows for this device that belong to other users
-    // (device switched accounts)
-    await NotificationToken.update(
-      { isActive: false },
-      {
-        where: {
-          uniqueDeviceId,
-          userId: { [Op.ne]: userId }, 
-        },
-      }
-    );
-
-    if (existing) {
-      await existing.update({
-        token,
-        isActive: true,
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: "Notification token updated successfully",
-        data: {
-          device_id: uniqueDeviceId,
-          updated: true,
-          created: false,
-        },
-      });
-    }
-
-    //  Device changed/new => create new row (ONLY here)
     await NotificationToken.create({
-      userId,
-      token,
-      uniqueDeviceId,
-      isActive: true,
+      user_id: userId,
+      token: token,
+      unique_device_id: uniqueDeviceId,
+      is_active: true,
     });
 
     return res.status(200).json({
@@ -92,12 +65,10 @@ async function addNotificationToken(req, res) {
       message: "Notification token saved successfully",
       data: {
         device_id: uniqueDeviceId,
-        updated: false,
-        created: true,
       },
     });
   } catch (err) {
-    console.error("saveNotificationToken error:", err);
+    console.error("Erro during subscribeToNotification:", err);
     return res.status(500).json({
       success: false,
       message: "Something went wrong",
@@ -107,5 +78,5 @@ async function addNotificationToken(req, res) {
 }
 
 module.exports = {
-  addNotificationToken,
+  subscribeToNotification,
 };

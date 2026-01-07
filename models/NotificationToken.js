@@ -8,40 +8,33 @@ const NotificationToken = sequelize.define(
       type: DataTypes.BIGINT.UNSIGNED,
       autoIncrement: true,
       primaryKey: true,
-      field: "id",
     },
 
-    userId: {
+    user_id: {
       type: DataTypes.BIGINT.UNSIGNED,
       allowNull: false,
-      field: "user_id", 
     },
 
     token: {
       type: DataTypes.STRING(255),
       allowNull: false,
-      field: "token",
     },
 
-    uniqueDeviceId: {
+    unique_device_id: {
       type: DataTypes.STRING(120),
       allowNull: false,
-      field: "unique_device_id", 
     },
 
-    isActive: {
+    is_active: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: true,
-      field: "is_active", 
     },
   },
   {
     tableName: "pb_notification_tokens",
     timestamps: true,
     underscored:true,
-    createdAt: "created_at",
-    updatedAt: "updated_at",
   }
 );
 
