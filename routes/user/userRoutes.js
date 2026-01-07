@@ -14,6 +14,14 @@ const {
 } = require("../../controllers/user/googleBillingController");
 const utilController = require("../../controllers/user/utilController");
 const notificationToken =require("../../controllers/user/notificationTokenController")
+
+const {
+  get_notifications,
+  get_unread_count,
+  mark_read,
+  mark_all_read,
+}=require("../../controllers/user/notificationController")
+
 /**
  * GET /setting
  *
@@ -808,5 +816,36 @@ router.post(
   "/notification-token",
   notificationToken.addNotificationToken
 );
+
+// GET /api/user/notifications
+// ---------------------------------
+// Fetches paginated notifications for the logged-in user.
+// - Requires a valid user session
+// - Returns latest notifications first
+// - Supports pagination, read status, and type filters
+router.get("/notifications",  get_notifications);
+
+// GET /api/user/notifications/unread-count
+// ---------------------------------
+// Returns total unread notification count for the logged-in user.
+// - Requires a valid user session
+// - Used for notification badge / red dot
+router.get("/notifications/unread-count", get_unread_count);
+
+// POST /api/user/notifications/mark-read
+// ---------------------------------
+// Marks one or multiple notifications as read for the logged-in user.
+// - Requires a valid user session
+// - Accepts either a single notification ID or an array of IDs
+// - Only updates notifications belonging to the user
+router.post("/notifications/mark-read", mark_read);
+
+// POST /api/user/notifications/mark-all-read
+// ---------------------------------
+// Marks all unread notifications as read for the logged-in user.
+// - Requires a valid user session
+// - Used when user taps "Mark all as read"
+router.post("/notifications/mark-all-read", mark_all_read);
+
 
 module.exports = router;
