@@ -15,7 +15,6 @@ const {
 const utilController = require("../../controllers/user/utilController");
 const notificationController = require("../../controllers/user/notificationController");
 
-
 /**
  * GET /setting
  *
@@ -811,4 +810,143 @@ router.post(
   notificationController.subscribeToNotification
 );
 
+/**
+ * GET /notifications
+ * ------------------------------------------------------------
+ * Fetches paginated notifications for the logged-in user.
+ *
+ * Purpose:
+ * - Retrieves in-app notifications stored in the database.
+ * - Supports filtering and pagination for efficient loading.
+ *
+ * Query Parameters:
+ * - page (number, optional): Page number (default: 1)
+ * - limit (number, optional): Items per page (default: 20, max: 100)
+ * - type (string, optional): Filter by notification type
+ * - is_read (boolean, optional): Filter by read/unread status
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated user session.
+ * - Users can only access their own notifications.
+ *
+ * Behavior:
+ * - Orders notifications by newest first.
+ * - Returns total count and pagination metadata.
+ *
+ * Notes:
+ * - Designed for infinite scroll or paginated UI.
+ * - Returns empty list if no notifications exist.
+ */
+router.get(
+  "/notifications",notificationController.getNotifications)
+
+/**
+ * GET /notifications/unread
+ * ------------------------------------------------------------
+ * Returns the count of unread notifications for the logged-in user.
+ *
+ * Purpose:
+ * - Provides unread notification count for badge indicators.
+ * - Enables real-time UI updates (bell icon, counters).
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated user session.
+ * - Count is calculated strictly for the logged-in user.
+ *
+ * Behavior:
+ * - Counts notifications where is_read = false.
+ * - Returns 0 if no unread notifications exist.
+ *
+ * Notes:
+ * - Lightweight and fast query.
+ * - Recommended to poll or refresh after mark-read actions.
+ */
+router.get(
+  "/notifications/unread",notificationController.getUnreadCount)
+
+/**
+ * POST /notifications/mark-read
+ * ------------------------------------------------------------
+ * Marks a single notification as read.
+ *
+ * Purpose:
+ * - Updates the read status of a specific notification.
+ * - Keeps unread counts accurate.
+ *
+ * Request Body:
+ * - id (number, required): Notification ID to mark as read.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated user session.
+ * - Users may only update their own notifications.
+ *
+ * Behavior:
+ * - Sets is_read = true for the given notification ID.
+ * - If already read or not owned by the user, no rows are updated.
+ *
+ * Idempotency:
+ * - Safe to call multiple times for the same notification.
+ *
+ * Notes:
+ * - Returns number of rows updated (0 or 1).
+ */
+router.post(
+  "/notifications/mark-read",notificationController.markRead)
+
+/**
+ * POST /notifications/mark-all-read
+ * ------------------------------------------------------------
+ * Marks all unread notifications as read for the logged-in user.
+ *
+ * Purpose:
+ * - Allows users to quickly clear notification inbox.
+ * - Resets unread notification badge count.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated user session.
+ * - Operation is limited strictly to the logged-in user.
+ *
+ * Behavior:
+ * - Updates all notifications where is_read = false.
+ * - Returns the total number of updated notifications.
+ *
+ * Idempotency:
+ * - Safe to call multiple times.
+ * - If no unread notifications exist, updated count will be 0.
+ *
+ * Notes:
+ * - Commonly used for "Mark all as read" UI actions.
+ */
+router.post(
+  "/notifications/mark-all-read",notificationController.markAllRead)
+
+/**
+ * POST /notifications/unsubscribe
+ * ------------------------------------------------------------
+ * Unsubscribes the user from receiving push notifications.
+ *
+ * Purpose:
+ * - Disables all active notification tokens for the user.
+ * - Stops future push notifications from being delivered.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated user session.
+ * - Only affects tokens belonging to the logged-in user.
+ *
+ * Behavior:
+ * - Sets is_active = false for all active device tokens.
+ * - Does not delete tokens (soft unsubscribe).
+ *
+ * Idempotency:
+ * - Safe to call multiple times.
+ * - If already unsubscribed, updated count will be 0.
+ *
+ * Notes:
+ * - Designed for global unsubscribe (all devices).
+ * - Can be extended for per-device unsubscribe if needed.
+ */
+router.post(
+  "/notifications/unsubscribe",notificationController.unsubscribeToNotification)
+
+  
 module.exports = router;
