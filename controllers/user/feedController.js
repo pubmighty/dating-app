@@ -50,7 +50,7 @@ async function getFeed(req, res) {
 
     // 3) Pagination config
     const maxPages = parseInt(
-      await getOption("total_maxpage_for_feed", 1000),
+      await getOption("max_pages_user", 1000),
       10
     );
     const perPage = parseInt(await getOption("default_per_page_feed", 10), 10);
@@ -217,7 +217,7 @@ async function getRandomFeed(req, res) {
 
     // 3) Pagination config
     const maxPages = parseInt(
-      await getOption("total_maxpage_for_feed", 1000),
+      await getOption("max_pages_user", 1000),
       10
     );
     const perPage = parseInt(await getOption("default_per_page_feed", 10), 10);

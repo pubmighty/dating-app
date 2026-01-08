@@ -42,14 +42,14 @@ async function getUserProfile(req, res) {
     }
     const files = await FileUpload.findAll({
       where: {
-        user_id: user.id
-      }
+        user_id: user.id,
+      },
     });
     return res.status(200).json({
       success: true,
       message: "Profile fetched successfully.",
       data: user,
-      files
+      files,
     });
   } catch (err) {
     console.error("Error during getUserProfile:", err);
@@ -129,7 +129,6 @@ async function updateUserProfile(req, res) {
     // Merge avatar from uploads (server-trusted) over body (client-controlled)
     const payload = {
       ...req.body,
-      ...(uploadedAvatar ? { avatar: uploadedAvatar } : {}),
     };
 
     const { error, value } = updateProfileSchema.validate(payload, {
@@ -196,7 +195,10 @@ async function updateUserProfile(req, res) {
       }
 
       // Update
-      await user.update(updates, { transaction });
+      await user.update(
+        { ...updates, ...(uploadedAvatar ? { avatar: uploadedAvatar } : {}) },
+        { transaction }
+      );
 
       // Return fresh instance (includes updated fields)
       return user;
@@ -329,13 +331,13 @@ async function uploadProfileMedia(req, res) {
             uploader_ip,
             user_agent,
             userId,
-            "user",
+            "user"
           );
 
           uploadedRows.push(uploadRes);
         }
       } catch (uploadErr) {
-        console.warn(uploadErr)
+        console.warn(uploadErr);
         // Attempt to remove any newly uploaded files to avoid partial replace
         for (const up of uploadedRows) {
           try {
@@ -676,7 +678,7 @@ async function changePassword(req, res) {
   } catch (err) {
     try {
       await t.rollback();
-    } catch (_) { }
+    } catch (_) {}
     console.error("Error during changePassword:", err);
     return res.status(500).json({
       success: false,

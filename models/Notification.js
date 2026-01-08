@@ -1,5 +1,5 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../config/db"); 
+const sequelize = require("../config/db");
 
 const Notification = sequelize.define(
   "Notification",
@@ -13,7 +13,6 @@ const Notification = sequelize.define(
     sender_id: {
       type: DataTypes.BIGINT.UNSIGNED,
       allowNull: true, // NULL for system/admin notifications
-      field: "sender_id",
     },
 
     receiver_id: {
@@ -48,8 +47,8 @@ const Notification = sequelize.define(
     underscored: true,
     indexes: [
       {
-        name: "idx_receiver",
-       fields: ["created_at"],
+        name: "idx_receiver_id_is_read_created_at",
+        fields: ["receiver_id", "is_read", "created_at"],
       },
     ],
   }

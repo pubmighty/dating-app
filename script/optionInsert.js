@@ -21,7 +21,7 @@ async function run() {
     await set("max_pinned_chats", 10);
     await set("google_client_id", "12345678");
 
-    await set("total_maxpage_for_feed", 10);
+    await set("max_pages_user", 10);
     await set("default_per_page_feed", 10);
     await set("max_files_per_user", 5);
 
@@ -72,6 +72,8 @@ async function run() {
 
     await set("admin_forgot_password_captcha", "altcha");
     await set("admin_forgot_password_captcha_enabled", "false");
+
+    await set("default_per_page_notifications", 10);
 
     console.log("Options inserted/verified");
     process.exit(0);

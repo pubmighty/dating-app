@@ -35,6 +35,17 @@ const NotificationToken = sequelize.define(
     tableName: "pb_notification_tokens",
     timestamps: true,
     underscored:true,
+    indexes: [
+       {
+        name: "idx_unique_device_id",
+        unique: true,
+        fields: ["unique_device_id"],
+      },
+       {
+        name: "idx_is_active_user_id",
+        fields: ["is_active", "user_id", ],
+      },
+    ]
   }
 );
 

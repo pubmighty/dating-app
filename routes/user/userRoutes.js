@@ -799,16 +799,7 @@ router.post(
  */
 router.post("/billing/google-play/verify", verifyGooglePlayPurchase);
 
-//POST /api/user/notification-token
-// ---------------------------------
-// Saves or updates the FCM notification token for the logged-in user.
-// - Requires a valid user session (checked inside controller)
-// - Deactivates old token for same device
-// - Upserts (userId + uniqueDeviceId)
-router.post(
-  "/notifications/subscribe",
-  notificationController.subscribeToNotification
-);
+
 
 /**
  * GET /notifications
@@ -832,10 +823,6 @@ router.post(
  * Behavior:
  * - Orders notifications by newest first.
  * - Returns total count and pagination metadata.
- *
- * Notes:
- * - Designed for infinite scroll or paginated UI.
- * - Returns empty list if no notifications exist.
  */
 router.get(
   "/notifications",notificationController.getNotifications)
@@ -856,10 +843,6 @@ router.get(
  * Behavior:
  * - Counts notifications where is_read = false.
  * - Returns 0 if no unread notifications exist.
- *
- * Notes:
- * - Lightweight and fast query.
- * - Recommended to poll or refresh after mark-read actions.
  */
 router.get(
   "/notifications/unread",notificationController.getUnreadCount)
@@ -883,15 +866,9 @@ router.get(
  * Behavior:
  * - Sets is_read = true for the given notification ID.
  * - If already read or not owned by the user, no rows are updated.
- *
- * Idempotency:
- * - Safe to call multiple times for the same notification.
- *
- * Notes:
- * - Returns number of rows updated (0 or 1).
  */
 router.post(
-  "/notifications/mark-read",notificationController.markRead)
+  "/notifications/mark-read",notificationController.markNotificationRead)
 
 /**
  * POST /notifications/mark-all-read
@@ -909,16 +886,35 @@ router.post(
  * Behavior:
  * - Updates all notifications where is_read = false.
  * - Returns the total number of updated notifications.
- *
- * Idempotency:
- * - Safe to call multiple times.
- * - If no unread notifications exist, updated count will be 0.
- *
- * Notes:
- * - Commonly used for "Mark all as read" UI actions.
  */
 router.post(
-  "/notifications/mark-all-read",notificationController.markAllRead)
+  "/notifications/mark-all-read",notificationController.markAllNotificationsRead)
+
+/**
+ * POST /notifications/subscribe
+ * ------------------------------------------------------------
+ * Subscribes the user to receive push notifications.
+ *
+ * Purpose:
+ * - Registers a device notification token.
+ * - Enables delivery of push notifications to the user.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated user session.
+ * - Token is always associated with the logged-in user.
+ *
+ * Behavior:
+ * - Creates a new notification token.
+ *
+ * Notes:
+ * - Intended for per-device subscription (mobile).
+ * - Supports multiple active devices per user.
+ */
+router.post(
+  "/notifications/subscribe",
+  notificationController.subscribeToNotification
+);
+
 
 /**
  * POST /notifications/unsubscribe
@@ -926,7 +922,7 @@ router.post(
  * Unsubscribes the user from receiving push notifications.
  *
  * Purpose:
- * - Disables all active notification tokens for the user.
+ * - Disables active notification tokens for the deivce.
  * - Stops future push notifications from being delivered.
  *
  * Security & Authorization:
@@ -936,17 +932,9 @@ router.post(
  * Behavior:
  * - Sets is_active = false for all active device tokens.
  * - Does not delete tokens (soft unsubscribe).
- *
- * Idempotency:
- * - Safe to call multiple times.
- * - If already unsubscribed, updated count will be 0.
- *
- * Notes:
- * - Designed for global unsubscribe (all devices).
- * - Can be extended for per-device unsubscribe if needed.
+ * 
  */
 router.post(
   "/notifications/unsubscribe",notificationController.unsubscribeToNotification)
 
-  
 module.exports = router;

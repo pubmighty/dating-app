@@ -2,11 +2,10 @@ const Joi = require("joi");
 const NotificationToken = require("../../models/NotificationToken");
 const {
   isUserSessionValid,
-  clearUserSession,
 } = require("../../utils/helpers/authHelper");
 const { generateServerDeviceId } = require("../../utils/helper");
 const { Op } = require("sequelize");
-const Notification=require("../../models/Notification")
+const Notification = require("../../models/Notification");
 
 async function subscribeToNotification(req, res) {
   // 1) Validate input
@@ -78,16 +77,18 @@ async function subscribeToNotification(req, res) {
   }
 }
 
-async function getNotifications(req, res) {
-  // Validate query params
-  const schema = Joi.object({
-    page: Joi.number().integer().min(1).default(1),
-    limit: Joi.number().integer().min(1).max(100).default(20),
-    type: Joi.string().trim().max(50).optional(),
-    is_read: Joi.boolean().optional(),
+async function unsubscribeToNotification(req, res) {
+  // 1) Validate input
+  const bodySchema = Joi.object({
+    deviceId: Joi.string().trim().min(8).max(128).required().messages({
+      "string.empty": "Device ID is required.",
+      "string.min": "Device ID looks too short.",
+      "string.max": "Device ID is too long.",
+      "any.required": "Device ID is required.",
+    }),
   });
 
-  const { error, value } = schema.validate(req.query || {}, {
+  const { error, value } = bodySchema.validate(req.body || {}, {
     abortEarly: true,
     stripUnknown: true,
     convert: true,
@@ -96,12 +97,12 @@ async function getNotifications(req, res) {
   if (error) {
     return res.status(400).json({
       success: false,
-      message: error.details?.[0]?.message || "Invalid query params",
+      message: error.details?.[0]?.message || "Invalid payload",
       data: null,
     });
   }
 
-  // Validate session
+  // 2) Validate session
   const session = await isUserSessionValid(req);
   if (!session?.success) {
     return res.status(401).json(session);
@@ -117,34 +118,135 @@ async function getNotifications(req, res) {
   }
 
   try {
-    const page = Number(value.page) || 1;
-    const limit = Number(value.limit) || 20;
+    const deviceId = String(value.deviceId).trim();
+
+    // 3) Deactivate ONLY this device's token for this user (idempotent)
+    const [affectedRows] = await NotificationToken.update(
+      { is_active: false },
+      {
+        where: {
+          user_id: userId,
+          unique_device_id: deviceId,
+          is_active: true,
+        },
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        affectedRows > 0
+          ? "Notification unsubscribed successfully"
+          : "Already unsubscribed",
+      data: {
+        updated: affectedRows,
+        device_id: deviceId,
+      },
+    });
+  } catch (err) {
+    console.error("Error during unsubscribeToNotification:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong",
+      data: null,
+    });
+  }
+}
+
+async function getNotifications(req, res) {
+  try {
+    // 1) Validate query params
+    const schema = Joi.object({
+      page: Joi.number().integer().min(1).default(1),
+
+      type: Joi.string().trim().max(50).allow("", null).default(null),
+
+      // support either "is_read" or "isRead" if clients differ (optional)
+      is_read: Joi.boolean().optional(),
+      isRead: Joi.boolean().optional(),
+    });
+
+    const { error, value } = schema.validate(req.query || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid query params",
+        data: null,
+      });
+    }
+
+    // 2) Session (REQUIRED)
+    const sessionResult = await isUserSessionValid(req);
+    if (!sessionResult?.success) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+        data: null,
+      });
+    }
+
+    const userId = Number(sessionResult.data);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid session.",
+        data: null,
+      });
+    }
+
+    // 3) Pagination config (options-driven like getFeed)
+    const maxPages = parseInt(await getOption("max_pages_user", 1000), 10);
+    const perPage = parseInt(await getOption("default_per_page_notifications", 20), 10);
+
+    const page = Math.min(Math.max(1, Number(value.page) || 1), maxPages);
+    const limit = Math.min(Math.max(1, perPage || 20), 100); // hard safety cap
     const offset = (page - 1) * limit;
 
+    // 4) WHERE filters
     const where = { receiver_id: userId };
 
     if (value.type) where.type = value.type;
-    if (typeof value.is_read === "boolean") where.is_read = value.is_read;
 
-    const { count, rows } = await Notification.findAndCountAll({
+    const isRead =
+      typeof value.is_read === "boolean"
+        ? value.is_read
+        : typeof value.isRead === "boolean"
+        ? value.isRead
+        : undefined;
+
+    if (typeof isRead === "boolean") where.is_read = isRead;
+
+    // 5) Query
+    const result = await Notification.findAndCountAll({
       where,
       order: [["created_at", "DESC"]],
       limit,
       offset,
     });
 
-    const total_pages = Math.ceil((count || 0) / limit);
+    const rows = result.rows || [];
+    const totalItems = Number(result.count || 0);
+
+    const calculatedPages = Math.max(1, Math.ceil(totalItems / limit));
+    const totalPages = Math.min(maxPages, calculatedPages);
 
     return res.status(200).json({
       success: true,
       message: "Notifications fetched",
       data: {
-        notifications: rows || [],
+        rows,
         pagination: {
-          total_items: count || 0,
-          total_pages,
-          current_page: page,
-          per_page: limit,
+          page,
+          perPage: limit,
+          totalItems,
+          totalPages,
+          hasPrev: page > 1,
+          hasNext: page < totalPages,
         },
       },
     });
@@ -158,9 +260,6 @@ async function getNotifications(req, res) {
   }
 }
 
-/*
- * Returns unread notification count for logged-in user
- */
 async function getUnreadCount(req, res) {
   // Validate session
   const session = await isUserSessionValid(req);
@@ -202,164 +301,141 @@ async function getUnreadCount(req, res) {
   }
 }
 
-async function markRead(req, res) {
-  // Validate input
-  const schema = Joi.object({
-    id: Joi.number().integer().positive().required(),
-  });
-
-  const { error, value } = schema.validate(req.body || {}, {
-    abortEarly: true,
-    stripUnknown: true,
-    convert: true,
-  });
-
-  if (error) {
-    return res.status(400).json({
-      success: false,
-      message: error.details?.[0]?.message || "Invalid payload",
-      data: null,
-    });
-  }
-
-  // Validate session
-  const session = await isUserSessionValid(req);
-  if (!session?.success) {
-    return res.status(401).json(session);
-  }
-
-  const userId = Number(session.data);
-  if (!Number.isInteger(userId) || userId <= 0) {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid session",
-      data: null,
-    });
-  }
-
+async function markNotificationRead(req, res) {
   try {
-    const id = Number(value.id);
+    // 1) Validate input
+    const schema = Joi.object({
+      id: Joi.number().integer().positive().required(),
+    }).required();
 
-    const [updated] = await Notification.update(
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid payload.",
+        data: null,
+      });
+    }
+
+    const notificationId = Number(value.id);
+
+    // 2) Session (REQUIRED)
+    const sessionResult = await isUserSessionValid(req);
+    if (!sessionResult?.success) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+        data: null,
+      });
+    }
+
+    const userId = Number(sessionResult.data);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid session.",
+        data: null,
+      });
+    }
+
+    // 3) Update (only unread rows)
+    const [affectedRows] = await Notification.update(
       { is_read: true },
       {
         where: {
-          receiver_id: userId,
-          id: id,
-          is_read: false,
-        },
-      }
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: "Notification marked as read",
-      data: { updated: Number(updated) || 0 },
-    });
-  } catch (err) {
-    console.error("Error during markRead:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to mark read",
-      data: null,
-    });
-  }
-}
-
-
-async function markAllRead(req, res) {
-  // Validate session
-  const session = await isUserSessionValid(req);
-  if (!session?.success) {
-    return res.status(401).json(session);
-  }
-
-  const userId = Number(session.data);
-  if (!Number.isInteger(userId) || userId <= 0) {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid session",
-      data: null,
-    });
-  }
-
-  try {
-    const [updated] = await Notification.update(
-      { is_read: true },
-      {
-        where: {
+          id: notificationId,
           receiver_id: userId,
           is_read: false,
         },
       }
     );
 
+    const updated = Number(affectedRows) || 0;
+
+    // Optional: distinguish "not found / already read"
+    if (updated === 0) {
+      // Either notification doesn't belong to user OR it was already read
+      return res.status(404).json({
+        success: false,
+        message: "Notification not found or already read.",
+        data: { updated: 0 },
+      });
+    }
+
     return res.status(200).json({
       success: true,
-      message: "All notifications marked as read",
-      data: { updated: Number(updated) || 0 },
+      message: "Notification marked as read.",
+      data: { updated },
     });
-  } catch (err) {
-    console.error("Error during markAllRead:", err);
+  } catch (error) {
+    console.error("Error during markNotificationRead:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to mark all as read",
+      message: "Failed to mark notification as read.",
       data: null,
     });
   }
 }
 
-async function unsubscribeToNotification(req, res) {
-  // Validate session
-  const session = await isUserSessionValid(req);
-  if (!session?.success) {
-    return res.status(401).json(session);
-  }
-
-  const userId = Number(session.data);
-  if (!Number.isInteger(userId) || userId <= 0) {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid session",
-      data: null,
-    });
-  }
-
+async function markAllNotificationsRead(req, res) {
   try {
-    const [updated] = await NotificationToken.update(
-      { is_active: false },
+    // 1) Session (REQUIRED)
+    const sessionResult = await isUserSessionValid(req);
+    if (!sessionResult?.success) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+        data: null,
+      });
+    }
+
+    const userId = Number(sessionResult.data);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid session.",
+        data: null,
+      });
+    }
+
+    // 2) Update all unread
+    const [affectedRows] = await Notification.update(
+      { is_read: true },
       {
         where: {
-          user_id: userId,
-          is_active: true,
+          receiver_id: userId,
+          is_read: false,
         },
       }
     );
 
+    const updated = Number(affectedRows) || 0;
+
     return res.status(200).json({
       success: true,
-      message: "Notification unsubscribed successfully",
-      data: {
-        updated: Number(updated) || 0,
-      },
+      message: "All notifications marked as read.",
+      data: { updated },
     });
-  } catch (err) {
-    console.error("Error during unsubscribeFromNotification:", err);
+  } catch (error) {
+    console.error("Error dusring markAllNotificationsRead:", error);
     return res.status(500).json({
       success: false,
-      message: "Something went wrong",
+      message: "Failed to mark all notifications as read.",
       data: null,
     });
   }
 }
-
 
 module.exports = {
   subscribeToNotification,
+  unsubscribeToNotification,
   getNotifications,
   getUnreadCount,
-  markRead,
-  markAllRead,
-  unsubscribeToNotification
-
+  markNotificationRead,
+  markAllNotificationsRead,
 };
