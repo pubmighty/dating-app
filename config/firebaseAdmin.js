@@ -11,7 +11,8 @@ function getAdmin() {
 
   const serviceAccountPath = path.join(
     __dirname,
-    "firebaseKey.json" 
+    "..",
+    "firebaseKey.json"
   );
 
   const serviceAccount = require(serviceAccountPath);

@@ -7,7 +7,7 @@ const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 const {
   getOrCreateChatBetweenUsers,
 } = require("../../utils/helpers/chatHelper");
-
+const { sendBotMatchNotificationToUser } = require("../../utils/helpers/notificationHelper");
 async function likeUser(req, res) {
   // 1) Validate input
   const schema = Joi.object({
@@ -198,8 +198,27 @@ async function likeUser(req, res) {
       );
     }
     // TODO: Send notification to target user if human of like recived and matched
+      let shouldNotifyBotMatch = false;
+      let chatIdForNotify = null;
+      if (isTargetBot && isMatch) {
+        shouldNotifyBotMatch = true;
+        chatIdForNotify = chat?.id || null;
+      }
 
     await transaction.commit();
+      let notifyResult = null;
+    if (shouldNotifyBotMatch) {
+      try {
+        notifyResult = await sendBotMatchNotificationToUser({
+          userId,
+          botId: targetUserId,
+          chatId: chatIdForNotify,
+        });
+      } catch (e) {
+        console.error("Bot match notify failed:", e);
+        notifyResult = null;
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -209,6 +228,8 @@ async function likeUser(req, res) {
         target_type: targetUser.type,
         is_match: isMatch,
         chat_id: chat?.id || null,
+        notification: notifyResult?.notification || null,
+        push: notifyResult?.push || null,
       },
     });
   } catch (err) {

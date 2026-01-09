@@ -1,6 +1,8 @@
 const Notification = require("../../models/Notification");
 const NotificationToken = require("../../models/NotificationToken");
 const { getAdmin } = require("../../config/firebaseAdmin");
+const User = require("../../models/User");
+
 
 function toStringData(data) {
   const out = {};
@@ -9,12 +11,13 @@ function toStringData(data) {
   return out;
 }
 
-function buildMulticastPayload({ tokens, title, content, data }) {
+function buildMulticastPayload({ tokens, title, content, image, data }) {
   return {
     tokens,
     notification: {
       title: title || "",
       body: content || "",
+      image: image || undefined,
     },
     data: toStringData(data),
     android: { priority: "high" },
@@ -30,6 +33,7 @@ async function createAndSend({
   type,
   title,
   content,
+  image = null,
   data = {},
 }) {
   if (!receiverId) throw new Error("receiverId is required");
@@ -74,6 +78,7 @@ async function createAndSend({
       tokens,
       title,
       content,
+       image,
       data: {
         notification_id: notification.id,
         type,
@@ -190,7 +195,44 @@ async function createAndSendGlobal({
   };
 }
 
+async function sendBotMatchNotificationToUser({ userId, botId, chatId = null }) {
+  if (!userId || !botId) throw new Error("userId and botId are required");
+
+  const bot = await User.findByPk(botId, {
+    attributes: ["id", "username", "full_name", "avatar"],
+  });
+
+  const botName =
+    bot?.username?.trim() ||
+    "someone";
+
+  // const BASE_URL = process.env.BASE_URL || "http://192.168.0.156:5002";
+  // const avatarUrl = `${BASE_URL}/uploads/avatar/${bot.avatar}`;
+  const avatarUrl = "https://favim.com/pd/1tb/preview/2/249/2496/24966/2496634.jpg";
+
+  const result = await createAndSend({
+  senderId: botId,
+  receiverId: userId,
+  type: "match",
+  title: "✨ It's a Match!",
+  content: `You matched with ${botName} 🎉 Start chatting now!`,
+  image: avatarUrl,
+  data: {
+    event: "BOT_MATCH",
+    chat_id: chatId,
+    target_user_id: botId,
+    target_type: "bot",
+    target_name: botName,
+    target_avatar_path: avatarUrl,
+  },
+});
+        return result;
+}
+
+
+
 module.exports = { 
   createAndSend,
-  createAndSendGlobal
+  createAndSendGlobal,
+  sendBotMatchNotificationToUser
  };
