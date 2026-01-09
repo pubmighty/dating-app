@@ -195,7 +195,7 @@ async function createAndSendGlobal({
   };
 }
 
-async function sendBotMatchNotificationToUser({ userId, botId, chatId = null }) {
+async function sendLikeNotification({ userId, botId, chatId = null }) {
   if (!userId || !botId) throw new Error("userId and botId are required");
 
   const bot = await User.findByPk(botId, {
@@ -234,5 +234,5 @@ async function sendBotMatchNotificationToUser({ userId, botId, chatId = null }) 
 module.exports = { 
   createAndSend,
   createAndSendGlobal,
-  sendBotMatchNotificationToUser
+  sendLikeNotification
  };
