@@ -2,7 +2,10 @@ const bcrypt = require("bcryptjs");
 const Joi = require("joi");
 const { Op } = require("sequelize");
 const { getOption } = require("../../utils/helper");
-const { isAdminSessionValid } = require("../../utils/helpers/authHelper");
+const {
+  isAdminSessionValid,
+  verifyAdminRole,
+} = require("../../utils/helpers/authHelper");
 const {
   verifyFileType,
   uploadFile,
@@ -11,7 +14,6 @@ const {
 const sequelize = require("../../config/db");
 const Admin = require("../../models/Admin/Admin");
 const CoinPackage = require("../../models/CoinPackage");
-const { verifyAdminRole } = require("../../utils/helper");
 
 async function getAdmins(req, res) {
   try {
@@ -499,7 +501,12 @@ async function editAdmin(req, res) {
       first_name: Joi.string().trim().max(100).allow("", null),
       last_name: Joi.string().trim().max(100).allow("", null),
 
-      role: Joi.string().valid("superAdmin", "staff", "paymentManager", "support"),
+      role: Joi.string().valid(
+        "superAdmin",
+        "staff",
+        "paymentManager",
+        "support"
+      ),
       status: Joi.number().integer().valid(0, 1, 2, 3),
 
       // 0=off,1=app,2=email
@@ -539,7 +546,9 @@ async function editAdmin(req, res) {
     }
 
     if (Object.prototype.hasOwnProperty.call(body, "email")) {
-      const normalizedEmail = String(body.email || "").trim().toLowerCase();
+      const normalizedEmail = String(body.email || "")
+        .trim()
+        .toLowerCase();
       if (!normalizedEmail) {
         return res
           .status(400)
@@ -606,14 +615,12 @@ async function editAdmin(req, res) {
       if (updatePayload.username || updatePayload.email) {
         const or = [];
         if (updatePayload.email) or.push({ email: updatePayload.email });
-        if (updatePayload.username) or.push({ username: updatePayload.username });
+        if (updatePayload.username)
+          or.push({ username: updatePayload.username });
 
         const conflict = await Admin.findOne({
           where: {
-            [Op.and]: [
-              { id: { [Op.ne]: targetAdminId } },
-              { [Op.or]: or },
-            ],
+            [Op.and]: [{ id: { [Op.ne]: targetAdminId } }, { [Op.or]: or }],
           },
           attributes: ["id", "email", "username"],
           transaction: t,
@@ -624,7 +631,9 @@ async function editAdmin(req, res) {
           const emailClash =
             updatePayload.email && conflict.email === updatePayload.email;
           const clashField = emailClash ? "email" : "username";
-          const err = new Error(`An admin with this ${clashField} already exists.`);
+          const err = new Error(
+            `An admin with this ${clashField} already exists.`
+          );
           err.statusCode = 409;
           throw err;
         }
@@ -692,7 +701,9 @@ async function editAdmin(req, res) {
     }
 
     console.error("Error during editAdmin:", err?.message || err);
-    return res.status(500).json({ success: false, msg: "Internal server error" });
+    return res
+      .status(500)
+      .json({ success: false, msg: "Internal server error" });
   }
 }
 

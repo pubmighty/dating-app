@@ -14,10 +14,11 @@ const {
 const { getOption, escapeLike } = require("../../utils/helper");
 const { getRealIp, normalizeFiles } = require("../../utils/helper");
 const { logActivity } = require("../../utils/helpers/activityLogHelper");
+const { BCRYPT_ROUNDS } = require("../../utils/staticValues");
 const {
-  BCRYPT_ROUNDS,
-} = require("../../utils/staticValues");
-const { isAdminSessionValid, verifyAdminRole } = require("../../utils/helpers/authHelper");
+  isAdminSessionValid,
+  verifyAdminRole,
+} = require("../../utils/helpers/authHelper");
 const Admin = require("../../models/Admin/Admin");
 const { Op } = require("sequelize");
 
@@ -26,7 +27,9 @@ async function getBots(req, res) {
     // 1) Admin auth
     const session = await isAdminSessionValid(req);
     if (!session?.success || !session?.data) {
-      return res.status(401).json({ success: false, msg: "Admin session invalid" });
+      return res
+        .status(401)
+        .json({ success: false, msg: "Admin session invalid" });
     }
 
     // 2) Role check
@@ -37,7 +40,9 @@ async function getBots(req, res) {
 
     const canGo = await verifyAdminRole(admin, "getBots");
     if (!canGo) {
-      return res.status(403).json({ success: false, msg: "Insufficient permissions" });
+      return res
+        .status(403)
+        .json({ success: false, msg: "Insufficient permissions" });
     }
 
     // 3) Query validation
@@ -237,13 +242,11 @@ async function getBot(req, res) {
 
     const canGo = await verifyAdminRole(admin, "getBotUserById");
     if (!canGo) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "Insufficient permissions",
-          data: null,
-        });
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
     }
 
     const userId = pVal.userId;
@@ -285,6 +288,7 @@ async function addBot(req, res) {
   try {
     // 1) Admin session + permission
     const session = await isAdminSessionValid(req);
+
     if (!session?.success || !session?.data) {
       return res
         .status(401)
@@ -945,13 +949,11 @@ async function deleteBot(req, res) {
 
     const canGo = await verifyAdminRole(admin, "deleteBotUser");
     if (!canGo) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "Insufficient permissions",
-          data: null,
-        });
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
     }
 
     // fetch
@@ -967,13 +969,11 @@ async function deleteBot(req, res) {
     }
 
     if (Number(existing.is_deleted) === 1) {
-      return res
-        .status(409)
-        .json({
-          success: false,
-          message: "Bot user is already deleted",
-          data: null,
-        });
+      return res.status(409).json({
+        success: false,
+        message: "Bot user is already deleted",
+        data: null,
+      });
     }
 
     // soft delete
@@ -1218,7 +1218,8 @@ async function uploadBotMedia(req, res) {
     if (Number(targetUser.is_deleted) === 1) {
       return res.status(409).json({
         success: false,
-        message: "Cannot upload media for a deleted bot user. Restore it first.",
+        message:
+          "Cannot upload media for a deleted bot user. Restore it first.",
         data: null,
       });
     }
@@ -1233,7 +1234,10 @@ async function uploadBotMedia(req, res) {
       });
     }
 
-    const MAX_FILES = Number.parseInt(await getOption("max_files_per_user", 5), 10);
+    const MAX_FILES = Number.parseInt(
+      await getOption("max_files_per_user", 5),
+      10
+    );
     if (!Number.isFinite(MAX_FILES) || MAX_FILES <= 0) {
       return res.status(500).json({
         success: false,

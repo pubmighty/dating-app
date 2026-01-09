@@ -47,7 +47,7 @@ const Admin = sequelize.define(
       type: DataTypes.STRING(256),
       allowNull: true,
     },
-    avtar: {
+    avatar: {
       type: DataTypes.STRING(256),
       allowNull: true,
     },

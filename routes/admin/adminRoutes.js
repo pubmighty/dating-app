@@ -5,6 +5,203 @@ const authController = require("../../controllers/admin/authController");
 const userController = require("../../controllers/admin/userController");
 const botController = require("../../controllers/admin/botController");
 const coinPackageController = require("../../controllers/admin/coinPackageController");
+const chatController = require("../../controllers/admin/chatController");
+
+/**
+ *  GET /chats
+ * ------------------------------------------------------------
+ * Fetches chats for the Admin panel (global inbox).
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated ADMIN session.
+ * - Admin must have permission to view chats (role-based if enforced).
+ *
+ * Optional Filters:
+ * - chatId (optional): fetch only one specific chat
+ * - userId (optional): fetch chats where this user is a participant
+ * - status (optional): "active" | "blocked" | "deleted"
+ *   - Matches if either side has the provided status
+ *
+ * Response includes:
+ * - Both participant profiles (safe subset)
+ * - Last message summary (if exists)
+ * - Both-side unread counters and per-user status fields
+ */
+router.get("/chats", chatController.adminGetChats);
+
+/**
+ *  GET /chats/:chatId/messages
+ * ------------------------------------------------------------
+ * Fetches chat messages using PAGE-based pagination (admin view).
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated ADMIN session.
+ * - Admin can access any chat (global access).
+ *
+ * Optional Admin Behavior:
+ * - markReadForUserId (optional):
+ *   - If provided, marks unread messages as read *for that user side*
+ *   - Also syncs unread_count_p1/unread_count_p2 correctly
+ *
+ * Notes:
+ * - Messages are fetched DESC for performance then reversed to ASC
+ *   so UI shows old → new for that page.
+ */
+router.get("/chats/:chatId/messages", chatController.adminGetChatMessages);
+
+/**
+ * GET /chats/:chatId/messages/cursor
+ * ------------------------------------------------------------
+ * Fetches chat messages using CURSOR-based pagination .
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated ADMIN session.
+ * - Admin can access any chat (global access).
+ *
+ * Query Params:
+ * - cursor (optional): message.id of the last item from previous page
+ * - limit (default: 30, hard cap: 50)
+ *
+ * Optional Admin Behavior:
+ * - markReadForUserId (optional):
+ *   - If provided, marks unread messages as read for that user side
+ *   - Updates unread_count_p1/unread_count_p2 accordingly
+ *
+ * Response includes:
+ * - cursor (next cursor)
+ * - hasMore boolean
+ */
+router.get(
+  "/chats/:chatId/messages/cursor",
+  chatController.adminGetChatMessagesCursor
+);
+
+/**
+ *  POST /messages/:messageId/delete
+ * ------------------------------------------------------------
+ * Deletes (soft-deletes) ANY message by Admin .
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated ADMIN session.
+ * - Admin must have permission to delete messages (role-based if enforced).
+ *
+ * Behavior:
+ * - Soft-deletes the message:
+ *   - status set to "deleted"
+ *   - message text replaced with "This message was deleted"
+ *   - message_type normalized to "text"
+ *
+ * Notes:
+ * - Operation is idempotent (deleting an already deleted message succeeds).
+ * - If your UI hides media/reply previews for deleted messages,
+ *   it should rely on message.status = "deleted".
+ */
+router.post("/messages/:messageId/delete", chatController.adminDeleteMessage);
+
+/**
+ *  POST /chats/pin
+ * ------------------------------------------------------------
+ * Pins or unpins one or more chats FOR a specific user side
+ * (Admin action applied on behalf of a user).
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated ADMIN session.
+ * - Admin must have permission to update chat flags (role-based if enforced).
+ *
+ * Payload:
+ * - userId: number (required)
+ * - chat_ids: number[] (non-empty)
+ * - is_pin: boolean (true = pin, false = unpin)
+ *
+ * Behavior:
+ * - Updates per-user pin state based on the user's participant side:
+ *   - is_pin_p1 OR is_pin_p2
+ * - Operation is idempotent.
+ *
+ * Why userId is required:
+ * - Your Chat table stores pin state in two columns:
+ *   - is_pin_p1 and is_pin_p2
+ * - Admin must specify which user's pin-state is being changed.
+ */
+router.post("/chats/pin", chatController.adminPinChats);
+
+/**
+ *  POST /chats/:chatId/block
+ * ------------------------------------------------------------
+ * Blocks or unblocks a chat from Admin panel.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated ADMIN session.
+ * - Admin must have permission to block/unblock chats.
+ *
+ * Payload:
+ * - action: "block" | "unblock" (optional, default: "block")
+ * - scope: "one" | "both" (optional, default: "one")
+
+ * Behavior:
+ * - Blocking is stored in per-user status fields:
+ *   - chat_status_p1 / chat_status_p2
+ * - Operation is idempotent.
+ */
+router.post("/chats/:chatId/block", chatController.adminBlockChat);
+
+/**
+ *  POST /chats/:chatId/delete
+ * ------------------------------------------------------------
+ * Deletes a chat visibility from Admin panel.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated ADMIN session.
+ * - Admin must have permission to delete chats.
+ *
+ * Payload:
+ * - scope: "one" | "both" (optional, default: "one")
+ *
+ * If scope="one":
+ * - userId (required): delete-for-me style deletion for that user side only
+ *   - Sets chat_status_p1 OR chat_status_p2 = "deleted"
+ *   - Clears that side’s pin + unread counter
+ *
+ * If scope="both":
+ * - Deletes for both participants:
+ *   - chat_status_p1 = "deleted" AND chat_status_p2 = "deleted"
+ *   - Clears pin/unread for both sides
+ *
+ * Behavior:
+ * - Operation is idempotent.
+ */
+router.post("/chats/:chatId/delete", chatController.adminDeleteChat);
+
+/**
+ *  POST /chats/mark-as-read
+ * ------------------------------------------------------------
+ * Marks messages in a chat as read FOR a specific user side
+ * (Admin action on behalf of that user).
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated ADMIN session.
+ * - Admin must have permission to update read state.
+ *
+ * Payload:
+ * - chatId: number (required)
+ * - userId: number (required)
+ * - lastMessageId (optional):
+ *   - If provided, only messages with id <= lastMessageId are marked read
+ *
+ * Behavior:
+ * - Updates unread messages where:
+ *   - chat_id = chatId
+ *   - receiver_id = userId
+ *   - is_read = false
+ *   - status != "deleted"
+ * - Recalculates remaining unread count and syncs:
+ *   - unread_count_p1 OR unread_count_p2 depending on the user's side
+ *
+ * Why userId is required:
+ * - unread_count is stored separately for each participant:
+ *   - unread_count_p1 / unread_count_p2
+ */
+router.post("/chats/mark-as-read", chatController.adminMarkChatMessagesRead);
 
 /**
  * POST /login
@@ -921,7 +1118,7 @@ router.get("/manage-admins/:id", adminController.getAdmin);
  */
 router.post(
   "/manage-admins/add",
-  fileUploader.single("avtar"),
+  fileUploader.single("avatar"),
   adminController.addAdmin
 );
 
@@ -968,7 +1165,7 @@ router.post(
  */
 router.post(
   "/manage-admins/:id",
-  fileUploader.single("avtar"),
+  fileUploader.single("avatar"),
   adminController.editAdmin
 );
 

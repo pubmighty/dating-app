@@ -3,7 +3,7 @@ const sequelize = require("./config/db");
 
 const userRoutes = require("./routes/user/userRoutes");
 const adminRoutes = require("./routes/admin/adminRoutes");
-const {setupAssociations}=require("./models/Associations")
+const { setupAssociations } = require("./models/Associations");
 require("dotenv").config();
 const cors = require("cors");
 
