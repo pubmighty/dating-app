@@ -425,6 +425,39 @@ router.post(
 router.get("/chats", chatController.getUserChats);
 
 /**
+ * GET /chats/blocked
+ * ------------------------------------------------------------
+ * Fetches the authenticated user's **blocked chat list**.
+ *
+ * Purpose:
+ * - Returns only chats where the user has blocked the other participant.
+ * - Used for the "Blocked Chats" or "Archived/Blocked" section in the app.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated user session.
+ * - Only returns chats belonging to the requesting user.
+ *
+ * Query Params:
+ * - page (default: 1)
+ * - limit (default: 20, max: 50)
+ *
+ * Filtering Logic:
+ * - Filters chats where `chat_status_p2 = "blocked"` for the current user.
+ * - Ensures only blocked conversations are returned.
+ *
+ * Ordering:
+ * - Pinned chats first (per-user pin state).
+ * - Then by last activity (`last_message_time`, fallback `updated_at`).
+ *
+ * Response Includes:
+ * - Other participant’s safe public profile data (no email/phone).
+ * - Last message summary (if exists).
+ * - Unread message count for the current user.
+ * - Pagination metadata.
+ */
+router.get("/chats/blocked", chatController.getBlockedChats);
+
+/**
  * POST /chats/pin
  * ------------------------------------------------------------
  * Pins or unpins one or more chats for the current user.

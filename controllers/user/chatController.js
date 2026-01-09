@@ -1283,6 +1283,128 @@ async function getUserChats(req, res) {
   }
 }
 
+async function getBlockedChats(req, res) {
+  try {
+    const schema = Joi.object({
+      page: Joi.number().integer().min(1).default(1),
+      limit: Joi.number().integer().min(1).max(50).default(20),
+    });
+
+    const { error, value } = schema.validate(req.query, {
+      abortEarly: true,
+      convert: true,
+      stripUnknown: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+      });
+    }
+
+    const page = Number(value.page);
+    const limit = Number(value.limit);
+    const offset = (page - 1) * limit;
+
+    const session = await isUserSessionValid(req);
+    if (!session.success) return res.status(401).json(session);
+    const userId = Number(session.data);
+
+    const { count, rows } = await Chat.findAndCountAll({
+      where: {
+        participant_2_id: userId,
+        chat_status_p2: "blocked",
+      },
+      attributes: [
+        "id",
+        "participant_1_id",
+        "participant_2_id",
+        "is_pin_p2",
+        "unread_count_p2",
+        "last_message_time",
+        "updated_at",
+      ],
+      include: [
+        {
+          model: User,
+          as: "participant1", // bot user
+          attributes: [
+            "id",
+            "username",
+            "avatar",
+            "is_active",
+            "last_active",
+            "bio",
+            "gender",
+            "country",
+          ],
+          required: true,
+        },
+        {
+          model: Message,
+          as: "lastMessage",
+          attributes: ["id", "message", "message_type", "created_at", "status"],
+          required: false,
+        },
+      ],
+      order: [
+        ["is_pin_p2", "DESC"],
+        // Prefer last_message_time if it’s maintained correctly; fallback to updated_at.
+        ["last_message_time", "DESC"],
+        ["updated_at", "DESC"],
+      ],
+      limit,
+      offset,
+      distinct: true,
+      subQuery: false,
+    });
+
+    const chatList = rows.map((chat) => {
+      const isP1 = chat.participant_1_id === userId;
+      const otherUser = isP1 ? chat.participant2 : chat.participant1;
+
+      const isPinned = isP1 ? chat.is_pin_p1 : chat.is_pin_p2;
+      const unread = isP1 ? chat.unread_count_p1 : chat.unread_count_p2;
+
+      const lastMsg = chat.lastMessage || null;
+
+      return {
+        chat_id: chat.id,
+        user: otherUser || null,
+        last_message: lastMsg ? lastMsg.message : null,
+        last_message_type: lastMsg ? lastMsg.message_type : null,
+        last_message_time:
+          chat.last_message_time || (lastMsg ? lastMsg.created_at : null),
+        unread_count: Number(unread || 0),
+        is_pin: !!isPinned,
+      };
+    });
+
+    return res.json({
+      success: true,
+      message: "Blocked chats fetched successfully",
+      data: {
+        chats: chatList,
+        pagination: {
+          page,
+          limit,
+          total: count,
+          totalPages: Math.ceil(count / limit),
+          hasMore: offset + chatList.length < count,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Error during getBlockedChats:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+}
+
+
 async function pinChats(req, res) {
   try {
     // 1) Validate body early
@@ -1800,8 +1922,8 @@ module.exports = {
   getChatMessages,
   getChatMessagesCursor,
   deleteMessage,
-
   getUserChats,
+  getBlockedChats,
   pinChats,
   blockChat,
   deleteChat,
