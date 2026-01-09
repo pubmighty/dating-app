@@ -80,13 +80,13 @@ async function createAndSend({
       content,
        image,
       data: {
-        notification_id: notification.id,
-        type,
+       notificationId: String(notification.id),
+        type: String(type),
         ...data,
       },
     });
 
-    const fcmRes = await admin.messaging().sendEachForMulticast(payload);
+  const fcmRes = await admin.messaging().sendEachForMulticast(payload);
 
     push = {
       attempted: tokens.length,
@@ -230,10 +230,58 @@ const result = await createAndSend({
         return result;
 }
 
+async function sendChatNotification({
+  senderId,
+  receiverId,
+  chatId,
+  messageId,
+  messageText = "",
+  messageType = "text",
+}) {
+  if (!senderId || !receiverId || !chatId || !messageId) {
+    throw new Error("senderId, receiverId, chatId, messageId are required");
+  }
+
+  const sender = await User.findByPk(senderId, {
+    attributes: ["id", "username", "full_name", "avatar"],
+  });
+
+  const senderName =
+    sender?.full_name?.trim() ||
+    sender?.username?.trim() ||
+    "Someone";
+
+  const preview =
+    (messageType !== "text" && !messageText)
+      ? "Sent an attachment"
+      : String(messageText || "").slice(0, 80);
+
+  const avatarUrl = "https://img.freepik.com/premium-photo/portrait-beautiful-smiling-young-indian-girl-posing-grey-background_136354-54823.jpg";
+
+  return createAndSend({
+    senderId,
+    receiverId,
+    type: "chat_message",
+    title: `💬 New Message From ${senderName}`,
+    content: preview || "New message",
+    image: avatarUrl,
+    data: {
+      event: "CHAT_MESSAGE",
+      chatId: String(chatId),
+      messageId: String(messageId),
+      senderId: String(senderId),
+      senderName: String(senderName),
+      senderAvatarUrl: String(avatarUrl),
+      messageType: String(messageType), 
+    },
+  });
+}
+
 
 
 module.exports = { 
   createAndSend,
   createAndSendGlobal,
-  sendBotMatchNotificationToUser
+  sendBotMatchNotificationToUser,
+  sendChatNotification
  };

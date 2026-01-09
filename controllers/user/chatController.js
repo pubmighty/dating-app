@@ -23,7 +23,7 @@ const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 const sequelize = require("../../config/db");
 const { fallbackMessages } = require("../../utils/staticValues");
 const MessageFile = require("../../models/MessageFile");
-
+const { sendChatNotification } = require("../../utils/helpers/notificationHelper");
 /**
  * Helper function to cleanup uploaded files when transaction fails
  * @param {Array} uploadedFiles - Array of uploaded file objects
@@ -486,7 +486,16 @@ async function sendMessage(req, res) {
     // Transaction committed successfully
     // Cleanup any remaining temp files
     await cleanupTempFiles(incomingFiles);
-
+    if (!isBotReceiver && receiverId && receiverId !== userId) {
+      sendChatNotification({
+        senderId: userId,
+        receiverId,
+        chatId,
+        messageId: result.message.id,
+        messageText: captionOrText || "",
+        messageType: result.message.message_type || "text",
+      }).catch((e) => console.error("Chat notify failed:", e));
+    }
     // If non-bot, respond immediately
     if (!isBotReceiver) {
       return res.json({
@@ -565,7 +574,16 @@ async function sendMessage(req, res) {
 
         return botMessageSaved;
       });
-
+      if (botSaved && botSaved.id) {
+        sendChatNotification({
+          senderId: receiverId,    
+          receiverId: userId,       
+          chatId,
+          messageId: botSaved.id,
+          messageText: botSaved.message || "",
+          messageType: botSaved.message_type || "text",
+        }).catch((e) => console.error("Bot chat notify failed:", e));
+      }   
       return res.json({
         success: true,
         message: "Message sent (bot replied)",
