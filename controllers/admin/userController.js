@@ -19,11 +19,10 @@ const {
 } = require("../../utils/helper");
 const { getRealIp, normalizeFiles } = require("../../utils/helper");
 const { logActivity } = require("../../utils/helpers/activityLogHelper");
-const {
-  BCRYPT_ROUNDS,
-} = require("../../utils/staticValues");
+const { BCRYPT_ROUNDS } = require("../../utils/staticValues");
 const {
   isAdminSessionValid,
+  verifyAdminRole,
 } = require("../../utils/helpers/authHelper");
 const Admin = require("../../models/Admin/Admin");
 
@@ -715,13 +714,7 @@ async function editUser(req, res) {
         )
         .optional()
         .allow(null, ""),
-    })
-      .min(1)
-      .required()
-      .messages({
-        "object.min": "At least one field is required to update.",
-      });
-
+    });
     const payload = req.body || {};
     const { error: bErr, value } = bodySchema.validate(payload, {
       abortEarly: true,
@@ -1016,13 +1009,11 @@ async function deleteUser(req, res) {
 
     const canGo = await verifyAdminRole(admin, "deleteUser");
     if (!canGo) {
-      return res
-        .status(403)
-        .json({
-          success: false,
-          message: "Insufficient permissions",
-          data: null,
-        });
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
     }
 
     // 3) Fetch user
@@ -1106,7 +1097,9 @@ async function restoreUser(req, res) {
     });
 
     if (pErr) {
-      return res.status(400).json({ success: false, message: pErr.details[0].message, data: null });
+      return res
+        .status(400)
+        .json({ success: false, message: pErr.details[0].message, data: null });
     }
 
     const userId = pVal.userId;
@@ -1114,24 +1107,34 @@ async function restoreUser(req, res) {
     // 2) Admin session + permission
     const session = await isAdminSessionValid(req, res);
     if (!session?.success || !session?.data) {
-      return res.status(401).json({ success: false, message: "Admin session invalid", data: null });
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin session invalid", data: null });
     }
 
     const adminId = Number(session.data);
     const admin = await Admin.findByPk(adminId);
     if (!admin) {
-      return res.status(401).json({ success: false, message: "Admin not found", data: null });
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin not found", data: null });
     }
 
     const canGo = await verifyAdminRole(admin, "restoreUser");
     if (!canGo) {
-      return res.status(403).json({ success: false, message: "Insufficient permissions", data: null });
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
     }
 
     // 3) Fetch user
     const existing = await User.findByPk(userId, { raw: true });
     if (!existing) {
-      return res.status(404).json({ success: false, message: "User not found", data: null });
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found", data: null });
     }
 
     if (Number(existing.is_deleted) === 0) {
@@ -1184,7 +1187,9 @@ async function restoreUser(req, res) {
     });
   } catch (err) {
     console.error("Error during restoreUser:", err);
-    return res.status(500).json({ success: false, message: "Internal server error", data: null });
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error", data: null });
   }
 }
 
@@ -1210,9 +1215,11 @@ async function uploadUserMedia(req, res) {
 
     const canGo = await verifyAdminRole(admin, "uploadUserMedia");
     if (!canGo) {
-      return res
-        .status(403)
-        .json({ success: false, message: "Insufficient permissions", data: null });
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
     }
 
     // 2) Validate target userId param
@@ -1240,7 +1247,7 @@ async function uploadUserMedia(req, res) {
 
     // 3) Ensure target user exists and is real (as you want)
     const targetUser = await User.findOne({
-      where: { id: targetUserId},
+      where: { id: targetUserId },
       attributes: ["id", "username", "type", "is_deleted"],
       raw: true,
     });
@@ -1263,7 +1270,10 @@ async function uploadUserMedia(req, res) {
       });
     }
 
-    const MAX_FILES = Number.parseInt(await getOption("max_files_per_user", 5), 10);
+    const MAX_FILES = Number.parseInt(
+      await getOption("max_files_per_user", 5),
+      10
+    );
     if (!Number.isFinite(MAX_FILES) || MAX_FILES <= 0) {
       // sane fallback
       return res.status(500).json({

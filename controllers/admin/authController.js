@@ -276,7 +276,7 @@ async function verifyAdminLogin(req, res) {
     }
 
     // Check if the password is correct
-    const isPasswordMatch = await bcrypt.compare(password, user.password);
+    const isPasswordMatch = await bcrypt.compare(password, admin.password);
     if (!isPasswordMatch) {
       return res
         .status(400)
@@ -337,7 +337,7 @@ async function verifyAdminLogin(req, res) {
       });
     }
 
-    const { token, expires_at } = await handleAdminSessionCreation(user, req);
+    const { token, expires_at } = await handleAdminSessionCreation(admin, req);
     const adminSafe = await Admin.findByPk(admin.id, {
       attributes: publicAdminAttributes,
     });
