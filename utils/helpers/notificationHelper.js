@@ -17,7 +17,7 @@ function buildMulticastPayload({ tokens, title, content, image, data }) {
     notification: {
       title: title || "",
       body: content || "",
-      image: image || undefined,
+        image: image || undefined,
     },
     data: toStringData(data),
     android: { priority: "high" },
@@ -195,7 +195,7 @@ async function createAndSendGlobal({
   };
 }
 
-async function sendLikeNotification({ userId, botId, chatId = null }) {
+async function sendBotMatchNotificationToUser({ userId, botId, chatId = null }) {
   if (!userId || !botId) throw new Error("userId and botId are required");
 
   const bot = await User.findByPk(botId, {
@@ -203,14 +203,15 @@ async function sendLikeNotification({ userId, botId, chatId = null }) {
   });
 
   const botName =
+    bot?.full_name?.trim() ||
     bot?.username?.trim() ||
     "someone";
 
   // const BASE_URL = process.env.BASE_URL || "http://192.168.0.156:5002";
   // const avatarUrl = `${BASE_URL}/uploads/avatar/${bot.avatar}`;
-  const avatarUrl = "https://favim.com/pd/1tb/preview/2/249/2496/24966/2496634.jpg";
+  const avatarUrl = "https://i.imgur.com/CEnilHo.jpeg";
 
-  const result = await createAndSend({
+const result = await createAndSend({
   senderId: botId,
   receiverId: userId,
   type: "match",
@@ -234,5 +235,5 @@ async function sendLikeNotification({ userId, botId, chatId = null }) {
 module.exports = { 
   createAndSend,
   createAndSendGlobal,
-  sendLikeNotification
+  sendBotMatchNotificationToUser
  };

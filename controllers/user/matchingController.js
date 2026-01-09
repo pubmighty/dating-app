@@ -7,7 +7,7 @@ const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 const {
   getOrCreateChatBetweenUsers,
 } = require("../../utils/helpers/chatHelper");
-const { sendLikeNotification } = require("../../utils/helpers/notificationHelper");
+const { sendBotMatchNotificationToUser } = require("../../utils/helpers/notificationHelper");
 async function likeUser(req, res) {
   // 1) Validate input
   const schema = Joi.object({
@@ -209,7 +209,7 @@ async function likeUser(req, res) {
       let notifyResult = null;
     if (shouldNotifyBotMatch) {
       try {
-        notifyResult = await sendLikeNotification({
+        notifyResult = await sendBotMatchNotificationToUser({
           userId,
           botId: targetUserId,
           chatId: chatIdForNotify,
