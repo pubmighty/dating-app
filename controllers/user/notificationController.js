@@ -3,9 +3,11 @@ const NotificationToken = require("../../models/NotificationToken");
 const {
   isUserSessionValid,
 } = require("../../utils/helpers/authHelper");
-const { generateServerDeviceId } = require("../../utils/helper");
+const { generateServerDeviceId,getOption } = require("../../utils/helper");
 const { Op } = require("sequelize");
 const Notification = require("../../models/Notification");
+const User=require("../../models/User")
+
 
 async function subscribeToNotification(req, res) {
   // 1) Validate input
@@ -222,13 +224,20 @@ async function getNotifications(req, res) {
     if (typeof isRead === "boolean") where.is_read = isRead;
 
     // 5) Query
-    const result = await Notification.findAndCountAll({
-      where,
-      order: [["created_at", "DESC"]],
-      limit,
-      offset,
-    });
-
+ const result = await Notification.findAndCountAll({
+   where,
+  order: [["created_at", "DESC"]],
+  limit,
+  offset,
+  include: [
+    {
+      model: User,
+      as: "sender",
+      attributes: ["id", "username", "avatar"],
+      required: false, // VERY IMPORTANT (system notifications)
+    },
+  ],
+});
     const rows = result.rows || [];
     const totalItems = Number(result.count || 0);
 
