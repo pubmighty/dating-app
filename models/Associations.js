@@ -8,6 +8,7 @@ const UserMedia = require("./UserMedia");
 const ActivityLog = require("./ActivityLog");
 const MessageFile = require("./MessageFile");
 const VideoCall = require("./VideoCall");
+const Notification=require("./Notification")
 
 function setupAssociations() {
   User.hasMany(UserInteraction, {
@@ -145,6 +146,10 @@ function setupAssociations() {
     foreignKey: "chat_id",
     as: "chat",
   });
+  Notification.belongsTo(User, {
+  foreignKey: "sender_id",
+  as: "sender",
+});
 }
 
 module.exports = { setupAssociations };
