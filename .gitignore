@@ -1,3 +1,4 @@
 node_modules/
 .env
 /firebaseKey.json
+/google-play-service.dev.json

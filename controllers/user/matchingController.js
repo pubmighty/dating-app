@@ -7,7 +7,7 @@ const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 const {
   getOrCreateChatBetweenUsers,
 } = require("../../utils/helpers/chatHelper");
-const { sendBotMatchNotificationToUser } = require("../../utils/helpers/notificationHelper");
+const { sendBotMatchNotificationToUser, sendLikeNotificationToUser, sendRejectNotificationToUser } = require("../../utils/helpers/notificationHelper");
 const UserBlock = require("../../models/UserBlock"); 
 const Chat = require("../../models/Chat");
 
@@ -211,6 +211,16 @@ async function likeUser(req, res) {
 
     await transaction.commit();
       let notifyResult = null;
+      let likeNotifyResult = null;
+      if (!isTargetBot && !isMatch) {
+        // target user ko notify: "bot liked you"
+        try {
+          likeNotifyResult = await sendLikeNotificationToUser(userId,targetUserId);
+        } catch (e) {
+          console.error("Like notify failed:", e);
+          likeNotifyResult = null;
+        }
+      }
     if (shouldNotifyBotMatch) {
       try {
        notifyResult = await sendBotMatchNotificationToUser(
@@ -232,8 +242,8 @@ async function likeUser(req, res) {
         target_type: targetUser.type,
         is_match: isMatch,
         chat_id: chat?.id || null,
-        notification: notifyResult?.notification || null,
-        push: notifyResult?.push || null,
+        notification: likeNotifyResult?.notification || notifyResult?.notification || null,
+        push:  likeNotifyResult?.push || notifyResult?.push || null,
       },
     });
   } catch (err) {
@@ -293,6 +303,7 @@ async function rejectUser(req, res) {
   }
 
   const transaction = await sequelize.transaction();
+  let shouldNotifyReject = false;
   try {
     const targetUser = await User.findOne({
       where: { id: targetUserId, is_active: true, status: 1 },
@@ -353,7 +364,9 @@ async function rejectUser(req, res) {
         { transaction }
       );
     }
-
+    if (String(targetUser.type || "").toLowerCase() !== "bot" && previousAction !== "reject") {
+     shouldNotifyReject = true;
+      }
     // break match if needed
     const wasMatch = previousAction === "match" || reverseAction === "match";
     if (wasMatch) {
@@ -387,7 +400,16 @@ async function rejectUser(req, res) {
     }
 
     await transaction.commit();
-
+    
+    let rejectNotifyResult = null;
+      if (shouldNotifyReject) {
+  try {
+    rejectNotifyResult = await sendRejectNotificationToUser(userId,targetUserId);
+  } catch (e) {
+    console.error("Reject notify failed:", e);
+    rejectNotifyResult = null;
+  }
+}
     return res.status(200).json({
       success: true,
       message: "Rejected.",

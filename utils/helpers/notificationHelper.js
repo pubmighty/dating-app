@@ -118,153 +118,6 @@ function buildUserWhere(filters) {
 }
 
 /**
- * NEW: Preview how many users match filters (no sending)
- */
-async function previewFilteredUsers(filters) {
-  const safeFilters = filters || {};
-  const { where, filters: normalized } = buildUserWhere(safeFilters);
-  const matched_users = await User.count({ where });
-
-  return {
-    matched_users,
-    filters: normalized,
-  };
-}
-
-async function createAndSendFiltered(
-  senderId = null, // admin => null
-  type,
-  title,
-  content,
-  image = null,
-  data = {},
-  filters = {},
-  max_users = 100000 // safety limit
-) {
-  if (!type) throw new Error("type is required");
-  if (!title) throw new Error("title is required");
-  if (!content) throw new Error("content is required");
-
-  const maxUsers = clampInt(max_users, 1, 500000) || 100000;
-
-  const { where, filters: normalizedFilters } = buildUserWhere(filters);
-
-  // 1) find matched users (IDs)
-  const users = await User.findAll({
-    where,
-    attributes: ["id"],
-    order: [["id", "DESC"]],
-    limit: maxUsers,
-  });
-
-  const userIds = users
-    .map((u) => Number(u.id))
-    .filter((x) => Number.isInteger(x) && x > 0);
-
-  if (!userIds.length) {
-    return {
-      matched_users: 0,
-      saved: 0,
-      push: { attempted: 0, success: 0, failed: 0 },
-      filters: normalizedFilters,
-    };
-  }
-
-  // 2) Save notifications in DB (bulk + chunked in transaction)
-  let saved = 0;
-  const t = await sequelize.transaction();
-  try {
-    const bulkChunkSize = 5000;
-
-    for (let i = 0; i < userIds.length; i += bulkChunkSize) {
-      const chunkIds = userIds.slice(i, i + bulkChunkSize);
-
-      const bulk = chunkIds.map((uid) => ({
-        sender_id: senderId,
-        receiver_id: uid,
-        type,
-        title,
-        content,
-        is_read: false,
-      }));
-
-      const created = await Notification.bulkCreate(bulk, { transaction: t });
-      saved += created?.length || 0;
-    }
-
-    await t.commit();
-  } catch (e) {
-    await t.rollback();
-    throw e;
-  }
-
-  // 3) Collect tokens for matched users (chunked IN)
-  const tokensSet = new Set();
-  const inChunkSize = 10000;
-
-  for (let i = 0; i < userIds.length; i += inChunkSize) {
-    const chunkIds = userIds.slice(i, i + inChunkSize);
-
-    const rows = await NotificationToken.findAll({
-      where: { user_id: { [Op.in]: chunkIds }, is_active: true },
-      attributes: ["token"],
-    });
-
-    for (const r of rows) {
-      if (r?.token) tokensSet.add(r.token);
-    }
-  }
-
-  const tokens = Array.from(tokensSet);
-
-  // 4) Push (500 tokens per multicast)
-  let push = { attempted: 0, success: 0, failed: 0 };
-
-  try {
-    if (!tokens.length) {
-      push = { attempted: 0, success: 0, failed: 0 };
-    } else {
-      const admin = getAdmin();
-
-      for (let i = 0; i < tokens.length; i += 500) {
-        const chunk = tokens.slice(i, i + 500);
-
-        const payload = buildMulticastPayload({
-          tokens: chunk,
-          title,
-          content,
-          image,
-          data: {
-            type: String(type),
-            ...toStringData(data),
-          },
-        });
-
-        const res = await admin.messaging().sendEachForMulticast(payload);
-
-        push.attempted += chunk.length;
-        push.success += res.successCount || 0;
-        push.failed += res.failureCount || 0;
-      }
-    }
-  } catch (err) {
-    push = {
-      attempted: push.attempted || 0,
-      success: push.success || 0,
-      failed: push.failed || 0,
-      error: err.message || String(err),
-    };
-  }
-
-  return {
-    matched_users: userIds.length,
-    saved,
-    push,
-    filters: normalizedFilters,
-  };
-}
-
-/**
  * Create DB notification + send push to ALL active tokens of receiver
  */
 async function createAndSend(
@@ -514,6 +367,222 @@ async function sendChatNotification(
   );
 }
 
+async function sendLikeNotificationToUser(senderId, receiverId) {
+  if (!senderId || !receiverId) throw new Error("senderId and receiverId are required");
+
+  const sender = await User.findByPk(senderId, {
+    attributes: ["id", "username", "full_name", "avatar", "type"],
+  });
+
+  const senderName =
+    sender?.full_name?.trim() || sender?.username?.trim() || "someone";
+
+  // const BASE_URL = process.env.BASE_URL || "http://192.168.0.156:5002";
+  // const avatarUrl = sender?.avatar ? `${BASE_URL}/uploads/avatar/${sender.avatar}` : null;
+
+  // Keeping same style as your match function (static URL used there)
+  const avatarUrl = "https://i.imgur.com/CEnilHo.jpeg";
+
+  const result = await createAndSend(
+    senderId,                     // sender (who liked)
+    receiverId,                   // receiver (who gets notification)
+    "like",                       // type
+    "❤️ New Like!",
+    `${senderName} liked you 👍`,
+    avatarUrl,
+    {
+      event: "LIKE_RECEIVED",
+      sender_id: senderId,
+      sender_name: senderName,
+      sender_avatar_path: avatarUrl,
+    }
+  );
+
+  return result;
+}
+
+async function sendRejectNotificationToUser( senderId, receiverId) {
+  if (!senderId || !receiverId) throw new Error("senderId and receiverId are required");
+
+  const sender = await User.findByPk(senderId, {
+    attributes: ["id", "username", "full_name", "avatar", "type"],
+  });
+
+  const senderName =
+    sender?.full_name?.trim() || sender?.username?.trim() || "someone";
+
+  // const BASE_URL = process.env.BASE_URL || "http://192.168.0.156:5002";
+  // const avatarUrl = sender?.avatar ? `${BASE_URL}/uploads/avatar/${sender.avatar}` : null;
+
+  const avatarUrl = "https://i.imgur.com/CEnilHo.jpeg";
+
+  const result = await createAndSend(
+    senderId,
+    receiverId,
+    "reject",
+    "❌ Not Interested",
+    `${senderName} is not interested right now.`,
+    avatarUrl,
+    {
+      event: "REJECT_RECEIVED",
+      sender_id: senderId,
+      sender_name: senderName,
+      sender_avatar_path: avatarUrl,
+    }
+  );
+
+  return result;
+}
+
+
+/**
+ * NEW: Preview how many users match filters (no sending)
+ */
+async function previewFilteredUsers(filters) {
+  const safeFilters = filters || {};
+  const { where, filters: normalized } = buildUserWhere(safeFilters);
+  const matched_users = await User.count({ where });
+
+  return {
+    matched_users,
+    filters: normalized,
+  };
+}
+
+async function createAndSendFiltered(
+  senderId = null, // admin => null
+  type,
+  title,
+  content,
+  image = null,
+  data = {},
+  filters = {},
+  max_users = 100000 // safety limit
+) {
+  if (!type) throw new Error("type is required");
+  if (!title) throw new Error("title is required");
+  if (!content) throw new Error("content is required");
+
+  const maxUsers = clampInt(max_users, 1, 500000) || 100000;
+
+  const { where, filters: normalizedFilters } = buildUserWhere(filters);
+
+  // 1) find matched users (IDs)
+  const users = await User.findAll({
+    where,
+    attributes: ["id"],
+    order: [["id", "DESC"]],
+    limit: maxUsers,
+  });
+
+  const userIds = users
+    .map((u) => Number(u.id))
+    .filter((x) => Number.isInteger(x) && x > 0);
+
+  if (!userIds.length) {
+    return {
+      matched_users: 0,
+      saved: 0,
+      push: { attempted: 0, success: 0, failed: 0 },
+      filters: normalizedFilters,
+    };
+  }
+
+  // 2) Save notifications in DB (bulk + chunked in transaction)
+  let saved = 0;
+  const t = await sequelize.transaction();
+  try {
+    const bulkChunkSize = 5000;
+
+    for (let i = 0; i < userIds.length; i += bulkChunkSize) {
+      const chunkIds = userIds.slice(i, i + bulkChunkSize);
+
+      const bulk = chunkIds.map((uid) => ({
+        sender_id: senderId,
+        receiver_id: uid,
+        type,
+        title,
+        content,
+        is_read: false,
+      }));
+
+      const created = await Notification.bulkCreate(bulk, { transaction: t });
+      saved += created?.length || 0;
+    }
+
+    await t.commit();
+  } catch (e) {
+    await t.rollback();
+    throw e;
+  }
+
+  // 3) Collect tokens for matched users (chunked IN)
+  const tokensSet = new Set();
+  const inChunkSize = 10000;
+
+  for (let i = 0; i < userIds.length; i += inChunkSize) {
+    const chunkIds = userIds.slice(i, i + inChunkSize);
+
+    const rows = await NotificationToken.findAll({
+      where: { user_id: { [Op.in]: chunkIds }, is_active: true },
+      attributes: ["token"],
+    });
+
+    for (const r of rows) {
+      if (r?.token) tokensSet.add(r.token);
+    }
+  }
+
+  const tokens = Array.from(tokensSet);
+
+  // 4) Push (500 tokens per multicast)
+  let push = { attempted: 0, success: 0, failed: 0 };
+
+  try {
+    if (!tokens.length) {
+      push = { attempted: 0, success: 0, failed: 0 };
+    } else {
+      const admin = getAdmin();
+
+      for (let i = 0; i < tokens.length; i += 500) {
+        const chunk = tokens.slice(i, i + 500);
+
+        const payload = buildMulticastPayload({
+          tokens: chunk,
+          title,
+          content,
+          image,
+          data: {
+            type: String(type),
+            ...toStringData(data),
+          },
+        });
+
+        const res = await admin.messaging().sendEachForMulticast(payload);
+
+        push.attempted += chunk.length;
+        push.success += res.successCount || 0;
+        push.failed += res.failureCount || 0;
+      }
+    }
+  } catch (err) {
+    push = {
+      attempted: push.attempted || 0,
+      success: push.success || 0,
+      failed: push.failed || 0,
+      error: err.message || String(err),
+    };
+  }
+
+  return {
+    matched_users: userIds.length,
+    saved,
+    push,
+    filters: normalizedFilters,
+  };
+}
+
+
 
 
 module.exports = { 
@@ -522,5 +591,7 @@ module.exports = {
   createAndSendFiltered,    
   previewFilteredUsers,
   sendBotMatchNotificationToUser,
-  sendChatNotification
+  sendChatNotification,
+  sendLikeNotificationToUser,
+  sendRejectNotificationToUser
  };

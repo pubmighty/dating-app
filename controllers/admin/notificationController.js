@@ -45,15 +45,9 @@ async function adminSendToUser(req, res) {
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found", data: null });
 
-    const result = await createAndSend({
-      senderId: null,
-      receiverId: value.receiverId,
-      type: value.type,
-      title: value.title,
-      content: value.content,
-      image: value.image || null,
-      data: { ...value.data, event: "ADMIN_SINGLE", sender_admin_id: String(adminId) },
-    });
+    const result = await createAndSend(adminId,value.receiverId,value.type, value.title, value.content,value.image || null,
+      { ...value.data, event: "ADMIN_SINGLE", sender_admin_id: String(adminId) },
+    );
 
     return res.json({ success: true, message: "Notification sent", data: result });
   } catch (err) {
@@ -86,13 +80,8 @@ async function adminSendGlobal(req, res) {
     const { error, value } = schema.validate(req.body, { abortEarly: true, stripUnknown: true, convert: true });
     if (error) return res.status(400).json({ success: false, message: error.details?.[0]?.message, data: null });
 
-    const result = await createAndSendGlobal({
-      senderId: null,
-      type: value.type,
-      title: value.title,
-      content: value.content,
-      data: { ...value.data, event: "ADMIN_GLOBAL", sender_admin_id: String(adminId) },
-    });
+    const result = await createAndSendGlobal(adminId, value.type,value.title,value.content,
+      { ...value.data, event: "ADMIN_GLOBAL", sender_admin_id: String(adminId) });
 
     return res.json({ success: true, message: "Global notification sent", data: result });
   } catch (err) {
@@ -169,16 +158,8 @@ async function adminSendFiltered(req, res) {
     const { error, value } = schema.validate(req.body, { abortEarly: true, stripUnknown: true, convert: true });
     if (error) return res.status(400).json({ success: false, msg: error.details?.[0]?.message, data: null });
 
-    const result = await createAndSendFiltered({
-      senderId: null,
-      type: value.type,
-      title: value.title,
-      content: value.content,
-      image: value.image || null,
-      data: { ...value.data, event: "ADMIN_FILTERED", sender_admin_id: String(adminId) },
-      filters: value.filters || {},
-      max_users: value.max_users,
-    });
+    const result = await createAndSendFiltered(adminId, value.type,value.title,value.content,value.image || null,
+       { ...value.data, event: "ADMIN_FILTERED", sender_admin_id: String(adminId) },value.filters || {}, value.max_users);
 
     return res.json({ success: true, msg: "Filtered notification sent", data: result });
   } catch (err) {
