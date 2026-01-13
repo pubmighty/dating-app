@@ -30,7 +30,7 @@ const fileUploader = multer({
       cb(null, `temp-${uniqueSuffix}${path.extname(file.originalname)}`);
     },
   }),
-  limits: { fileSize: 4 * 1024 * 1024 }, // 4MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 4MB
 });
 
 async function uploadImage(file, folder) {
@@ -150,11 +150,7 @@ async function sanitizePdfBuffer(srcBytes) {
  * Save an already-verified temp file into public/<folder> using the provided extension (if any).
  * Strips metadata when possible and sets final permissions to non-executable, read-only (0o444).
  *
- * @param {object} file - Multer file object with .path and .originalname
- * @param {string} folder - folder under public (example: "images", "docs")
- * @param {string|null} detectedExt - optional extension (without dot) supplied by prior detection
- * @returns {Promise<string>} final filename (without path)
- * @throws {Error} on failure
+ * Supports: Images, PDFs, Office, Plain files, Video, Audio
  */
 async function uploadFile(
   file,
@@ -173,6 +169,71 @@ async function uploadFile(
   const destDir = path.join(publicDir, folder || "");
   await fs.ensureDir(destDir);
 
+  // -----------------------------
+  // Allowlists (extensions)
+  // -----------------------------
+  const IMAGE_EXTS = [
+    "jpg",
+    "jpeg",
+    "png",
+    "webp",
+    "heic",
+    "heif",
+    "tiff",
+    "gif",
+  ];
+  const ARCHIVE_EXTS = ["zip", "rar", "7z", "tar", "gz", "bz2"];
+  const VIDEO_EXTS = ["mp4", "webm", "mov", "mkv"];
+  const AUDIO_EXTS = ["mp3", "m4a", "aac", "wav", "ogg", "opus"];
+  const OOXML_EXTS = ["docx", "xlsx", "pptx"];
+  const LEGACY_OFFICE_EXTS = ["doc", "xls"];
+  const PLAINISH_EXTS = ["csv", "txt", "rtf"];
+
+  // Optional: mime allowlist mapping (extra hardening)
+  const ALLOWED_MIMES = new Set([
+    // images
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/tiff",
+    "image/heic",
+    "image/heif",
+
+    // pdf
+    "application/pdf",
+
+    // ooxml
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+
+    // legacy office (mime detection is not always reliable, so we won’t hard-fail solely on mime)
+    "application/msword",
+    "application/vnd.ms-excel",
+
+    // plain
+    "text/plain",
+    "text/csv",
+    "application/rtf",
+    "text/rtf",
+
+    // video
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "video/x-matroska",
+
+    // audio
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/aac",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/ogg",
+    "audio/opus",
+  ]);
+
   // Determine extension (use detectedExt if provided)
   let ext = detectedExt ? String(detectedExt).toLowerCase() : null;
   let mime = null;
@@ -185,8 +246,10 @@ async function uploadFile(
       const buf = Buffer.alloc(probeLen);
       const { bytesRead } = await fd.read(buf, 0, probeLen, 0);
       const slice = buf.slice(0, bytesRead);
+
       const { fileTypeFromBuffer } = await import("file-type");
       const detected = await fileTypeFromBuffer(slice);
+
       ext =
         detected?.ext ||
         path
@@ -194,6 +257,7 @@ async function uploadFile(
           .replace(/^\./, "")
           .toLowerCase() ||
         "bin";
+
       mime = detected?.mime || null;
     } finally {
       await fd.close();
@@ -206,28 +270,45 @@ async function uploadFile(
   // If we still don't have mime, try lookup by extension
   if (!mime) mime = mimeTypes.lookup(ext) || null;
 
-  // Decide how we will output the file and (maybe) change extension
-  // We compute filename AFTER the final extension is settled.
-  const isImage = /^(jpg|jpeg|png|webp|heic|heif|tiff|gif)$/i.test(ext);
-  const isArchive = /^(zip|rar|7z|tar|gz|bz2)$/i.test(ext);
+  // Decide file type
+  const isImage = IMAGE_EXTS.includes(ext);
+  const isArchive = ARCHIVE_EXTS.includes(ext);
   const isPdf = ext === "pdf";
-  const isOOXML = /^(docx|xlsx|pptx)$/i.test(ext);
-  const isLegacyOffice = /^(doc|xls)$/i.test(ext);
-  const isPlainish = /^(csv|txt|rtf)$/i.test(ext);
+  const isOOXML = OOXML_EXTS.includes(ext);
+  const isLegacyOffice = LEGACY_OFFICE_EXTS.includes(ext);
+  const isPlainish = PLAINISH_EXTS.includes(ext);
+  const isVideo = VIDEO_EXTS.includes(ext);
+  const isAudio = AUDIO_EXTS.includes(ext);
 
-  let outputExt = ext; // may change (e.g., heic → jpg)
-  let finalPath; // path computed after outputExt is known
-  let filename; // final filename only once
+  // Output values
+  let outputExt = ext;
+  let finalPath;
+  let filename;
 
   try {
+    // Hard reject archives always
     if (isArchive) {
-      // Hard reject archives
       try {
         await safeRemove(tempPath);
       } catch {}
       throw new Error("Archive formats are not accepted for security reasons");
     }
 
+    // Extra hardening (optional):
+    // If file-type gave us a mime, and it’s not in allowlist, reject.
+    // (We do NOT reject legacy office purely on mime because detection can be inconsistent.)
+    if (mime && !isLegacyOffice) {
+      if (!ALLOWED_MIMES.has(String(mime).toLowerCase())) {
+        try {
+          await safeRemove(tempPath);
+        } catch {}
+        throw new Error("File type is not accepted for security reasons");
+      }
+    }
+
+    // -----------------------------
+    // IMAGES
+    // -----------------------------
     if (isImage) {
       if (ext === "gif") {
         // Copy as-is for GIF to preserve animation
@@ -250,11 +331,9 @@ async function uploadFile(
         } else if (ext === "webp") {
           pipeline = pipeline.webp({ quality });
         } else if (ext === "heic" || ext === "heif" || ext === "tiff") {
-          // Convert to JPEG for broad compatibility
           pipeline = pipeline.jpeg({ quality, mozjpeg: true });
           effectiveExt = "jpg";
         } else {
-          // Fallback to JPEG
           pipeline = pipeline.jpeg({ quality, mozjpeg: true });
           effectiveExt = "jpg";
         }
@@ -268,9 +347,14 @@ async function uploadFile(
       }
 
       await fsp.chmod(finalPath, 0o444);
-    } else if (isPdf) {
+    }
+
+    // -----------------------------
+    // PDF
+    // -----------------------------
+    else if (isPdf) {
       const fileBytes = await fs.readFile(tempPath);
-      const cleaned = await sanitizePdfBuffer(fileBytes); // you must implement/import this
+      const cleaned = await sanitizePdfBuffer(fileBytes); // implement/import
       outputExt = "pdf";
       filename = `PM-${Date.now()}-${Math.round(
         Math.random() * 1e9
@@ -278,9 +362,13 @@ async function uploadFile(
       finalPath = path.join(destDir, filename);
       await fs.writeFile(finalPath, cleaned);
       await fsp.chmod(finalPath, 0o444);
-    } else if (isOOXML) {
-      // Strip docProps/* only
-      outputExt = ext; // keep same
+    }
+
+    // -----------------------------
+    // OOXML: docx/xlsx/pptx (strip docProps)
+    // -----------------------------
+    else if (isOOXML) {
+      outputExt = ext;
       filename = `PM-${Date.now()}-${Math.round(
         Math.random() * 1e9
       )}.${outputExt}`;
@@ -292,18 +380,35 @@ async function uploadFile(
 
       for (const e of entries) {
         if (e.entryName.startsWith("docProps/")) continue;
-        if (e.isDirectory) {
-          // AdmZip doesn't need explicit dir entries; ensure paths on addFile
-          continue;
-        }
+        if (e.isDirectory) continue;
         newZip.addFile(e.entryName, e.getData());
       }
 
-      // write rebuilt package
       newZip.writeZip(finalPath);
       await fsp.chmod(finalPath, 0o444);
-    } else if (isLegacyOffice || isPlainish) {
-      // Copy as-is; safe metadata strip is non-trivial here
+    }
+
+    // -----------------------------
+    // VIDEO / AUDIO (copy as-is)
+    // -----------------------------
+    else if (isVideo || isAudio) {
+      outputExt = ext;
+      filename = `PM-${Date.now()}-${Math.round(
+        Math.random() * 1e9
+      )}.${outputExt}`;
+      finalPath = path.join(destDir, filename);
+
+      // Copy as-is (no transcoding)
+      await fs.copyFile(tempPath, finalPath);
+
+      // Make read-only
+      await fsp.chmod(finalPath, 0o444);
+    }
+
+    // -----------------------------
+    // Legacy Office / Plain files (copy as-is)
+    // -----------------------------
+    else if (isLegacyOffice || isPlainish) {
       outputExt = ext;
       filename = `PM-${Date.now()}-${Math.round(
         Math.random() * 1e9
@@ -311,8 +416,12 @@ async function uploadFile(
       finalPath = path.join(destDir, filename);
       await fs.copyFile(tempPath, finalPath);
       await fsp.chmod(finalPath, 0o444);
-    } else {
-      // Hard reject unknown/other format
+    }
+
+    // -----------------------------
+    // Everything else -> reject
+    // -----------------------------
+    else {
       try {
         await safeRemove(tempPath);
       } catch {}
@@ -321,46 +430,14 @@ async function uploadFile(
 
     // cleanup temp
     try {
-      console.warn("tempPath: ", tempPath);
-      let res = await safeRemove(tempPath);
-      console.warn("res: ", res);
-    } catch (e) {
-      console.warn(e);
-    }
+      await safeRemove(tempPath);
+    } catch {}
 
     // Final mime after potential extension change
     const finalMime = mime || mimeTypes.lookup(outputExt) || null;
     const { size: finalSize } = await fs.stat(finalPath);
 
     let fileUpload = { id: null };
-
-    // if (recordType === "chat") {
-    //   fileUpload = await MessageFile.create({
-    //     chat_id: message.chat_id,
-    //     message_id: message.id,
-    //     sender_id: user_id,
-    //     name: filename,
-    //     folders: folder,
-    //     size: finalSize, // bytes
-    //     file_type: outputExt, // helpful for querying
-    //     mime_type: finalMime,
-    //     user_id,
-    //     uploader_ip,
-    //     user_agent,
-    //   });
-    // } else {
-    //   // Persist uploads record (FIXED FIELDS)
-    //   fileUpload = await FileUpload.create({
-    //     name: filename,
-    //     folders: folder,
-    //     size: finalSize, // bytes
-    //     file_type: outputExt, // helpful for querying
-    //     mime_type: finalMime,
-    //     user_id,
-    //     uploader_ip,
-    //     user_agent,
-    //   });
-    // }
 
     if (recordType === "chat") {
       if (!message || !message.chat_id || !message.id) {
@@ -397,7 +474,7 @@ async function uploadFile(
         user_agent,
       });
     }
-    
+
     return {
       filename,
       folder,
@@ -409,7 +486,7 @@ async function uploadFile(
       await safeRemove(tempPath);
     } catch {}
     try {
-      await safeRemove(finalPath);
+      if (finalPath) await safeRemove(finalPath);
     } catch {}
     throw err;
   }

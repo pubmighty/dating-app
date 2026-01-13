@@ -152,7 +152,7 @@ async function initiateVideoCallByBot(req, res) {
           status: "initiated",
           coins_charged: 0, // explicitly 0 for bot-initiated
           duration: null,
-          started_at: null,
+          started_at: startedAt,
           ended_at: null,
         },
         { transaction }
@@ -365,7 +365,7 @@ async function initiateVideoCall(req, res) {
           status: "initiated",
           coins_charged: initialCharge,
           duration: null,
-          started_at: null,
+          started_at: startedAt,
           ended_at: null,
         },
         { transaction }
@@ -946,28 +946,35 @@ async function endVideoCall(req, res) {
         ? new Date(call.started_at).getTime()
         : null;
       const durationSeconds = startedMs
-        ? clampInt(Math.floor((nowMs - startedMs) / 1000), 0, 0)
+        ? clampInt(Math.floor((nowMs - startedMs) / 1000), 0, 86400)
         : 0;
 
       // billedMinutes INT (only if started)
       const billedMinutes = startedMs
-        ? Math.max(1, ceilDiv(durationSeconds, 60))
+        ? Math.max(1, Math.ceil(durationSeconds / 60))
         : 0;
 
       // totalCost INT
       const totalCost = billedMinutes * perMinuteCost;
 
       // prepaidAlready INT (includes prepaid 1 minute from initiate; bot calls may be 0)
-      const prepaidAlready = clampInt(call.coins_charged || 0, 0, 0);
+      const prepaidAlready = clampInt(call.coins_charged || 0, 0, 999999999);
 
       // remainingToCharge INT
       const remainingToCharge = Math.max(0, totalCost - prepaidAlready);
+
+      console.warn("startedMs: ", startedMs);
+      console.warn("durationSeconds: ", durationSeconds);
+      console.warn("billedMinutes: ", billedMinutes);
+      console.warn("totalCost: ", totalCost);
+      console.warn("prepaidAlready: ", prepaidAlready);
+      console.warn("remainingToCharge: ", remainingToCharge);
 
       let chargedNow = 0;
       let callerNewBalance = null;
 
       if (remainingToCharge > 0) {
-        const caller = await User.findByPk(callerId, {
+        const caller = await User.findByPk(userId, {
           transaction,
           lock: transaction.LOCK.UPDATE,
           attributes: ["id", "coins"],

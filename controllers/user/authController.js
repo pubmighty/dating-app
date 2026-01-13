@@ -2,7 +2,7 @@ const Joi = require("joi");
 const bcrypt = require("bcryptjs");
 const User = require("../../models/User");
 const TempUser = require("../../models/TempUser");
-const UserOtp = require("../../models/UserOtp");
+const UserOtp = require("../../models/UserOTP");
 const { OAuth2Client } = require("google-auth-library");
 const { getRealIp, getOption } = require("../../utils/helper");
 const {

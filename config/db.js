@@ -1,16 +1,4 @@
 const { Sequelize } = require("sequelize");
-// require("dotenv").config();
-const path = require("path");
-require("dotenv").config({
-  path: path.resolve(__dirname, "..", ".env"),
-});
-
-console.log("Loaded env:", {
-  dialect: process.env.DB_DIALECT,
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  db: process.env.DB_NAME,
-});
 
 // Load environment variables
 const dbConfig = {

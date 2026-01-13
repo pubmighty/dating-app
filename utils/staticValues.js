@@ -1,5 +1,3 @@
-require("dotenv").config();
-
 const publicFeedUserAttributes = [
   "id",
   "username",
@@ -60,19 +58,44 @@ const fallbackMessages = [
 ];
 
 const ALLOWED_EXTS = [
-  "png",
+  // images
   "jpg",
   "jpeg",
+  "png",
   "webp",
   "gif",
+  "heic",
+  "heif",
+  "tiff",
+
+  // pdf
   "pdf",
-  "doc",
+
+  // office
   "docx",
-  "xls",
   "xlsx",
-  "csv",
+  "pptx",
+  "doc",
+  "xls",
+
+  // plain
   "txt",
+  "csv",
   "rtf",
+
+  // video
+  "mp4",
+  "webm",
+  "mov",
+  "mkv",
+
+  // audio
+  "mp3",
+  "m4a",
+  "aac",
+  "wav",
+  "ogg",
+  "opus",
 ];
 
 const PACKAGE_NAME = process.env.ANDROID_PACKAGE_NAME;

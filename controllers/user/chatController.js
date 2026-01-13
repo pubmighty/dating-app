@@ -23,7 +23,9 @@ const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 const sequelize = require("../../config/db");
 const { fallbackMessages } = require("../../utils/staticValues");
 const MessageFile = require("../../models/MessageFile");
-const { sendChatNotification } = require("../../utils/helpers/notificationHelper");
+const {
+  sendChatNotification,
+} = require("../../utils/helpers/notificationHelper");
 /**
  * Helper function to cleanup uploaded files when transaction fails
  * @param {Array} uploadedFiles - Array of uploaded file objects
@@ -535,6 +537,18 @@ async function sendMessage(req, res) {
     let botSaved = null;
     try {
       botSaved = await sequelize.transaction(async (t2) => {
+        await Message.update(
+          {
+            is_read: true,
+            read_at: new Date(),
+            status: "read"
+          },
+          {
+            where: {
+              chat_id: chatId,
+            },
+          }
+        );
         const botMessageSaved = await Message.create(
           {
             chat_id: chatId,
@@ -576,14 +590,14 @@ async function sendMessage(req, res) {
       });
       if (botSaved && botSaved.id) {
         sendChatNotification({
-          senderId: receiverId,    
-          receiverId: userId,       
+          senderId: receiverId,
+          receiverId: userId,
           chatId,
           messageId: botSaved.id,
           messageText: botSaved.message || "",
           messageType: botSaved.message_type || "text",
         }).catch((e) => console.error("Bot chat notify failed:", e));
-      }   
+      }
       return res.json({
         success: true,
         message: "Message sent (bot replied)",
@@ -1404,7 +1418,6 @@ async function getBlockedChats(req, res) {
   }
 }
 
-
 async function pinChats(req, res) {
   try {
     // 1) Validate body early
@@ -1821,7 +1834,9 @@ async function markChatMessagesRead(req, res) {
     }
 
     const chatId = Number(value.chatId);
-    const lastMessageId = value.lastMessageId ? Number(value.lastMessageId) : null;
+    const lastMessageId = value.lastMessageId
+      ? Number(value.lastMessageId)
+      : null;
 
     // 2) Validate session
     const sessionResult = await isUserSessionValid(req);
@@ -1837,12 +1852,20 @@ async function markChatMessagesRead(req, res) {
       const chat = await Chat.findByPk(chatId, {
         transaction: t,
         lock: t.LOCK.UPDATE,
-        attributes: ["id", "participant_1_id", "participant_2_id", "unread_count_p1", "unread_count_p2"],
+        attributes: [
+          "id",
+          "participant_1_id",
+          "participant_2_id",
+          "unread_count_p1",
+          "unread_count_p2",
+        ],
       });
 
       if (!chat) {
         await t.rollback();
-        return res.status(404).json({ success: false, message: "Chat not found" });
+        return res
+          .status(404)
+          .json({ success: false, message: "Chat not found" });
       }
 
       const isUserP1 = chat.participant_1_id === userId;
@@ -1877,7 +1900,7 @@ async function markChatMessagesRead(req, res) {
         }
       );
 
-      // 5) Compute remaining unread 
+      // 5) Compute remaining unread
       const remainingUnread = await Message.count({
         where: {
           chat_id: chatId,
