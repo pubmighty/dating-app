@@ -15,6 +15,7 @@ const {
 const utilController = require("../../controllers/user/utilController");
 const notificationController = require("../../controllers/user/notificationController");
 
+
 /**
  * GET /setting
  *
@@ -455,7 +456,7 @@ router.get("/chats", chatController.getUserChats);
  * - Unread message count for the current user.
  * - Pagination metadata.
  */
-router.get("/chats/blocked", chatController.getBlockedChats);
+router.get("/blocked", matchingController.getBlockedUsers);
 
 /**
  * POST /chats/pin
@@ -495,7 +496,36 @@ router.post("/chats/pin", chatController.pinChats);
  *   - Blocking an already blocked chat succeeds.
  *   - Unblocking an already active chat succeeds.
  */
-router.post("/chats/:chatId/block", chatController.blockChat);
+router.post("/block/:userId", matchingController.blockUser);
+
+/**
+ * POST /unblock/:userId
+ * ------------------------------------------------------------
+ * Unblocks a previously blocked user for the current user.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated user session.
+ * - The authenticated user (blocker) must be the one who blocked :userId.
+ *
+ * Behavior:
+ * - Removes the block relationship from `pb_user_blocks`
+ *   (blocked_by = current user, user_id = :userId).
+ *
+ * Bot Chat Handling:
+ * - If the unblocked user is a BOT:
+ *   - Restores the chat visibility for the current user
+ *   - Sets `chat_status_p2` back to "active"
+ *
+ * Side Effects:
+ * - Does NOT restore pinned state or unread counts.
+ * - Does NOT recreate deleted chats.
+ * - Does NOT send notifications.
+ *
+ * Response:
+ * - Returns success status along with:
+ *   - whether a block row was deleted
+ */
+router.post("/unblock/:userId", matchingController.unblockUser);
 /**
  * POST /chats/:chatId/delete
  * ------------------------------------------------------------

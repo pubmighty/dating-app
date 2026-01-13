@@ -9,6 +9,7 @@ const ActivityLog = require("./ActivityLog");
 const MessageFile = require("./MessageFile");
 const VideoCall = require("./VideoCall");
 const Notification=require("./Notification")
+const UserBlock = require("./UserBlock");
 
 function setupAssociations() {
   User.hasMany(UserInteraction, {
@@ -150,6 +151,25 @@ function setupAssociations() {
   foreignKey: "sender_id",
   as: "sender",
 });
+
+  UserBlock.belongsTo(User, {
+   foreignKey: "user_id", 
+   as: "blockedUser"
+   });
+  UserBlock.belongsTo(User, { 
+  foreignKey: "blocked_by", 
+  as: "blocker" 
+  });
+
+  User.hasMany(UserBlock, {
+  foreignKey: "blocked_by",
+   as: "myBlocked"
+   });
+  User.hasMany(UserBlock, {
+  foreignKey: "user_id", 
+  as: "blockedMe"
+ });
+
 }
 
 module.exports = { setupAssociations };

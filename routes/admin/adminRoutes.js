@@ -6,6 +6,7 @@ const userController = require("../../controllers/admin/userController");
 const botController = require("../../controllers/admin/botController");
 const coinPackageController = require("../../controllers/admin/coinPackageController");
 const chatController = require("../../controllers/admin/chatController");
+const adminNotificationController = require("../../controllers/admin/notificationController");
 
 /**
  *  GET /chats
@@ -1168,5 +1169,137 @@ router.post(
   fileUploader.single("avatar"),
   adminController.editAdmin
 );
+
+/**
+ * POST /notifications/send-to-user
+ * ------------------------------------------------------------
+ * Sends a notification to a specific user.
+ *
+ * Purpose:
+ * - Allows an admin to send a targeted notification to a single user.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to send notifications.
+ * - Suspended or inactive admins are denied access.
+ *
+ * Payload:
+ * - user_id: number (required)
+ *   The recipient user ID.
+ * - title: string (required)
+ *   Notification title shown to the user.
+ * - content: string (required)
+ *   Notification message body.
+ * Behavior:
+ * - Creates a notification record in the database.
+ * - Sends push notification to all active devices of the user.
+ * - Fails gracefully if user has no active notification tokens.
+ *
+ * Side Effects:
+ * - Does not force notification delivery if device tokens are invalid.
+ * - Does not retry failed push deliveries automatically.
+ */
+router.post(
+  "/notifications/send-user",
+  adminNotificationController.adminSendToUser
+);
+
+/**
+ * POST /notifications/send-global
+ * ------------------------------------------------------------
+ * Sends a global notification to all eligible users.
+ *
+ * Purpose:
+ * - Allows admins to broadcast system-wide announcements
+ *   such as maintenance alerts, updates, or promotions.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to send global notifications.
+ *
+ * Payload:
+ * - title: string (required)
+ *   Notification title.
+ * - content: string (required)
+ *   Notification message body.
+ * - type: string (required)
+ * Behavior:
+ * - Creates notification records for all target users.
+ * - Sends push notifications to all active FCM tokens.
+ * - Uses batch/multicast delivery for performance.
+ *
+ * Warning:
+ * - Global notifications affect all users.
+ * - Should be used sparingly to avoid notification fatigue.
+ */
+router.post(
+  "/notifications/send-global",
+  adminNotificationController.adminSendGlobal
+);
+/**
+ * POST /notifications/preview-filter
+ * ------------------------------------------------------------
+ * Previews the number of users matching notification filters.
+ *
+ * Purpose:
+ * - Allows admins to estimate audience size before sending
+ *   filtered notifications.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to send notifications.
+ *
+ * Payload:
+ * - filters: object (required)
+ *   User filtering criteria such as:
+ *   - country
+ *   - gender
+ *
+ * Behavior:
+ * - Applies filters without sending notifications.
+ * - Returns only user count and filter summary.
+ *
+ * Side Effects:
+ * - No database writes.
+ * - No push notifications are sent.
+ */
+
+router.post(
+  "/notifications/filter",
+  adminNotificationController.adminPreviewFiltered
+);
+/**
+ * POST /notifications/send-filtered
+ * ------------------------------------------------------------
+ * Sends notifications to users matching selected filters.
+ *
+ * Purpose:
+ * - Enables targeted notification campaigns
+ *   based on user attributes or activity.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to send notifications.
+ *
+ * Payload:
+ * - filters: object (required)
+ *   Filtering criteria for selecting users.
+ * - title: string (required)
+ *   Notification title.
+ * - content: string (required)
+ * Behavior:
+ * - Selects users matching provided filters.
+ * - Creates notification records per user.
+ * - Sends push notifications to active devices only.
+ *
+ * Warning:
+ * - Large filter sets may send notifications to many users.
+ * - Recommended to use preview-filter before execution.
+ */
+router.post(
+  "/notifications/send-filtered-user",
+  adminNotificationController.adminSendFiltered
+);
+
 
 module.exports = router;
