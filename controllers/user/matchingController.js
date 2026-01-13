@@ -8,6 +8,10 @@ const {
   getOrCreateChatBetweenUsers,
 } = require("../../utils/helpers/chatHelper");
 const { sendBotMatchNotificationToUser } = require("../../utils/helpers/notificationHelper");
+const UserBlock = require("../../models/UserBlock"); 
+const Chat = require("../../models/Chat");
+
+
 async function likeUser(req, res) {
   // 1) Validate input
   const schema = Joi.object({
@@ -131,7 +135,7 @@ async function likeUser(req, res) {
         { transaction }
       );
     }
-
+    
     // 6.1) If match, write reverse row too (target -> actor) to keep symmetry
     if (isMatch) {
       if (reverse) {
@@ -209,11 +213,11 @@ async function likeUser(req, res) {
       let notifyResult = null;
     if (shouldNotifyBotMatch) {
       try {
-        notifyResult = await sendBotMatchNotificationToUser({
-          userId,
-          botId: targetUserId,
-          chatId: chatIdForNotify,
-        });
+       notifyResult = await sendBotMatchNotificationToUser(
+            userId,
+            targetUserId,
+            chatIdForNotify
+          );
       } catch (e) {
         console.error("Bot match notify failed:", e);
         notifyResult = null;
@@ -532,9 +536,299 @@ async function getUserMatches(req, res) {
     });
   }
 }
+async function blockUser(req, res) {
+  // 1) Validate input (param userId)
+  const schema = Joi.object({
+    userId: Joi.number().integer().positive().required(),
+  });
+
+  const { error, value } = schema.validate(
+    { userId: req.params.userId },
+    { abortEarly: true, stripUnknown: true, convert: true }
+  );
+
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.details?.[0]?.message || "Invalid payload",
+      data: null,
+    });
+  }
+
+  // 2) Validate session
+  const session = await isUserSessionValid(req);
+  if (!session?.success) return res.status(401).json(session);
+
+  const blockerId = Number(session.data);
+  if (!Number.isInteger(blockerId) || blockerId <= 0) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid session",
+      data: null,
+    });
+  }
+
+  const blockedUserId = Number(value.userId);
+
+  if (blockerId === blockedUserId) {
+    return res.status(400).json({
+      success: false,
+      message: "You cannot block yourself.",
+      data: null,
+    });
+  }
+
+  const transaction = await sequelize.transaction();
+  try {
+    // 3) Check target user exists + active (also fetch type for bot check)
+    const targetUser = await User.findOne({
+      where: { id: blockedUserId, is_active: true, status: 1 },
+      transaction,
+      attributes: ["id", "type", "is_active", "status"],
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!targetUser) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+        data: null,
+      });
+    }
+
+    // 4) Create block row (safe)
+    await UserBlock.findOrCreate({
+      where: { user_id: blockedUserId, blocked_by: blockerId },
+      defaults: { user_id: blockedUserId, blocked_by: blockerId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    // 5) If blocked user is BOT => update chat_status_p2 to "blocked"
+    const isBot = String(targetUser.type || "").toLowerCase() === "bot";
+    let chatUpdated = 0;
+
+    if (isBot) {
+      // bot = participant_1, user = participant_2 (based on your getUserChats filters)
+      const [affected] = await Chat.update(
+        { chat_status_p2: "blocked" },
+        {
+          where: {
+            participant_1_id: blockedUserId, // bot
+            participant_2_id: blockerId,     // me
+          },
+          transaction,
+        }
+      );
+      chatUpdated = Number(affected || 0);
+    }
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "User blocked successfully.",
+      data: {
+        user_id: blockedUserId,
+        blocked_by: blockerId,
+        is_bot: isBot,
+        chat_status_updated: chatUpdated > 0, // true if chat row updated
+      },
+    });
+  } catch (err) {
+    console.error("Error during blockUser:", err);
+    await transaction.rollback();
+
+    // Optional: treat "already blocked" as success
+    if (err?.name === "SequelizeUniqueConstraintError") {
+      return res.status(200).json({
+        success: true,
+        message: "User already blocked.",
+        data: {
+          user_id: blockedUserId,
+          blocked_by: blockerId,
+          is_bot: null,
+          chat_status_updated: false,
+        },
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to block user.",
+      data: null,
+    });
+  }
+}
+
+async function unblockUser(req, res) {
+  // 1) Validate input (param userId)
+  const schema = Joi.object({
+    userId: Joi.number().integer().positive().required(),
+  });
+
+  const { error, value } = schema.validate(
+    { userId: req.params.userId },
+    { abortEarly: true, stripUnknown: true, convert: true }
+  );
+
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.details?.[0]?.message || "Invalid payload",
+      data: null,
+    });
+  }
+
+  // 2) Validate session
+  const session = await isUserSessionValid(req);
+  if (!session?.success) return res.status(401).json(session);
+
+  const blockerId = Number(session.data);
+  if (!Number.isInteger(blockerId) || blockerId <= 0) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid session",
+      data: null,
+    });
+  }
+
+  const blockedUserId = Number(value.userId);
+
+  const transaction = await sequelize.transaction();
+  try {
+    // 3) Find target user to know if it's bot (so we can restore chat status)
+    const targetUser = await User.findOne({
+      where: { id: blockedUserId },
+      attributes: ["id", "type"],
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    const isBot = targetUser
+      ? String(targetUser.type || "").toLowerCase() === "bot"
+      : false;
+
+    // 4) Delete the block row
+    const deleted = await UserBlock.destroy({
+      where: { user_id: blockedUserId, blocked_by: blockerId },
+      transaction,
+    });
+
+    // 5) If it was BOT and unblock happened (or even if not), restore chat_status_p2 => active
+    //    (You can keep it conditional on deleted if you want strict behavior)
+    let chatUpdated = 0;
+    if (isBot) {
+      const [affected] = await Chat.update(
+        { chat_status_p2: "active" },
+        {
+          where: {
+            participant_1_id: blockedUserId, // bot
+            participant_2_id: blockerId,     // me
+          },
+          transaction,
+        }
+      );
+      chatUpdated = Number(affected || 0);
+    }
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: deleted ? "User unblocked successfully." : "User was not blocked.",
+      data: {
+        user_id: blockedUserId,
+        blocked_by: blockerId,
+        deleted: Boolean(deleted),
+        is_bot: isBot,
+        chat_status_updated: chatUpdated > 0,
+      },
+    });
+  } catch (err) {
+    console.error("Error during unblockUser:", err);
+    await transaction.rollback();
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to unblock user.",
+      data: null,
+    });
+  }
+}
+
+
+async function getBlockedUsers(req, res) {
+  // Validate session
+  const session = await isUserSessionValid(req);
+  if (!session?.success) {
+    return res.status(401).json(session);
+  }
+
+  const userId = Number(session.data);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid session",
+      data: null,
+    });
+  }
+
+  try {
+    // Fetch blocked users
+    const rows = await UserBlock.findAll({
+      where: { blocked_by: userId },
+      attributes: ["id", "user_id", "created_at"],
+      include: [
+        {
+          model: User,
+          as: "blockedUser",
+          attributes: [
+            "id",
+            "username",
+            "avatar",
+            "is_active",
+            "status",
+          ],
+          required: true,
+        },
+      ],
+      order: [["created_at", "DESC"]],
+    });
+
+    // Normalize response
+    const blocked = rows.map((row) => ({
+      block_id: row.id,
+      blocked_at: row.created_at,
+      user: row.blockedUser,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: "Blocked users fetched successfully.",
+      data: {
+        total: blocked.length,
+        users: blocked,
+      },
+    });
+  } catch (err) {
+    console.error("Error during getBlockedUsers:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch blocked users.",
+      data: null,
+    });
+  }
+}
+
+
 
 module.exports = {
   likeUser,
   rejectUser,
   getUserMatches,
+  blockUser,
+  unblockUser,
+  getBlockedUsers
 };

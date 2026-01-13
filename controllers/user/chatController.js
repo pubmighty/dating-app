@@ -489,14 +489,14 @@ async function sendMessage(req, res) {
     // Cleanup any remaining temp files
     await cleanupTempFiles(incomingFiles);
     if (!isBotReceiver && receiverId && receiverId !== userId) {
-      sendChatNotification({
-        senderId: userId,
-        receiverId,
-        chatId,
-        messageId: result.message.id,
-        messageText: captionOrText || "",
-        messageType: result.message.message_type || "text",
-      }).catch((e) => console.error("Chat notify failed:", e));
+     sendChatNotification({
+  senderId: userId,
+  receiverId,
+  chatId,
+  messageId: result.message.id,
+  messageText: captionOrText || "",
+  messageType: result.message.message_type || "text",
+}).catch((e) => console.error("Chat notify failed:", e));
     }
     // If non-bot, respond immediately
     if (!isBotReceiver) {
@@ -589,15 +589,16 @@ async function sendMessage(req, res) {
         return botMessageSaved;
       });
       if (botSaved && botSaved.id) {
-        sendChatNotification({
-          senderId: receiverId,
-          receiverId: userId,
+      sendChatNotification(
+          receiverId,
+          userId,
           chatId,
-          messageId: botSaved.id,
-          messageText: botSaved.message || "",
-          messageType: botSaved.message_type || "text",
-        }).catch((e) => console.error("Bot chat notify failed:", e));
-      }
+          botSaved.id,
+          botSaved.message || "",
+          botSaved.message_type || "text"
+        ).catch((e) => console.error("Bot chat notify failed:", e));
+
+      }   
       return res.json({
         success: true,
         message: "Message sent (bot replied)",
@@ -1297,126 +1298,126 @@ async function getUserChats(req, res) {
   }
 }
 
-async function getBlockedChats(req, res) {
-  try {
-    const schema = Joi.object({
-      page: Joi.number().integer().min(1).default(1),
-      limit: Joi.number().integer().min(1).max(50).default(20),
-    });
+// async function getBlockedChats(req, res) {
+//   try {
+//     const schema = Joi.object({
+//       page: Joi.number().integer().min(1).default(1),
+//       limit: Joi.number().integer().min(1).max(50).default(20),
+//     });
 
-    const { error, value } = schema.validate(req.query, {
-      abortEarly: true,
-      convert: true,
-      stripUnknown: true,
-    });
+//     const { error, value } = schema.validate(req.query, {
+//       abortEarly: true,
+//       convert: true,
+//       stripUnknown: true,
+//     });
 
-    if (error) {
-      return res.status(400).json({
-        success: false,
-        message: error.details[0].message,
-      });
-    }
+//     if (error) {
+//       return res.status(400).json({
+//         success: false,
+//         message: error.details[0].message,
+//       });
+//     }
 
-    const page = Number(value.page);
-    const limit = Number(value.limit);
-    const offset = (page - 1) * limit;
+//     const page = Number(value.page);
+//     const limit = Number(value.limit);
+//     const offset = (page - 1) * limit;
 
-    const session = await isUserSessionValid(req);
-    if (!session.success) return res.status(401).json(session);
-    const userId = Number(session.data);
+//     const session = await isUserSessionValid(req);
+//     if (!session.success) return res.status(401).json(session);
+//     const userId = Number(session.data);
 
-    const { count, rows } = await Chat.findAndCountAll({
-      where: {
-        participant_2_id: userId,
-        chat_status_p2: "blocked",
-      },
-      attributes: [
-        "id",
-        "participant_1_id",
-        "participant_2_id",
-        "is_pin_p2",
-        "unread_count_p2",
-        "last_message_time",
-        "updated_at",
-      ],
-      include: [
-        {
-          model: User,
-          as: "participant1", // bot user
-          attributes: [
-            "id",
-            "username",
-            "avatar",
-            "is_active",
-            "last_active",
-            "bio",
-            "gender",
-            "country",
-          ],
-          required: true,
-        },
-        {
-          model: Message,
-          as: "lastMessage",
-          attributes: ["id", "message", "message_type", "created_at", "status"],
-          required: false,
-        },
-      ],
-      order: [
-        ["is_pin_p2", "DESC"],
-        // Prefer last_message_time if it’s maintained correctly; fallback to updated_at.
-        ["last_message_time", "DESC"],
-        ["updated_at", "DESC"],
-      ],
-      limit,
-      offset,
-      distinct: true,
-      subQuery: false,
-    });
+//     const { count, rows } = await Chat.findAndCountAll({
+//       where: {
+//         participant_2_id: userId,
+//         chat_status_p2: "blocked",
+//       },
+//       attributes: [
+//         "id",
+//         "participant_1_id",
+//         "participant_2_id",
+//         "is_pin_p2",
+//         "unread_count_p2",
+//         "last_message_time",
+//         "updated_at",
+//       ],
+//       include: [
+//         {
+//           model: User,
+//           as: "participant1", // bot user
+//           attributes: [
+//             "id",
+//             "username",
+//             "avatar",
+//             "is_active",
+//             "last_active",
+//             "bio",
+//             "gender",
+//             "country",
+//           ],
+//           required: true,
+//         },
+//         {
+//           model: Message,
+//           as: "lastMessage",
+//           attributes: ["id", "message", "message_type", "created_at", "status"],
+//           required: false,
+//         },
+//       ],
+//       order: [
+//         ["is_pin_p2", "DESC"],
+//         // Prefer last_message_time if it’s maintained correctly; fallback to updated_at.
+//         ["last_message_time", "DESC"],
+//         ["updated_at", "DESC"],
+//       ],
+//       limit,
+//       offset,
+//       distinct: true,
+//       subQuery: false,
+//     });
 
-    const chatList = rows.map((chat) => {
-      const isP1 = chat.participant_1_id === userId;
-      const otherUser = isP1 ? chat.participant2 : chat.participant1;
+//     const chatList = rows.map((chat) => {
+//       const isP1 = chat.participant_1_id === userId;
+//       const otherUser = isP1 ? chat.participant2 : chat.participant1;
 
-      const isPinned = isP1 ? chat.is_pin_p1 : chat.is_pin_p2;
-      const unread = isP1 ? chat.unread_count_p1 : chat.unread_count_p2;
+//       const isPinned = isP1 ? chat.is_pin_p1 : chat.is_pin_p2;
+//       const unread = isP1 ? chat.unread_count_p1 : chat.unread_count_p2;
 
-      const lastMsg = chat.lastMessage || null;
+//       const lastMsg = chat.lastMessage || null;
 
-      return {
-        chat_id: chat.id,
-        user: otherUser || null,
-        last_message: lastMsg ? lastMsg.message : null,
-        last_message_type: lastMsg ? lastMsg.message_type : null,
-        last_message_time:
-          chat.last_message_time || (lastMsg ? lastMsg.created_at : null),
-        unread_count: Number(unread || 0),
-        is_pin: !!isPinned,
-      };
-    });
+//       return {
+//         chat_id: chat.id,
+//         user: otherUser || null,
+//         last_message: lastMsg ? lastMsg.message : null,
+//         last_message_type: lastMsg ? lastMsg.message_type : null,
+//         last_message_time:
+//           chat.last_message_time || (lastMsg ? lastMsg.created_at : null),
+//         unread_count: Number(unread || 0),
+//         is_pin: !!isPinned,
+//       };
+//     });
 
-    return res.json({
-      success: true,
-      message: "Blocked chats fetched successfully",
-      data: {
-        chats: chatList,
-        pagination: {
-          page,
-          limit,
-          total: count,
-          totalPages: Math.ceil(count / limit),
-          hasMore: offset + chatList.length < count,
-        },
-      },
-    });
-  } catch (err) {
-    console.error("Error during getBlockedChats:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
-  }
-}
+//     return res.json({
+//       success: true,
+//       message: "Blocked chats fetched successfully",
+//       data: {
+//         chats: chatList,
+//         pagination: {
+//           page,
+//           limit,
+//           total: count,
+//           totalPages: Math.ceil(count / limit),
+//           hasMore: offset + chatList.length < count,
+//         },
+//       },
+//     });
+//   } catch (err) {
+//     console.error("Error during getBlockedChats:", err);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//     });
+//   }
+// }
 
 async function pinChats(req, res) {
   try {
@@ -1567,133 +1568,133 @@ async function pinChats(req, res) {
   }
 }
 
-async function blockChat(req, res) {
-  try {
-    // 1) Validate params + body early
-    const paramsSchema = Joi.object({
-      chatId: Joi.number().integer().positive().required(),
-    });
-    const { error: pErr, value: pVal } = paramsSchema.validate(req.params, {
-      abortEarly: true,
-      convert: true,
-      stripUnknown: true,
-    });
-    if (pErr) {
-      return res
-        .status(400)
-        .json({ success: false, message: pErr.details[0].message });
-    }
+// async function blockChat(req, res) {
+//   try {
+//     // 1) Validate params + body early
+//     const paramsSchema = Joi.object({
+//       chatId: Joi.number().integer().positive().required(),
+//     });
+//     const { error: pErr, value: pVal } = paramsSchema.validate(req.params, {
+//       abortEarly: true,
+//       convert: true,
+//       stripUnknown: true,
+//     });
+//     if (pErr) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: pErr.details[0].message });
+//     }
 
-    const bodySchema = Joi.object({
-      action: Joi.string().valid("block", "unblock").default("block"),
-    });
+//     const bodySchema = Joi.object({
+//       action: Joi.string().valid("block", "unblock").default("block"),
+//     });
 
-    const { error: bErr, value: bVal } = bodySchema.validate(req.body || {}, {
-      abortEarly: true,
-      convert: true,
-      stripUnknown: true,
-    });
+//     const { error: bErr, value: bVal } = bodySchema.validate(req.body || {}, {
+//       abortEarly: true,
+//       convert: true,
+//       stripUnknown: true,
+//     });
 
-    if (bErr) {
-      return res
-        .status(400)
-        .json({ success: false, message: bErr.details[0].message });
-    }
+//     if (bErr) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: bErr.details[0].message });
+//     }
 
-    const chatId = Number(pVal.chatId);
-    const op = String(bVal.action).toLowerCase();
-    const newStatus = op === "block" ? "blocked" : "active";
+//     const chatId = Number(pVal.chatId);
+//     const op = String(bVal.action).toLowerCase();
+//     const newStatus = op === "block" ? "blocked" : "active";
 
-    // 2) Validate session
-    const sessionResult = await isUserSessionValid(req);
-    if (!sessionResult.success) {
-      return res.status(401).json(sessionResult);
-    }
-    const userId = Number(sessionResult.data);
+//     // 2) Validate session
+//     const sessionResult = await isUserSessionValid(req);
+//     if (!sessionResult.success) {
+//       return res.status(401).json(sessionResult);
+//     }
+//     const userId = Number(sessionResult.data);
 
-    // 3) Short transaction only for the status update (lock row briefly)
-    const t = await sequelize.transaction();
-    try {
-      const chat = await Chat.findByPk(chatId, {
-        transaction: t,
-        lock: t.LOCK.UPDATE,
-        attributes: [
-          "id",
-          "participant_1_id",
-          "participant_2_id",
-          "chat_status_p1",
-          "chat_status_p2",
-        ],
-      });
+//     // 3) Short transaction only for the status update (lock row briefly)
+//     const t = await sequelize.transaction();
+//     try {
+//       const chat = await Chat.findByPk(chatId, {
+//         transaction: t,
+//         lock: t.LOCK.UPDATE,
+//         attributes: [
+//           "id",
+//           "participant_1_id",
+//           "participant_2_id",
+//           "chat_status_p1",
+//           "chat_status_p2",
+//         ],
+//       });
 
-      if (!chat) {
-        await t.rollback();
-        return res
-          .status(404)
-          .json({ success: false, message: "Chat not found" });
-      }
+//       if (!chat) {
+//         await t.rollback();
+//         return res
+//           .status(404)
+//           .json({ success: false, message: "Chat not found" });
+//       }
 
-      const isUserP1 = chat.participant_1_id === userId;
-      const isUserP2 = chat.participant_2_id === userId;
+//       const isUserP1 = chat.participant_1_id === userId;
+//       const isUserP2 = chat.participant_2_id === userId;
 
-      if (!isUserP1 && !isUserP2) {
-        await t.rollback();
-        return res
-          .status(403)
-          .json({ success: false, message: "You are not part of this chat." });
-      }
+//       if (!isUserP1 && !isUserP2) {
+//         await t.rollback();
+//         return res
+//           .status(403)
+//           .json({ success: false, message: "You are not part of this chat." });
+//       }
 
-      const currentStatus = isUserP1
-        ? chat.chat_status_p1
-        : chat.chat_status_p2;
+//       const currentStatus = isUserP1
+//         ? chat.chat_status_p1
+//         : chat.chat_status_p2;
 
-      // Idempotent: no update needed
-      if (currentStatus === newStatus) {
-        await t.commit();
-        return res.json({
-          success: true,
-          message:
-            op === "block"
-              ? "Chat already blocked."
-              : "Chat already unblocked.",
-          data: {
-            chatId: chat.id,
-            yourStatus: currentStatus,
-            otherStatus: isUserP1 ? chat.chat_status_p2 : chat.chat_status_p1,
-          },
-        });
-      }
+//       // Idempotent: no update needed
+//       if (currentStatus === newStatus) {
+//         await t.commit();
+//         return res.json({
+//           success: true,
+//           message:
+//             op === "block"
+//               ? "Chat already blocked."
+//               : "Chat already unblocked.",
+//           data: {
+//             chatId: chat.id,
+//             yourStatus: currentStatus,
+//             otherStatus: isUserP1 ? chat.chat_status_p2 : chat.chat_status_p1,
+//           },
+//         });
+//       }
 
-      // Update only the right column
-      if (isUserP1) chat.chat_status_p1 = newStatus;
-      else chat.chat_status_p2 = newStatus;
+//       // Update only the right column
+//       if (isUserP1) chat.chat_status_p1 = newStatus;
+//       else chat.chat_status_p2 = newStatus;
 
-      await chat.save({ transaction: t });
-      await t.commit();
+//       await chat.save({ transaction: t });
+//       await t.commit();
 
-      return res.json({
-        success: true,
-        message:
-          op === "block"
-            ? "Chat blocked successfully."
-            : "Chat unblocked successfully.",
-        data: {
-          chatId: chat.id,
-          yourStatus: isUserP1 ? chat.chat_status_p1 : chat.chat_status_p2,
-          otherStatus: isUserP1 ? chat.chat_status_p2 : chat.chat_status_p1,
-        },
-      });
-    } catch (e) {
-      await t.rollback();
-      throw e;
-    }
-  } catch (error) {
-    console.error("Error during blockChat:", error);
-    return res
-      .status(500)
-      .json({ success: false, message: "Internal server error" });
-  }
-}
+//       return res.json({
+//         success: true,
+//         message:
+//           op === "block"
+//             ? "Chat blocked successfully."
+//             : "Chat unblocked successfully.",
+//         data: {
+//           chatId: chat.id,
+//           yourStatus: isUserP1 ? chat.chat_status_p1 : chat.chat_status_p2,
+//           otherStatus: isUserP1 ? chat.chat_status_p2 : chat.chat_status_p1,
+//         },
+//       });
+//     } catch (e) {
+//       await t.rollback();
+//       throw e;
+//     }
+//   } catch (error) {
+//     console.error("Error during blockChat:", error);
+//     return res
+//       .status(500)
+//       .json({ success: false, message: "Internal server error" });
+//   }
+// }
 
 async function deleteChat(req, res) {
   try {
@@ -1946,9 +1947,9 @@ module.exports = {
   getChatMessagesCursor,
   deleteMessage,
   getUserChats,
-  getBlockedChats,
+ // getBlockedChats,
   pinChats,
-  blockChat,
+//  blockChat,
   deleteChat,
   markChatMessagesRead,
 };
