@@ -12,7 +12,7 @@ function toStringData(data) {
   return out;
 }
 
-function buildMulticastPayload({ tokens, title, content, image, data }) {
+function buildMulticastPayload( tokens, title, content, image, data ) {
   return {
     tokens,
     notification: {
@@ -167,17 +167,17 @@ async function createAndSend(
     }
 
     const admin = getAdmin();
-    const payload = buildMulticastPayload({
+    const payload = buildMulticastPayload(
       tokens,
       title,
       content,
        image,
-      data: {
+       {
        notificationId: String(notification.id),
         type: String(type),
         ...data,
       },
-    });
+    );
 
     const fcmRes = await admin.messaging().sendEachForMulticast(payload);
 
@@ -264,12 +264,7 @@ async function createAndSendGlobal(
     for (let i = 0; i < tokens.length; i += 500) {
       const chunk = tokens.slice(i, i + 500);
 
-      const payload = buildMulticastPayload({
-        tokens: chunk,
-        title,
-        content,
-        data: { type, ...data }, // global push doesn't need per-user notification_id
-      });
+      const payload = buildMulticastPayload(chunk,title,content,{ type, ...data },);
 
       const res = await admin.messaging().sendEachForMulticast(payload);
 
@@ -377,7 +372,7 @@ async function sendLikeNotificationToUser(senderId, receiverId) {
   const senderName =
     sender?.full_name?.trim() || sender?.username?.trim() || "someone";
 
-  // const BASE_URL = process.env.BASE_URL || "http://192.168.0.156:5002";
+  // const BASE_URL = process.env.BASE_URL || "http://192.168.0.156:5000";
   // const avatarUrl = sender?.avatar ? `${BASE_URL}/uploads/avatar/${sender.avatar}` : null;
 
   // Keeping same style as your match function (static URL used there)
@@ -547,16 +542,12 @@ async function createAndSendFiltered(
       for (let i = 0; i < tokens.length; i += 500) {
         const chunk = tokens.slice(i, i + 500);
 
-        const payload = buildMulticastPayload({
-          tokens: chunk,
-          title,
-          content,
-          image,
-          data: {
+        const payload = buildMulticastPayload(chunk,title,content,image,
+          {
             type: String(type),
             ...toStringData(data),
           },
-        });
+        );
 
         const res = await admin.messaging().sendEachForMulticast(payload);
 

@@ -592,14 +592,6 @@ async function blockUser(req, res) {
 
   const blockedUserId = Number(value.userId);
 
-  if (blockerId === blockedUserId) {
-    return res.status(400).json({
-      success: false,
-      message: "You cannot block yourself.",
-      data: null,
-    });
-  }
-
   const transaction = await sequelize.transaction();
   try {
     // 3) Check target user exists + active (also fetch type for bot check)
@@ -622,7 +614,6 @@ async function blockUser(req, res) {
     // 4) Create block row (safe)
     await UserBlock.findOrCreate({
       where: { user_id: blockedUserId, blocked_by: blockerId },
-      defaults: { user_id: blockedUserId, blocked_by: blockerId },
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
@@ -655,27 +646,12 @@ async function blockUser(req, res) {
         user_id: blockedUserId,
         blocked_by: blockerId,
         is_bot: isBot,
-        chat_status_updated: chatUpdated > 0, // true if chat row updated
+        chat_status_updated: chatUpdated > 0,
       },
     });
   } catch (err) {
     console.error("Error during blockUser:", err);
     await transaction.rollback();
-
-    // Optional: treat "already blocked" as success
-    if (err?.name === "SequelizeUniqueConstraintError") {
-      return res.status(200).json({
-        success: true,
-        message: "User already blocked.",
-        data: {
-          user_id: blockedUserId,
-          blocked_by: blockerId,
-          is_bot: null,
-          chat_status_updated: false,
-        },
-      });
-    }
-
     return res.status(500).json({
       success: false,
       message: "Failed to block user.",
@@ -762,9 +738,8 @@ async function unblockUser(req, res) {
       message: deleted ? "User unblocked successfully." : "User was not blocked.",
       data: {
         user_id: blockedUserId,
-        blocked_by: blockerId,
+        unblocked_by: blockerId,
         deleted: Boolean(deleted),
-        is_bot: isBot,
         chat_status_updated: chatUpdated > 0,
       },
     });
