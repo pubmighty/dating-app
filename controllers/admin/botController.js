@@ -5,7 +5,6 @@ const FileUpload = require("../../models/FileUpload");
 const User = require("../../models/User");
 const UserSetting = require("../../models/UserSetting");
 const path = require("path");
-const fs = require("fs-extra");
 const CallFile = require("../../models/CallFile");
 const {
   cleanupTempFiles,
@@ -1404,74 +1403,44 @@ async function getBotMedia(req, res) {
     // 1) Admin session
     const session = await isAdminSessionValid(req, res);
     if (!session?.success || !session?.data) {
-      return res.status(401).json({
-        success: false,
-        message: "Admin session invalid",
-        data: null,
-      });
+      return res.status(401).json({ success: false, message: "Admin session invalid", data: null });
     }
 
     const adminId = Number(session.data);
     const admin = await Admin.findByPk(adminId);
     if (!admin) {
-      return res.status(401).json({
-        success: false,
-        message: "Admin not found",
-        data: null,
-      });
+      return res.status(401).json({ success: false, message: "Admin not found", data: null });
     }
 
     const canGo = await verifyAdminRole(admin, "getBotMedia");
     if (!canGo) {
-      return res.status(403).json({
-        success: false,
-        message: "Insufficient permissions",
-        data: null,
-      });
+      return res.status(403).json({ success: false, message: "Insufficient permissions", data: null });
     }
 
-    // 2) Validate target userId param
-    const paramsSchema = Joi.object({
-      userId: Joi.number().integer().positive().required().messages({
-        "number.base": "Invalid userId.",
-        "number.integer": "Invalid userId.",
-        "number.positive": "Invalid userId.",
-        "any.required": "userId is required.",
-      }),
+    // 2) Validate botId
+    const schema = Joi.object({
+      botId: Joi.number().integer().positive().required(),
     }).unknown(false);
 
-    const { error: pErr, value: pVal } = paramsSchema.validate(req.params, {
-      abortEarly: true,
-      convert: true,
-    });
-
-    if (pErr) {
-      return res.status(400).json({
-        success: false,
-        message: pErr.details[0].message,
-        data: null,
-      });
+    const { error, value } = schema.validate(req.params, { abortEarly: true, convert: true });
+    if (error) {
+      return res.status(400).json({ success: false, message: error.details[0].message, data: null });
     }
 
-    const targetUserId = Number(pVal.userId);
+    const botId = Number(value.botId);
 
-    // 3) Ensure target user exists AND is bot
-    const targetUser = await User.findOne({
-      where: { id: targetUserId, type: "bot" },
-      attributes: ["id", "username", "type", "is_active"],
+    // 3) Ensure bot exists
+    const bot = await User.findOne({
+      where: { id: botId, type: "bot" },
+      attributes: ["id", "username", "type", "is_deleted"],
       raw: true,
     });
 
-    if (!targetUser) {
-      return res.status(404).json({
-        success: false,
-        message: "Bot user not found.",
-        data: null,
-      });
+    if (!bot) {
+      return res.status(404).json({ success: false, message: "Bot user not found.", data: null });
     }
 
-    // If you want to allow viewing media even if deleted, remove this check
-    if (Number(targetUser.is_active) === 2) {
+    if (Number(bot.is_deleted) === 1) {
       return res.status(409).json({
         success: false,
         message: "Cannot fetch media for a deleted bot user. Restore it first.",
@@ -1479,52 +1448,29 @@ async function getBotMedia(req, res) {
       });
     }
 
-    // 4) Fetch media rows (source of truth)
+    // 4) Read ONLY from pb_user_media
     const rows = await FileUpload.findAll({
-      where: { user_id: targetUserId },
-      order: [["created_at", "DESC"]],
-      raw: true,
-    });
-
-    // 5) Build public URLs (assuming express serves /public)
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
-
-    const files = rows.map((r) => {
-      // r.folders is like: "uploads/media/user/14"
-      // public URL becomes: <baseUrl>/uploads/media/user/14/<filename>
-      const publicPath = `${String(r.folders).replace(/\\/g, "/")}/${r.name}`;
-
-      return {
-        id: r.id,
-        user_id: r.user_id,
-        name: r.name,
-        folders: r.folders,
-        size: r.size,
-        file_type: r.file_type,
-        mime_type: r.mime_type,
-        created_at: r.created_at,
-        updated_at: r.updated_at,
-        url: `${baseUrl}/${publicPath}`,
-      };
+      where: {
+        user_id: botId,
+        status: "active",
+        type: "image",       // gallery images only
+      },
+      order: [["uploaded_at", "DESC"]],
     });
 
     return res.status(200).json({
       success: true,
-      message: "Bot user profile media fetched successfully.",
+      message: "Bot media fetched successfully.",
       data: {
-        user_id: targetUserId,
-        username: targetUser.username,
-        total: files.length,
-        files,
+        user_id: botId,
+        username: bot.username,
+        total: rows.length,
+        files: rows, 
       },
     });
   } catch (err) {
     console.error("getBotMedia error:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Something went wrong while fetching media.",
-      data: null,
-    });
+    return res.status(500).json({ success: false, message: "Something went wrong while fetching media.", data: null });
   }
 }
 
