@@ -1509,8 +1509,13 @@ async function uploadBotVideo(req, res) {
     }
 
     // 2) botId param
-    const paramsSchema = Joi.object({
-      botId: Joi.number().integer().positive().required(),
+       const paramsSchema = Joi.object({
+      userId: Joi.number().integer().positive().required().messages({
+        "number.base": "Invalid userId.",
+        "number.integer": "Invalid userId.",
+        "number.positive": "Invalid userId.",
+        "any.required": "userId is required.",
+      }),
     }).unknown(false);
 
     const { error: pErr, value: pVal } = paramsSchema.validate(req.params, {
