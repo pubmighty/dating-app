@@ -1403,28 +1403,48 @@ async function getBotMedia(req, res) {
     // 1) Admin session
     const session = await isAdminSessionValid(req, res);
     if (!session?.success || !session?.data) {
-      return res.status(401).json({ success: false, message: "Admin session invalid", data: null });
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid",
+        data: null,
+      });
     }
 
     const adminId = Number(session.data);
     const admin = await Admin.findByPk(adminId);
     if (!admin) {
-      return res.status(401).json({ success: false, message: "Admin not found", data: null });
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+        data: null,
+      });
     }
 
     const canGo = await verifyAdminRole(admin, "getBotMedia");
     if (!canGo) {
-      return res.status(403).json({ success: false, message: "Insufficient permissions", data: null });
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
     }
 
-    // 2) Validate botId
-    const schema = Joi.object({
+    // 2) botId param
+    const paramsSchema = Joi.object({
       botId: Joi.number().integer().positive().required(),
     }).unknown(false);
 
-    const { error, value } = schema.validate(req.params, { abortEarly: true, convert: true });
+    const { error, value } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      convert: true,
+    });
+
     if (error) {
-      return res.status(400).json({ success: false, message: error.details[0].message, data: null });
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+        data: null,
+      });
     }
 
     const botId = Number(value.botId);
@@ -1432,45 +1452,63 @@ async function getBotMedia(req, res) {
     // 3) Ensure bot exists
     const bot = await User.findOne({
       where: { id: botId, type: "bot" },
-      attributes: ["id", "username", "type", "is_deleted"],
+      attributes: ["id", "username", "is_active"],
       raw: true,
     });
 
     if (!bot) {
-      return res.status(404).json({ success: false, message: "Bot user not found.", data: null });
-    }
-
-    if (Number(bot.is_deleted) === 1) {
-      return res.status(409).json({
+      return res.status(404).json({
         success: false,
-        message: "Cannot fetch media for a deleted bot user. Restore it first.",
+        message: "Bot user not found.",
         data: null,
       });
     }
 
-    // 4) Read ONLY from pb_user_media
-    const rows = await FileUpload.findAll({
+    if (Number(bot.is_active) === 0) {
+      return res.status(409).json({
+        success: false,
+        message: "Bot user is deactivated.",
+        data: null,
+      });
+    }
+
+    // Fetch ONLY images from pb_file_uploads (FileUpload)
+    const images = await FileUpload.findAll({
       where: {
         user_id: botId,
-        status: "active",
-        type: "image",       // gallery images only
+        mime_type: { [Op.like]: "image/%" }, // requires Sequelize Op
       },
-      order: [["uploaded_at", "DESC"]],
+      order: [["created_at", "DESC"]],
+      raw: true,
     });
+
+    const formatted = images.map((img) => ({
+      id: img.id,
+      user_id: img.user_id,
+      name: img.name,
+      file_type: img.file_type,
+      mime_type: img.mime_type,
+      size: img.size,
+      created_at: img.created_at,
+      image_path: `/${img.folders}/${img.name}`,
+    }));
 
     return res.status(200).json({
       success: true,
       message: "Bot media fetched successfully.",
       data: {
         user_id: botId,
-        username: bot.username,
-        total: rows.length,
-        files: rows, 
+        total: formatted.length,
+        images: formatted,
       },
     });
   } catch (err) {
     console.error("getBotMedia error:", err);
-    return res.status(500).json({ success: false, message: "Something went wrong while fetching media.", data: null });
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while fetching media.",
+      data: null,
+    });
   }
 }
 
