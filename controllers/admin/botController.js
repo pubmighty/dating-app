@@ -4,6 +4,9 @@ const bcrypt = require("bcryptjs");
 const FileUpload = require("../../models/FileUpload");
 const User = require("../../models/User");
 const UserSetting = require("../../models/UserSetting");
+const path = require("path");
+const fs = require("fs-extra");
+const CallFile = require("../../models/CallFile");
 const {
   cleanupTempFiles,
   verifyFileType,
@@ -1396,6 +1399,425 @@ async function uploadBotMedia(req, res) {
   }
 }
 
+async function getBotMedia(req, res) {
+  try {
+    // 1) Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid",
+        data: null,
+      });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+        data: null,
+      });
+    }
+
+    const canGo = await verifyAdminRole(admin, "getBotMedia");
+    if (!canGo) {
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
+    }
+
+    // 2) Validate target userId param
+    const paramsSchema = Joi.object({
+      userId: Joi.number().integer().positive().required().messages({
+        "number.base": "Invalid userId.",
+        "number.integer": "Invalid userId.",
+        "number.positive": "Invalid userId.",
+        "any.required": "userId is required.",
+      }),
+    }).unknown(false);
+
+    const { error: pErr, value: pVal } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (pErr) {
+      return res.status(400).json({
+        success: false,
+        message: pErr.details[0].message,
+        data: null,
+      });
+    }
+
+    const targetUserId = Number(pVal.userId);
+
+    // 3) Ensure target user exists AND is bot
+    const targetUser = await User.findOne({
+      where: { id: targetUserId, type: "bot" },
+      attributes: ["id", "username", "type", "is_active"],
+      raw: true,
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Bot user not found.",
+        data: null,
+      });
+    }
+
+    // If you want to allow viewing media even if deleted, remove this check
+    if (Number(targetUser.is_active) === 2) {
+      return res.status(409).json({
+        success: false,
+        message: "Cannot fetch media for a deleted bot user. Restore it first.",
+        data: null,
+      });
+    }
+
+    // 4) Fetch media rows (source of truth)
+    const rows = await FileUpload.findAll({
+      where: { user_id: targetUserId },
+      order: [["created_at", "DESC"]],
+      raw: true,
+    });
+
+    // 5) Build public URLs (assuming express serves /public)
+    const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+    const files = rows.map((r) => {
+      // r.folders is like: "uploads/media/user/14"
+      // public URL becomes: <baseUrl>/uploads/media/user/14/<filename>
+      const publicPath = `${String(r.folders).replace(/\\/g, "/")}/${r.name}`;
+
+      return {
+        id: r.id,
+        user_id: r.user_id,
+        name: r.name,
+        folders: r.folders,
+        size: r.size,
+        file_type: r.file_type,
+        mime_type: r.mime_type,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        url: `${baseUrl}/${publicPath}`,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Bot user profile media fetched successfully.",
+      data: {
+        user_id: targetUserId,
+        username: targetUser.username,
+        total: files.length,
+        files,
+      },
+    });
+  } catch (err) {
+    console.error("getBotMedia error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while fetching media.",
+      data: null,
+    });
+  }
+}
+
+
+async function uploadBotVideo(req, res) {
+  let incomingFiles = [];
+
+  try {
+    // 1) Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid",
+        data: null,
+      });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+        data: null,
+      });
+    }
+
+    const canGo = await verifyAdminRole(admin, "uploadBotVideo");
+    if (!canGo) {
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
+    }
+
+    // 2) botId param
+    const paramsSchema = Joi.object({
+      botId: Joi.number().integer().positive().required(),
+    }).unknown(false);
+
+    const { error: pErr, value: pVal } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (pErr) {
+      return res.status(400).json({
+        success: false,
+        message: pErr.details[0].message,
+        data: null,
+      });
+    }
+
+    const botId = Number(pVal.botId);
+
+    // 3) ensure bot exists
+    const bot = await User.findOne({
+      where: { id: botId, type: "bot" },
+      attributes: ["id", "username", "type", "is_deleted"],
+      raw: true,
+    });
+
+    if (!bot) {
+      return res.status(404).json({
+        success: false,
+        message: "Bot user not found.",
+        data: null,
+      });
+    }
+
+    if (Number(bot.is_deleted) === 1) {
+      return res.status(409).json({
+        success: false,
+        message: "Cannot upload videos for a deleted bot user. Restore it first.",
+        data: null,
+      });
+    }
+
+    // 4) Get files from multer
+    incomingFiles = req.files || [];
+    if (!incomingFiles.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No files provided.",
+        data: null,
+      });
+    }
+
+    // 5) Move to public/uploads/videos/<botId> using uploadFile()
+    const folder = `uploads/videos/${botId}`;
+    const uploader_ip = getRealIp(req);
+    const user_agent = String(req.headers["user-agent"] || "").slice(0, 300);
+
+    const VIDEO_EXTS = new Set(["mp4", "webm", "mov", "mkv"]);
+
+    const inserted = [];
+
+    try {
+      for (const f of incomingFiles) {
+        // uploadFile will validate by magic-bytes and reject if not allowed
+        const up = await uploadFile(
+          f,
+          folder,
+          null,
+          uploader_ip,
+          user_agent,
+          botId,
+          "normal"
+        );
+
+        // up = { filename, folder, id } (id is FileUpload row id)
+        // We still must insert pb_call_files row:
+        const fileName = up.filename;
+
+        const ext = String(path.extname(fileName || "") || "")
+          .replace(".", "")
+          .toLowerCase();
+
+        if (!VIDEO_EXTS.has(ext)) {
+          // uploadFile accepted something non-video (shouldn't happen),
+          // but if it does, reject hard.
+          throw new Error("Only video files are allowed.");
+        }
+
+        const row = await CallFile.create({
+          user_id: botId,
+          name: fileName,
+          folders: `videos/${botId}`, // note: NOT "uploads/videos/..", matches your earlier DB style
+          size: Number(f.size || 0),
+          file_type: ext,
+          mime_type: String(f.mimetype || "video/mp4"),
+          status: 1,
+        });
+
+        inserted.push(row);
+      }
+    } catch (e) {
+      // cleanup temp files if any still exist
+      await cleanupTempFiles(incomingFiles).catch(() => {});
+
+      // IMPORTANT: file might already be moved into public folder
+      // so you can optionally delete folder or delete the inserted rows (compensation)
+      return res.status(500).json({
+        success: false,
+        message: e?.message || "Failed to upload video(s).",
+        data: null,
+      });
+    }
+
+    // 6) Cleanup temp leftovers (uploadFile usually removes temp, but safe)
+    await cleanupTempFiles(incomingFiles).catch(() => {});
+
+    return res.status(200).json({
+      success: true,
+      message: "video uploaded successfully.",
+      data: {
+        user_id: botId,
+        folder: `uploads/videos/${botId}`,
+      },
+    });
+  } catch (err) {
+    console.error("uploadBotVideo error:", err);
+
+    try {
+      if (!incomingFiles.length) incomingFiles = req.files || [];
+      if (incomingFiles?.length) await cleanupTempFiles(incomingFiles);
+    } catch (_) {}
+
+    return res.status(500).json({
+      success: false,
+      message: err?.message || "Something went wrong while uploading video.",
+      data: null,
+    });
+  }
+}
+
+async function getBotVideos(req, res) {
+  try {
+    // 1) Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid",
+        data: null,
+      });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+        data: null,
+      });
+    }
+
+    const canGo = await verifyAdminRole(admin, "getBotVideos");
+    if (!canGo) {
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
+    }
+
+    // 2) botId param
+    const paramsSchema = Joi.object({
+      botId: Joi.number().integer().positive().required(),
+    }).unknown(false);
+
+    const { error, value } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+        data: null,
+      });
+    }
+
+    const botId = Number(value.botId);
+
+    // 3) Ensure bot exists
+    const bot = await User.findOne({
+      where: { id: botId, type: "bot" },
+      attributes: ["id", "username", "is_active"],
+      raw: true,
+    });
+
+    if (!bot) {
+      return res.status(404).json({
+        success: false,
+        message: "Bot user not found.",
+        data: null,
+      });
+    }
+
+    if (Number(bot.is_active) === 0) {
+      return res.status(409).json({
+        success: false,
+        message: "Bot user is deactivated.",
+        data: null,
+      });
+    }
+
+    // 4) Fetch videos from pb_call_files
+    const videos = await CallFile.findAll({
+      where: {
+        user_id: botId,
+        status: 1,
+      },
+      order: [["created_at", "DESC"]],
+      raw: true,
+    });
+    const formatted = videos.map((v) => ({
+      id: v.id,
+      user_id: v.user_id,
+      name: v.name,
+      file_type: v.file_type,
+      mime_type: v.mime_type,
+      size: v.size,
+      status: v.status,
+      created_at: v.created_at,
+      video_path: `/uploads/${v.folders}/${v.name}`,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: "Bot videos fetched successfully.",
+      data: {
+        user_id: botId,
+        total: formatted.length,
+        videos: formatted,
+      },
+    });
+  } catch (err) {
+    console.error("getBotVideos error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while fetching videos.",
+      data: null,
+    });
+  }
+}
+
 module.exports = {
   getBots,
   getBot,
@@ -1404,4 +1826,7 @@ module.exports = {
   deleteBot,
   restoreBot,
   uploadBotMedia,
+  getBotMedia,
+  uploadBotVideo,
+  getBotVideos
 };

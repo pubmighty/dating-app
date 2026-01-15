@@ -538,6 +538,63 @@ router.post(
 );
 
 /**
+ * GET /bots/:userId/media
+ * ------------------------------------------------------------
+ * Fetches the list of profile media files for a specific bot user.
+ *
+ * Purpose:
+ * - Allows admins to view all media uploaded for a bot profile.
+ * - Used in the Admin Panel → Bots → Edit Bot → Media tab.
+ * - Supports moderation, review, and deletion of bot media.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to view/manage bot media.
+ *
+ * Path Parameters:
+ * - userId: number (required)
+ *   The ID of the bot user whose media should be retrieved.
+ *
+ * Request Body:
+ * - None
+ *
+ * Behavior:
+ * - Validates admin session and permissions.
+ * - Validates that the target user exists and is of type "bot".
+ * - Fetches all media records for the bot from the database.
+ * - Uses the database as the source of truth (no filesystem scanning).
+ * - Returns media metadata along with publicly accessible URLs.
+ *
+ * Response:
+ * - success: boolean
+ * - message: string
+ * - data:
+ *   - user_id: number
+ *   - username: string
+ *   - total: number
+ *   - files: array of media objects
+ *
+ * Media Object Fields:
+ * - id: number
+ * - name: string
+ * - folders: string
+ * - size: number
+ * - file_type: string
+ * - mime_type: string
+ * - created_at: datetime
+ * - url: string (public media URL)
+ *
+ * Notes:
+ * - This endpoint is read-only.
+ * - Media URLs assume `/public` is exposed via Express static middleware.
+ * - Deleted or inactive bot users can be optionally blocked from access.
+ */
+router.get(
+  "/bots/:userId/media",
+  botController.getBotMedia
+);
+
+/**
  * POST /users/:userId/delete
  * ------------------------------------------------------------
  * Soft deletes a user account.
@@ -1300,6 +1357,114 @@ router.post(
   "/notifications/send-filtered-user",
   adminNotificationController.adminSendFiltered
 );
+
+/**
+ * POST /bots/:botId/upload-video
+ * ------------------------------------------------------------
+ * Uploads one or more call/intro videos for a specific bot user.
+ *
+ * Purpose:
+ * - Allows admins to upload videos that bots can use for calls,
+ *   introductions, or media-based interactions.
+ * - Used in Admin Panel → Bots → Edit Bot → Videos tab.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to manage bot videos.
+ *
+ * Path Parameters:
+ * - botId: number (required)
+ *   The ID of the bot user for which videos are being uploaded.
+ *
+ * Multipart Form Data:
+ * - files[]: array of video files (required)
+ *
+ * Behavior:
+ * - Validates admin session and permissions.
+ * - Validates that the target user exists and is of type "bot".
+ * - Enforces a maximum number of uploaded videos per request.
+ * - Accepts only video formats (e.g. MP4, WEBM, MOV, MKV).
+ * - Stores video files under:
+ *   /public/uploads/videos/{botId}/
+ * - Saves video metadata into the `pb_call_files` table.
+ * - Performs best-effort cleanup on upload or database failures.
+ *
+ * Response:
+ * - success: boolean
+ * - message: string
+ * - data:
+ *   - user_id: number
+ *   - folder: string
+ *
+ * Notes:
+ * - This is an incremental upload operation (does not replace existing videos).
+ * - Files are validated server-side using magic-byte detection.
+ * - Public access to videos assumes `/public` is exposed via Express static middleware.
+ */
+router.post(
+  "/bots/:botId/upload-video",
+  fileUploader.array("files", 10),
+  botController.uploadBotVideo
+);
+
+/**
+ * GET /bots/:botId/video
+ * ------------------------------------------------------------
+ * Fetches the list of uploaded videos for a specific bot user.
+ *
+ * Purpose:
+ * - Allows admins to view and manage all videos associated
+ *   with a bot profile.
+ * - Used in Admin Panel → Bots → Edit Bot → Videos tab.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to view bot videos.
+ *
+ * Path Parameters:
+ * - botId: number (required)
+ *   The ID of the bot user whose videos should be retrieved.
+ *
+ * Request Body:
+ * - None
+ *
+ * Behavior:
+ * - Validates admin session and permissions.
+ * - Validates that the target user exists and is of type "bot".
+ * - Retrieves video records from the `pb_call_files` table.
+ * - Returns videos ordered by most recent upload.
+ * - Builds publicly accessible video URLs for preview/playback.
+ *
+ * Response:
+ * - success: boolean
+ * - message: string
+ * - data:
+ *   - user_id: number
+ *   - total: number
+ *   - videos: array of video objects
+ *
+ * Video Object Fields:
+ * - id: number
+ * - name: string
+ * - folders: string
+ * - size: number
+ * - file_type: string
+ * - mime_type: string
+ * - created_at: datetime
+ * - video_url: string
+ *
+ * Notes:
+ * - This endpoint is read-only.
+ * - Videos are served from:
+ *   /public/uploads/videos/{botId}/{filename}
+ * - If a video file is missing on disk, the DB record
+ *   is still returned (DB is the source of truth).
+ */
+router.get(
+  "/bots/:botId/video",
+  botController.getBotVideos
+);
+
 
 
 module.exports = router;
