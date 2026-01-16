@@ -575,25 +575,10 @@ async function getFeedUser(req, res) {
     const viewerId = Number(isSessionValid.data); // logged-in user id
     const botId = Number(value.id);
 
-    const blockRow = await UserBlock.findOne({
-      where: {
-        user_id: botId,       // bot being viewed
-        blocked_by: viewerId, // viewer (me)
-      },
-      attributes: ["id"],
-    });
-
-    if (blockRow) {
-      return res.status(403).json({
-        success: false,
-        message: "You have blocked this bot.",
-        data: null,
-      });
-    }
-
+    // Fetch bot user
     const user = await User.findOne({
       where: {
-        id: value.id,
+        id: botId,
         type: "bot",
         is_active: true,
       },
@@ -612,19 +597,27 @@ async function getFeedUser(req, res) {
       });
     }
 
-    // Mask sensitive fields
-    if (user.email) {
-      user.email = maskEmail(user.email);
-    }
+    // Check block relationship (viewer -> bot)
+    const blockRow = await UserBlock.findOne({
+      where: {
+        user_id: botId,       // bot being viewed
+        blocked_by: viewerId, // viewer (me)
+      },
+      attributes: ["id"],
+    });
 
-    if (user.phone) {
-      user.phone = maskPhone(user.phone);
-    }
+    // Mask sensitive fields
+    if (user.email) user.email = maskEmail(user.email);
+    if (user.phone) user.phone = maskPhone(user.phone);
+
+    // Convert to plain object and append is_blocked
+    const userData = user.toJSON();
+    userData.is_blocked = !!blockRow;
 
     return res.json({
       success: true,
       message: "User fetched successfully",
-      data: user,
+      data: userData,
     });
   } catch (err) {
     console.error("Error during getFeedUser:", err);
@@ -635,6 +628,7 @@ async function getFeedUser(req, res) {
     });
   }
 }
+
 
 module.exports = {
   getFeed,
