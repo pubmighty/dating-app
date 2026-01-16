@@ -10,6 +10,7 @@ const MessageFile = require("./MessageFile");
 const VideoCall = require("./VideoCall");
 const Notification=require("./Notification")
 const UserBlock = require("./UserBlock");
+const FileUpload = require("./FileUpload");
 
 function setupAssociations() {
   User.hasMany(UserInteraction, {
@@ -40,14 +41,14 @@ function setupAssociations() {
     onUpdate: "CASCADE",
   });
 
-  User.hasMany(UserMedia, {
+  User.hasMany(FileUpload, {
     foreignKey: "user_id",
     as: "media", // user.getMedia()
     onDelete: "CASCADE",
     onUpdate: "CASCADE",
   });
 
-  UserMedia.belongsTo(User, {
+  FileUpload.belongsTo(User, {
     foreignKey: "user_id",
     as: "user", // media.getUser()
     onDelete: "CASCADE",
