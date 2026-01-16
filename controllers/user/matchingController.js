@@ -10,7 +10,7 @@ const {
 const { sendBotMatchNotificationToUser, sendLikeNotificationToUser, sendRejectNotificationToUser } = require("../../utils/helpers/notificationHelper");
 const UserBlock = require("../../models/UserBlock"); 
 const Chat = require("../../models/Chat");
-
+const UserReport=require("../../models/UserReport")
 
 async function likeUser(req, res) {
   // 1) Validate input
@@ -819,6 +819,81 @@ async function getBlockedUsers(req, res) {
   }
 }
 
+async function reportUser(req, res) {
+  const schema = Joi.object({
+    userId: Joi.number().integer().positive().required(),
+    reason: Joi.string().trim().min(3).max(500).required(),
+  });
+
+  const { error, value } = schema.validate(
+    { userId: req.params.userId, reason: req.body?.reason },
+    { abortEarly: true, stripUnknown: true }
+  );
+
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      message: error.details?.[0]?.message || "Invalid payload",
+      data: null,
+    });
+  }
+
+  const session = await isUserSessionValid(req);
+  if (!session?.success) return res.status(401).json(session);
+
+  const reporterId = Number(session.data);
+  const reportedId = Number(value.userId);
+
+  if (reporterId === reportedId) {
+    return res.status(400).json({
+      success: false,
+      message: "You cannot report yourself.",
+      data: null,
+    });
+  }
+
+  try {
+    // Ensure target exists
+    const targetUser = await User.findOne({
+      where: { id: reportedId, is_active: true },
+      attributes: ["id"],
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+        data: null,
+      });
+    }
+
+    const report = await UserReport.create({
+      reported_user: reportedId,
+      reported_by: reporterId,
+      reason: value.reason,
+      moderated_by: null,
+      moderator_note: null,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Report submitted successfully.",
+      data: {
+        report_id: report.id,
+        reported_user: report.reported_user,
+        reported_by: report.reported_by,
+      },
+    });
+  } catch (err) {
+    console.error("Error during reportUser:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to submit report.",
+      data: null,
+    });
+  }
+}
+
 
 
 module.exports = {
@@ -827,5 +902,6 @@ module.exports = {
   getUserMatches,
   blockUser,
   unblockUser,
-  getBlockedUsers
+  getBlockedUsers,
+  reportUser
 };

@@ -590,9 +590,11 @@ router.post(
  * - Deleted or inactive bot users can be optionally blocked from access.
  */
 router.get(
-  "/bots/:userId/media",
+  "/bots/:botId/media",
   botController.getBotMedia
 );
+
+router.post("/bots/:botId/media/:mediaId", botController.deleteBotMedia);
 
 /**
  * POST /users/:userId/delete
@@ -1402,7 +1404,7 @@ router.post(
  * - Public access to videos assumes `/public` is exposed via Express static middleware.
  */
 router.post(
-  "/bots/:botId/upload-video",
+  "/bots/:botId/video",
   fileUploader.array("files", 10),
   botController.uploadBotVideo
 );
@@ -1465,6 +1467,55 @@ router.get(
   botController.getBotVideos
 );
 
-
+/**
+ * POST /bots/:botId/video/:videoId
+ * ------------------------------------------------------------
+ * Deletes a specific uploaded video associated with a bot user.
+ *
+ * Purpose:
+ * - Allows admins to remove unwanted or inappropriate videos
+ *   from a bot profile.
+ * - Used in Admin Panel → Bots → Edit Bot → Videos tab.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to delete bot videos.
+ *
+ * Path Parameters:
+ * - botId: number (required)
+ *   The ID of the bot user who owns the video.
+ *
+ * - videoId: number (required)
+ *   The ID of the video record to be deleted.
+ *
+ * Request Body:
+ * - None
+ *
+ * Behavior:
+ * - Validates admin session and permissions.
+ * - Validates that the target user exists and is of type "bot".
+ * - Ensures the video belongs to the specified bot user.
+ * - Deletes the video record from the database.
+ * - Attempts to delete the physical video file from disk.
+ * - If the file is missing on disk, the DB record is still removed.
+ *
+ * Response:
+ * - success: boolean
+ * - message: string
+ * - data:
+ *   - bot_id: number
+ *   - video_id: number
+ *   - deleted: boolean
+ *
+ * Notes:
+ * - This operation is irreversible.
+ * - Used strictly for moderation and content management.
+ * - File path structure:
+ *   /public/uploads/videos/{botId}/{filename}
+ */
+router.post(
+  "/bots/:botId/video/:videoId",
+  botController.deleteBotVideo
+);
 
 module.exports = router;

@@ -1000,4 +1000,15 @@ router.post(
 router.post(
   "/notifications/unsubscribe",notificationController.unsubscribeToNotification)
 
+ /* POST /notifications/unsubscribe
+ * ------------------------------------------------------------
+ * Report a bot
+ * Creates a new report entry for each report (multiple reports allowed)
+ * Params: userId → ID of the user/bot being reported
+ * Body: { reason: string }
+ * Auth: Logged-in user required
+ */
+router.post("/report/:userId",matchingController.reportUser)
+
+
 module.exports = router;

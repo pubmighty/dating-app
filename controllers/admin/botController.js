@@ -1512,6 +1512,127 @@ async function getBotMedia(req, res) {
   }
 }
 
+async function deleteBotMedia(req, res) {
+  try {
+    // 1) Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid",
+        data: null,
+      });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+        data: null,
+      });
+    }
+
+    const canGo = await verifyAdminRole(admin, "deleteBotMedia");
+    if (!canGo) {
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
+    }
+
+    // 2) Validate params
+    const paramsSchema = Joi.object({
+      botId: Joi.number().integer().positive().required(),
+      mediaId: Joi.number().integer().positive().required(),
+    }).unknown(false);
+
+    const { error, value } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+        data: null,
+      });
+    }
+
+    const botId = Number(value.botId);
+    const mediaId = Number(value.mediaId);
+
+    // 3) Ensure bot exists
+    const bot = await User.findOne({
+      where: { id: botId, type: "bot" },
+      attributes: ["id", "username", "is_active"],
+      raw: true,
+    });
+
+    if (!bot) {
+      return res.status(404).json({
+        success: false,
+        message: "Bot user not found.",
+        data: null,
+      });
+    }
+
+    if (Number(bot.is_active) === 0) {
+      return res.status(409).json({
+        success: false,
+        message: "Bot user is deactivated.",
+        data: null,
+      });
+    }
+
+    // 4) Fetch media row
+    const media = await FileUpload.findOne({
+      where: { id: mediaId, user_id: botId },
+      attributes: ["id", "user_id", "name", "folders"],
+      raw: true,
+    });
+
+    if (!media) {
+      return res.status(404).json({
+        success: false,
+        message: "Media record not found.",
+        data: null,
+      });
+    }
+
+    // recordType = "normal" => it will destroy from FileUpload table
+    const ok = await deleteFile(media.name, media.folders, media.id, "normal");
+
+    if (!ok) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to delete media file or record.",
+        data: null,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Bot media deleted successfully.",
+      data: {
+        id: media.id,
+        user_id: media.user_id,
+        name: media.name,
+        folders: media.folders,
+      },
+    });
+  } catch (err) {
+    console.error("deleteBotMedia error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while deleting bot media.",
+      data: null,
+    });
+  }
+}
 
 async function uploadBotVideo(req, res) {
   let incomingFiles = [];
@@ -1547,12 +1668,12 @@ async function uploadBotVideo(req, res) {
     }
 
     // 2) botId param
-       const paramsSchema = Joi.object({
-      userId: Joi.number().integer().positive().required().messages({
-        "number.base": "Invalid userId.",
-        "number.integer": "Invalid userId.",
-        "number.positive": "Invalid userId.",
-        "any.required": "userId is required.",
+    const paramsSchema = Joi.object({
+      botId: Joi.number().integer().positive().required().messages({
+        "number.base": "Invalid botId.",
+        "number.integer": "Invalid botId.",
+        "number.positive": "Invalid botId.",
+        "any.required": "botId is required.",
       }),
     }).unknown(false);
 
@@ -1589,7 +1710,8 @@ async function uploadBotVideo(req, res) {
     if (Number(bot.is_deleted) === 1) {
       return res.status(409).json({
         success: false,
-        message: "Cannot upload videos for a deleted bot user. Restore it first.",
+        message:
+          "Cannot upload videos for a deleted bot user. Restore it first.",
         data: null,
       });
     }
@@ -1806,6 +1928,153 @@ async function getBotVideos(req, res) {
     });
   }
 }
+async function deleteBotVideo(req, res) {
+  try {
+    // 1) Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid",
+        data: null,
+      });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+        data: null,
+      });
+    }
+
+    const canGo = await verifyAdminRole(admin, "deleteBotVideo");
+    if (!canGo) {
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
+    }
+
+    // 2) Validate params
+    const paramsSchema = Joi.object({
+      botId: Joi.number().integer().positive().required(),
+      videoId: Joi.number().integer().positive().required(),
+    }).unknown(false);
+
+    const { error, value } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+        data: null,
+      });
+    }
+
+    const botId = Number(value.botId);
+    const videoId = Number(value.videoId);
+
+    // 3) Ensure bot exists
+    const bot = await User.findOne({
+      where: { id: botId, type: "bot" },
+      attributes: ["id", "username", "is_active"],
+      raw: true,
+    });
+
+    if (!bot) {
+      return res.status(404).json({
+        success: false,
+        message: "Bot user not found.",
+        data: null,
+      });
+    }
+
+    if (Number(bot.is_active) === 0) {
+      return res.status(409).json({
+        success: false,
+        message: "Bot user is deactivated.",
+        data: null,
+      });
+    }
+
+    // 4) Fetch video row from pb_call_files (must belong to this bot)
+    const video = await CallFile.findOne({
+      where: {
+        id: videoId,
+        user_id: botId,
+        status: 1, // keep same constraint as listing (optional)
+      },
+      attributes: [
+        "id",
+        "user_id",
+        "name",
+        "folders",
+        "file_type",
+        "mime_type",
+        "size",
+        "status",
+        "created_at",
+      ],
+      raw: true,
+    });
+
+    if (!video) {
+      return res.status(404).json({
+        success: false,
+        message: "Video record not found for this bot.",
+        data: null,
+      });
+    }
+
+    // 5) Delete physical file using existing deleteFile()
+
+    const fileDeleted = await deleteFile(
+      video.name,
+      video.folders,
+      null,
+      "chat"
+    );
+
+    // 6) Delete DB row from CallFile
+    await CallFile.destroy({
+      where: {
+        id: videoId,
+        user_id: botId,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Bot video deleted successfully.",
+      data: {
+        id: video.id,
+        user_id: video.user_id,
+        name: video.name,
+        folders: video.folders,
+        file_type: video.file_type,
+        mime_type: video.mime_type,
+        size: video.size,
+        status: video.status,
+        created_at: video.created_at,
+        file_deleted: fileDeleted ? "true" : "false",
+      },
+    });
+  } catch (err) {
+    console.error("deleteBotVideo error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while deleting bot video.",
+      data: null,
+    });
+  }
+}
 
 module.exports = {
   getBots,
@@ -1816,6 +2085,8 @@ module.exports = {
   restoreBot,
   uploadBotMedia,
   getBotMedia,
+  deleteBotMedia,
   uploadBotVideo,
-  getBotVideos
+  getBotVideos,
+  deleteBotVideo,
 };
