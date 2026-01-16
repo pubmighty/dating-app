@@ -6,6 +6,8 @@ const { Op, literal } = require("sequelize");
 const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 const { getOption, maskEmail, maskPhone } = require("../../utils/helper");
 const { publicFeedUserAttributes } = require("../../utils/staticValues");
+const FileUpload = require("../../models/FileUpload");
+const UserBlock=require("../../models/UserBlock")
 
 /**
  * Get feed with filters + sorting + interaction flags
@@ -570,6 +572,25 @@ async function getFeedUser(req, res) {
       return res.status(401).json(isSessionValid);
     }
 
+    const viewerId = Number(isSessionValid.data); // logged-in user id
+    const botId = Number(value.id);
+
+    const blockRow = await UserBlock.findOne({
+      where: {
+        user_id: botId,       // bot being viewed
+        blocked_by: viewerId, // viewer (me)
+      },
+      attributes: ["id"],
+    });
+
+    if (blockRow) {
+      return res.status(403).json({
+        success: false,
+        message: "You have blocked this bot.",
+        data: null,
+      });
+    }
+
     const user = await User.findOne({
       where: {
         id: value.id,
@@ -577,7 +598,10 @@ async function getFeedUser(req, res) {
         is_active: true,
       },
       attributes: publicFeedUserAttributes,
-      raw: true,
+      include: {
+        model: FileUpload,
+        as: "media",
+      },
     });
 
     if (!user) {
