@@ -382,7 +382,7 @@ async function sendMessage(req, res) {
           receiver_id: receiverId,
           message: captionOrText || null,
           message_type: messageType,
-          reply_id: replyToMessageId || null,
+          reply_to_message_id: replyToMessageId || null,
           sender_type: "real",
           is_read: false,
           read_at: null,
@@ -555,7 +555,7 @@ async function sendMessage(req, res) {
             sender_id: receiverId,
             receiver_id: userId,
             message: botReplyText,
-            reply_id: createdMessage.id,
+            reply_to_message_id: createdMessage.id,
             message_type: "text",
             sender_type: "bot",
             is_read: false,
@@ -702,6 +702,8 @@ async function getChatMessages(req, res) {
         "participant_2_id",
         "unread_count_p1",
         "unread_count_p2",
+        "chat_status_p1",
+        "chat_status_p2",
       ],
     });
 
@@ -719,6 +721,8 @@ async function getChatMessages(req, res) {
         message: "You are not allowed to view this chat",
       });
     }
+     const myChatStatus = isP1 ? chat.chat_status_p1 : chat.chat_status_p2;
+    const is_blocked = myChatStatus === "blocked";
 
     // 4) Fetch messages (no transaction needed)
     // Use DESC for performance (newest first), then reverse for client if needed.
@@ -838,6 +842,8 @@ async function getChatMessages(req, res) {
         success: true,
         message: "Messages fetched successfully",
         data: {
+            is_blocked,
+          chat_status: myChatStatus,
           messages,
           pagination: {
             page,
