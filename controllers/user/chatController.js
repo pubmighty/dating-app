@@ -722,8 +722,6 @@ async function getChatMessages(req, res) {
       });
     }
      const myChatStatus = isP1 ? chat.chat_status_p1 : chat.chat_status_p2;
-    const is_blocked = myChatStatus === "blocked";
-
     // 4) Fetch messages (no transaction needed)
     // Use DESC for performance (newest first), then reverse for client if needed.
     const where = {
@@ -842,7 +840,6 @@ async function getChatMessages(req, res) {
         success: true,
         message: "Messages fetched successfully",
         data: {
-            is_blocked,
           chat_status: myChatStatus,
           messages,
           pagination: {
