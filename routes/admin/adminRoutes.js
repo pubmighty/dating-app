@@ -1557,8 +1557,10 @@ router.post(
  *   - moderator_note (optional)
  * - Does not allow cross-bot or invalid report manipulation.
  */
-
-//router.get("/bots/reports/show",botController.getBotReports)
+router.post(
+  "/bots/:botId/reports/:reportId",
+  botController.updateBotReport
+);
 
 
 
