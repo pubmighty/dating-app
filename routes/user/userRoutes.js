@@ -632,7 +632,7 @@ router.post("/ads/complete", adsController.completeAdView);
  * - Active call states are enforced server-side.
  */
 router.post(
-  "/chats/:chatId/video-calls/initiate/bot",
+  "/chats/video-calls/initiate/bot",
   videoCallConroller.initiateVideoCallByBot
 );
 
@@ -1000,7 +1000,7 @@ router.post(
 router.post(
   "/notifications/unsubscribe",notificationController.unsubscribeToNotification)
 
- /* POST /notifications/unsubscribe
+ /* POST /report/:userId
  * ------------------------------------------------------------
  * Report a bot
  * Creates a new report entry for each report (multiple reports allowed)

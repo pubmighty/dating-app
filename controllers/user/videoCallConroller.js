@@ -19,24 +19,7 @@ async function initiateVideoCallByBot(req, res) {
     const sessionResult = await isUserSessionValid(req);
     if (!sessionResult.success) return res.status(401).json(sessionResult);
 
-    const receiverId = Number(sessionResult.data);
-    if (!Number.isFinite(receiverId) || receiverId <= 0) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Invalid session." });
-    }
-
-    // 2) Validate params
-    const chatId = Number(req.params?.chatId);
-    if (!Number.isFinite(chatId) || chatId <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Valid chatId is required to start a bot call.",
-      });
-    }
-
-    // 3) Validate body
-    const schema = Joi.object({
+  const schema = Joi.object({
       callType: Joi.string().valid("video", "audio").default("video"),
     });
 
@@ -47,80 +30,69 @@ async function initiateVideoCallByBot(req, res) {
     });
 
     if (error) {
-      return res
-        .status(400)
-        .json({ success: false, message: error.details[0].message });
+      return res.status(400).json({ success: false, message: error.details[0].message });
     }
 
     const callType = value.callType;
 
-    // 4) Transaction
     const transaction = await sequelize.transaction({
       isolationLevel: Transaction.ISOLATION_LEVELS.READ_COMMITTED,
     });
 
     try {
-      /**
-       * 5) Fetch chat where:
-       * - receiver must be participant_2 (P2)
-       * - bot must be participant_1 (P1)
-       *
-       * This enforces your rule: "participant pid p1"
-       */
-      const chat = await Chat.findOne({
-        where: {
-          id: chatId,
-          participant_2_id: receiverId, // receiver is P2
-        },
+      // 1) Find ONE random eligible chat (bot is P1, user is P2)
+      //    Add your own rules inside WHERE as needed.
+      const whereChat = {
+        //only call active bots
+          chat_status_p1: "active",
+          chat_status_p2: "active",
+      };
+
+      if (value.botId) {
+        whereChat.participant_1_id = value.botId;
+      }
+
+      const randomChat = await Chat.findOne({
+        where: whereChat,
         attributes: ["id", "participant_1_id", "participant_2_id"],
+        include: [
+          {
+            model: User,
+            as: "participant1", // bot
+            attributes: ["id", "type", "username", "full_name", "country", "avatar"],
+            where: { type: "bot" },
+            required: true,
+          },
+          {
+            model: User,
+            as: "participant2", // real user
+            attributes: ["id", "type"],
+            where: { type: { [Op.ne]: "bot" } },
+            required: true,
+          },
+        ],
+        order: sequelize.random(), // MySQL/MariaDB => RAND()
         transaction,
         lock: transaction.LOCK.UPDATE,
       });
 
-      if (!chat) {
+      if (!randomChat) {
         await transaction.rollback();
         return res.status(404).json({
           success: false,
-          message: "Chat not found or you are not the receiver of this chat.",
+          message: "No eligible chat found for random bot call.",
         });
       }
 
-      const botCallerId = Number(chat.participant_1_id); // bot is P1
-      if (!Number.isFinite(botCallerId) || botCallerId <= 0) {
-        await transaction.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Invalid bot participant in this chat.",
-        });
-      }
+      const chatId = Number(randomChat.id);
+      const botCallerId = Number(randomChat.participant_1_id);
+      const receiverId = Number(randomChat.participant_2_id);
 
-      // confirm P1 is actually a bot user
-      const botUser = await User.findByPk(botCallerId, {
-        transaction,
-        attributes: [
-          "id",
-          "type",
-          "username",
-          "full_name",
-          "country",
-          "avatar",
-        ],
-      });
-      if (!botUser || !botUser.type === "bot") {
-        await transaction.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Invalid bot participant.",
-        });
-      }
-
-      // 6) Prevent multiple simultaneous active calls on this chat
+      // 2) Ensure no active call for this chat
       const activeExisting = await VideoCall.findOne({
         where: {
           chat_id: chatId,
-          status: {
-            [Op.in]: ["initiated", "ringing", "answered", "in_progress"],
-          },
+          status: { [Op.in]: ["initiated", "ringing", "answered", "in_progress"] },
         },
         attributes: ["id", "status", "caller_id", "receiver_id"],
         transaction,
@@ -142,17 +114,17 @@ async function initiateVideoCallByBot(req, res) {
         });
       }
 
-      // 7) Create call record (NO coin deduction for bot calls)
+      // 3) Create call
       const call = await VideoCall.create(
         {
-          chat_id: chat.id,
-          caller_id: botCallerId, // P1 (bot)
-          receiver_id: receiverId, // P2 (user)
+          chat_id: chatId,
+          caller_id: botCallerId,
+          receiver_id: receiverId,
           call_type: callType,
           status: "initiated",
-          coins_charged: 0, // explicitly 0 for bot-initiated
+          coins_charged: 0,
           duration: null,
-          started_at: startedAt,
+          started_at: Date.now(),
           ended_at: null,
         },
         { transaction }
@@ -160,9 +132,12 @@ async function initiateVideoCallByBot(req, res) {
 
       await transaction.commit();
 
+      // 4) Notify user (socket / FCM)
+      // await sendCallNotificationToUser(receiverId, { callId: call.id, chatId });
+
       return res.status(200).json({
         success: true,
-        message: "Bot call initiated",
+        message: "Random bot call initiated",
         data: {
           callId: call.id,
           chatId: call.chat_id,
@@ -171,23 +146,19 @@ async function initiateVideoCallByBot(req, res) {
           callType: call.call_type,
           status: call.status,
           coinsDeducted: 0,
-          botUser,
+          botUser: randomChat.participant1, // already loaded
         },
-        meta: {
-          ms: Date.now() - startedAt,
-        },
+        meta: { ms: Date.now() - startedAt },
       });
     } catch (err) {
-      try {
-        await transaction.rollback();
-      } catch (_) {}
+      try { await transaction.rollback(); } catch (_) {}
       throw err;
     }
   } catch (error) {
-    console.error("Error during initiateVideoCallByBot:", error);
+    console.error("Error during initiateRandomVideoCallByBot:", error);
     return res.status(500).json({
       success: false,
-      message: "Something went wrong while initiating bot call.",
+      message: "Something went wrong while initiating random bot call.",
     });
   }
 }
