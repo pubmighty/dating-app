@@ -1518,4 +1518,48 @@ router.post(
   botController.deleteBotVideo
 );
 
+/**
+ * POST /admin/bots/:botId/reports/:reportId
+ * ------------------------------------------------------------
+ * Updates the moderation status of a reported bot user.
+ *
+ * Purpose:
+ * - Allows admins to review user-submitted reports against bot users.
+ * - Enables moderators to take action such as marking a report as
+ *   completed, spam, rejected, or pending.
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have sufficient permission to moderate bot reports.
+ *
+ * Path Parameters:
+ * - botId: number (required)
+ *   The ID of the bot user that was reported.
+ *
+ * - reportId: number (required)
+ *   The ID of the report record to be moderated.
+ *
+ * Request Body (JSON):
+ * - status: string (required)
+ *   The moderation status to apply.
+ *   Allowed values:
+ *   - pending
+ *   - spam
+ *   - rejected
+ *   - completed
+ * Behavior:
+ * - Validates admin session and role permissions.
+ * - Validates route parameters and request body.
+ * - Ensures the target bot user exists and is of type "bot".
+ * - Ensures the report exists and belongs to the specified bot.
+ * - Updates the report status and moderation metadata:
+ *   - moderated_by (admin ID)
+ *   - moderated_at (timestamp)
+ *   - moderator_note (optional)
+ * - Does not allow cross-bot or invalid report manipulation.
+ */
+
+//router.get("/bots/reports/show",botController.getBotReports)
+
+
+
 module.exports = router;

@@ -11,7 +11,7 @@ const { sendBotMatchNotificationToUser, sendLikeNotificationToUser, sendRejectNo
 const UserBlock = require("../../models/UserBlock"); 
 const Chat = require("../../models/Chat");
 const UserReport=require("../../models/UserReport")
-
+const { getOption } = require("../../utils/helper"); 
 async function likeUser(req, res) {
   // 1) Validate input
   const schema = Joi.object({
@@ -867,21 +867,42 @@ async function reportUser(req, res) {
       });
     }
 
-    const report = await UserReport.create({
-      reported_user: reportedId,
-      reported_by: reporterId,
-      reason: value.reason,
-      moderated_by: null,
-      moderator_note: null,
+     const rawCooldown = await getOption("user_report_cooldown_seconds", "300");
+    let cooldownSeconds = Number(rawCooldown);
+    
+    if (cooldownSeconds > 0) {
+      const cutoffDate = new Date(Date.now() - cooldownSeconds * 1000);
+
+      const recentReport = await UserReport.findOne({
+        where: {
+          reported_user: reportedId,
+          reported_by: reporterId,
+          created_at: { [Op.gte]: cutoffDate },
+        },
+        attributes: ["id", "reported_user", "reported_by", "created_at"],
+        order: [["id", "DESC"]],
+      });
+
+      if (!recentReport) {
+          await UserReport.create({
+          reported_user: reportedId,
+          reported_by: reporterId,
+          reason: value.reason,
+          status: "pending",
+          moderated_by: null,
+          moderator_note: null,
+          moderated_at: null,
     });
 
+      }
+    }
+   
     return res.status(200).json({
       success: true,
       message: "Report submitted successfully.",
       data: {
-        report_id: report.id,
-        reported_user: report.reported_user,
-        reported_by: report.reported_by,
+        reported_user: reportedId,
+        reported_by: reporterId,
       },
     });
   } catch (err) {
@@ -893,8 +914,6 @@ async function reportUser(req, res) {
     });
   }
 }
-
-
 
 module.exports = {
   likeUser,

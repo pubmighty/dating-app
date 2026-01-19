@@ -24,12 +24,23 @@ const UserReport = sequelize.define(
          allowNull: false
          },
 
+    status: {
+          type: DataTypes.ENUM(
+            "pending",
+            "rejected",
+            "spam",
+            "completed"
+          ),
+          allowNull: false,
+          defaultValue: "pending",
+        },
+
     moderated_by: { 
         type: DataTypes.BIGINT.UNSIGNED,
          allowNull: true 
         },
     moderator_note: {
-        type: DataTypes.STRING(1000), 
+        type: DataTypes.STRING(500), 
         allowNull: true 
         },
 
@@ -45,6 +56,7 @@ const UserReport = sequelize.define(
     indexes: [
       { fields: ["reported_user"] },
       { fields: ["reported_by"] },
+      { fields: ["status"] }, 
     ],
   }
 );

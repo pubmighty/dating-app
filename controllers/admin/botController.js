@@ -23,6 +23,7 @@ const {
 } = require("../../utils/helpers/authHelper");
 const Admin = require("../../models/Admin/Admin");
 const { Op } = require("sequelize");
+const Report = require("../../models/UserReport")
 
 async function getBots(req, res) {
   try {
@@ -2076,6 +2077,181 @@ async function deleteBotVideo(req, res) {
   }
 }
 
+async function updateBotReport(req, res) {
+  try {
+    // Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid",
+        data: null,
+      });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+        data: null,
+      });
+    }
+
+    const canGo = await verifyAdminRole(admin, "updateBotReport");
+    if (!canGo) {
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
+    }
+
+    //  Validate params: botId + reportId
+    const paramsSchema = Joi.object({
+      botId: Joi.number().integer().positive().required().messages({
+        "number.base": "Invalid botId.",
+        "number.integer": "Invalid botId.",
+        "number.positive": "Invalid botId.",
+        "any.required": "botId is required.",
+      }),
+      reportId: Joi.number().integer().positive().required().messages({
+        "number.base": "Invalid reportId.",
+        "number.integer": "Invalid reportId.",
+        "number.positive": "Invalid reportId.",
+        "any.required": "reportId is required.",
+      }),
+    }).unknown(false);
+
+    const { error: pErr, value: pVal } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (pErr) {
+      return res.status(400).json({
+        success: false,
+        message: pErr.details[0].message,
+        data: null,
+      });
+    }
+
+    const botId = Number(pVal.botId);
+    const reportId = Number(pVal.reportId);
+
+    //  Validate body (from modal)
+    const bodySchema = Joi.object({
+      status: Joi.string()
+        .trim()
+        .valid("pending", "spam", "rejected", "completed")
+        .required()
+        .messages({
+          "any.only": "Invalid status.",
+          "any.required": "status is required.",
+        }),
+
+      moderator_note: Joi.string().trim().max(1000).allow("", null).default(null),
+
+      }).unknown(false);
+
+    const { error: bErr, value: botVal } = bodySchema.validate(req.body, {
+      abortEarly: true,
+      convert: true,
+      stripUnknown: true,
+    });
+
+    if (bErr) {
+      return res.status(400).json({
+        success: false,
+        message: bErr.details[0].message,
+        data: null,
+      });
+    }
+
+    //  Ensure bot exists
+    const bot = await User.findOne({
+      where: { id: botId, type: "bot" },
+      attributes: ["id", "username", "type", "is_deleted", "is_active"],
+      raw: true,
+    });
+
+    if (!bot) {
+      return res.status(404).json({
+        success: false,
+        message: "Bot user not found.",
+        data: null,
+      });
+    }
+
+    // Ensure report exists and belongs to that bot
+    const report = await Report.findOne({
+      where: { id: reportId, reported_user: botId },
+      attributes: [
+        "id",
+        "reported_user",
+        "reported_by",
+        "reason",
+        "status",
+        "moderated_by",
+        "moderator_note",
+        "moderated_at",
+        "created_at",
+      ],
+    });
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found for this bot.",
+        data: null,
+      });
+    }
+    // Update report moderation fields
+    await Report.update(
+      {
+        status: botVal.status,
+        moderated_by: adminId,
+        moderator_note: botVal.moderator_note,
+        moderated_at: new Date(),
+      },
+      { where: { id: reportId } }
+    );
+
+    //  Return updated report (fresh)
+    const updated = await Report.findOne({
+      where: { id: reportId },
+      attributes: [
+        "id",
+        "reported_user",
+        "reported_by",
+        "reason",
+        "status",
+        "moderated_by",
+        "moderator_note",
+        "moderated_at",
+        "created_at",
+      ],
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Report updated successfully.",
+      data: {
+        report: updated,
+      },
+    });
+  } catch (err) {
+    console.error("updateBotReport error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || "Something went wrong while updating report.",
+      data: null,
+    });
+  }
+}
+
 module.exports = {
   getBots,
   getBot,
@@ -2089,4 +2265,5 @@ module.exports = {
   uploadBotVideo,
   getBotVideos,
   deleteBotVideo,
+  updateBotReport
 };
