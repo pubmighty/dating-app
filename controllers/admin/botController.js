@@ -2252,6 +2252,262 @@ async function updateBotReport(req, res) {
   }
 }
 
+
+async function getReports(req, res) {
+  try {
+    // Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid",
+        data: null,
+      });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+        data: null,
+      });
+    }
+
+    const canGo = await verifyAdminRole(admin, "adminGetReports");
+    if (!canGo) {
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
+    }
+
+    // Validate query (filters + pagination)
+    const querySchema = Joi.object({
+      status: Joi.string().trim().valid("pending", "spam", "rejected", "completed").allow("", null),
+      reported_user: Joi.number().integer().positive(),
+      reported_by: Joi.number().integer().positive(),
+
+      page: Joi.number().integer().min(1).default(1),
+      perPage: Joi.number().integer().min(1).max(100).default(20),
+
+      orderBy: Joi.string().trim().valid("created_at", "moderated_at", "id").default("created_at"),
+      order: Joi.string().trim().valid("ASC", "DESC").default("DESC"),
+    }).unknown(false);
+
+    const { error: qErr, value: qVal } = querySchema.validate(req.query, {
+      abortEarly: true,
+      convert: true,
+      stripUnknown: true,
+    });
+
+    if (qErr) {
+      return res.status(400).json({
+        success: false,
+        message: qErr.details[0].message,
+        data: null,
+      });
+    }
+
+    const where = {};
+    if (qVal.status) where.status = qVal.status;
+    if (qVal.reported_user) where.reported_user = Number(qVal.reported_user);
+    if (qVal.reported_by) where.reported_by = Number(qVal.reported_by);
+
+    const page = Number(qVal.page);
+    const perPage = Number(qVal.perPage);
+    const offset = (page - 1) * perPage;
+
+    const { rows, count } = await Report.findAndCountAll({
+      where,
+      attributes: [
+        "id",
+        "reported_user",
+        "reported_by",
+        "reason",
+        "status",
+        "moderated_by",
+        "moderator_note",
+        "moderated_at",
+        "created_at",
+      ],
+      order: [[qVal.orderBy, qVal.order]],
+      limit: perPage,
+      offset,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Reports fetched successfully.",
+      data: {
+        reports: rows,
+        pagination: {
+          totalItems: count,
+          totalPages: Math.ceil(count / perPage),
+          currentPage: page,
+          perPage,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("adminGetReports error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || "Something went wrong while fetching reports.",
+      data: null,
+    });
+  }
+}
+
+async function getBotReports(req, res) {
+  try {
+    // Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid",
+        data: null,
+      });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+        data: null,
+      });
+    }
+
+    const canGo = await verifyAdminRole(admin, "adminGetUserReports");
+    if (!canGo) {
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
+    }
+
+    // Validate params
+    const paramsSchema = Joi.object({
+      botId: Joi.number().integer().positive().required().messages({
+        "number.base": "Invalid botId.",
+        "number.integer": "Invalid botId.",
+        "number.positive": "Invalid botId.",
+        "any.required": "botId is required.",
+      }),
+    }).unknown(false);
+
+    const { error: pErr, value: pVal } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (pErr) {
+      return res.status(400).json({
+        success: false,
+        message: pErr.details[0].message,
+        data: null,
+      });
+    }
+
+    const botId = Number(pVal.botId);
+
+    // Optional: validate query (status + pagination)
+    const querySchema = Joi.object({
+      status: Joi.string().trim().valid("pending", "spam", "rejected", "completed").allow("", null),
+
+      page: Joi.number().integer().min(1).default(1),
+      perPage: Joi.number().integer().min(1).max(100).default(20),
+
+      orderBy: Joi.string().trim().valid("created_at", "moderated_at", "id").default("created_at"),
+      order: Joi.string().trim().valid("ASC", "DESC").default("DESC"),
+    }).unknown(false);
+
+    const { error: qErr, value: qVal } = querySchema.validate(req.query, {
+      abortEarly: true,
+      convert: true,
+      stripUnknown: true,
+    });
+
+    if (qErr) {
+      return res.status(400).json({
+        success: false,
+        message: qErr.details[0].message,
+        data: null,
+      });
+    }
+
+    // Ensure user exists (same “ensure exists” style like bot check)
+    const user = await User.findOne({
+      where: { id: botId },
+      attributes: ["id", "username", "type", "is_deleted", "is_active"],
+      raw: true,
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+        data: null,
+      });
+    }
+
+    const where = { reported_user: botId };
+    if (qVal.status) where.status = qVal.status;
+
+    const page = Number(qVal.page);
+    const perPage = Number(qVal.perPage);
+    const offset = (page - 1) * perPage;
+
+    const { rows, count } = await Report.findAndCountAll({
+      where,
+      attributes: [
+        "id",
+        "reported_user",
+        "reported_by",
+        "reason",
+        "status",
+        "moderated_by",
+        "moderator_note",
+        "moderated_at",
+        "created_at",
+      ],
+      order: [[qVal.orderBy, qVal.order]],
+      limit: perPage,
+      offset,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "User reports fetched successfully.",
+      data: {
+        user,
+        reports: rows,
+        pagination: {
+          totalItems: count,
+          totalPages: Math.ceil(count / perPage),
+          currentPage: page,
+          perPage,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("adminGetUserReports error:", err);
+    return res.status(500).json({
+      success: false,
+      message: err?.message || "Something went wrong while fetching user reports.",
+      data: null,
+    });
+  }
+}
+
 module.exports = {
   getBots,
   getBot,
@@ -2265,5 +2521,7 @@ module.exports = {
   uploadBotVideo,
   getBotVideos,
   deleteBotVideo,
-  updateBotReport
+  updateBotReport,
+  getReports,
+  getBotReports
 };

@@ -538,6 +538,44 @@ router.post(
 );
 
 /**
+ * POST /users/:userId/media/:mediaId/delete
+ * ------------------------------------------------------------
+ * Deletes a single profile media item for a user.
+ *
+ * Purpose:
+ * - Allows admins to remove specific user media files.
+ * - Used for moderation, policy enforcement, or content cleanup.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to manage user media.
+ *
+ * Path Parameters:
+ * - userId: number (required)
+ *   The ID of the user who owns the media.
+ *
+ * - mediaId: number (required)
+ *   The ID of the media record to delete.
+ *
+ * Behavior:
+ * - Validates admin session and role permissions.
+ * - Validates user existence and account state.
+ * - Ensures the media record belongs to the specified user.
+ * - Deletes the media file from storage.
+ * - Removes the media record from the database.
+ * - Logs admin activity for auditing.
+ *
+ * Notes:
+ * - This is a single-item delete operation.
+ * - No other user media is affected.
+ * - Operation fails if media does not belong to the user.
+ */
+router.post(
+  "/users/:userId/media/:mediaId/delete",
+  userController.deleteUserMedia
+);
+
+/**
  * GET /bots/:userId/media
  * ------------------------------------------------------------
  * Fetches the list of profile media files for a specific bot user.
@@ -594,7 +632,79 @@ router.get(
   botController.getBotMedia
 );
 
-router.post("/bots/:botId/media/:mediaId", botController.deleteBotMedia);
+/**
+ * POST /users/:userId/media
+ * ------------------------------------------------------------
+ * Replaces all profile media for a user.
+ *
+ * Purpose:
+ * - Allows admins to manage and replace user profile media.
+ * - Used for moderation, verification, or profile correction.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to manage user media.
+ *
+ * Path Parameters:
+ * - userId: number (required)
+ *
+ * Multipart Form Data:
+ * - media[]: array of files (required)
+ *
+ * Behavior:
+ * - Validates user existence and account state.
+ * - Replaces all existing profile media with new uploads.
+ * - Enforces maximum allowed file count.
+ * - Validates file types before upload.
+ * - Deletes existing media from storage and database.
+ * - Uploads new media and stores metadata records.
+ * - Logs admin activity for auditing and traceability.
+ *
+ * Notes:
+ * - This is a replace-all operation, not incremental.
+ * - Partial uploads are rolled back on failure where possible.
+ * - Storage cleanup is attempted on errors.
+ */
+router.post(
+  "/users/:userId/media",
+  fileUploader.array("media", 10),
+  userController.uploadUserMedia
+);
+
+/**
+ * POST /bots/:botId/media/:mediaId/delete
+ * ------------------------------------------------------------
+ * Deletes a single profile media item for a user.
+ *
+ * Purpose:
+ * - Allows admins to remove specific user media files.
+ * - Used for moderation, policy enforcement, or content cleanup.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to manage user media.
+ *
+ * Path Parameters:
+ * - userId: number (required)
+ *   The ID of the user who owns the media.
+ *
+ * - mediaId: number (required)
+ *   The ID of the media record to delete.
+ *
+ * Behavior:
+ * - Validates admin session and role permissions.
+ * - Validates user existence and account state.
+ * - Ensures the media record belongs to the specified user.
+ * - Deletes the media file from storage.
+ * - Removes the media record from the database.
+ * - Logs admin activity for auditing.
+ *
+ * Notes:
+ * - This is a single-item delete operation.
+ * - No other user media is affected.
+ * - Operation fails if media does not belong to the user.
+ */
+router.post("/bots/:botId/media/:mediaId/delete", botController.deleteBotMedia);
 
 /**
  * POST /users/:userId/delete
@@ -1562,6 +1672,94 @@ router.post(
   botController.updateBotReport
 );
 
+/**
+ * GET /reports
+ * ------------------------------------------------------------
+ * Retrieves a paginated list of all user reports.
+ *
+ * Purpose:
+ * - Allows admins to review all reports submitted by users.
+ * - Used for moderation queues, audits, and abuse monitoring.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to view reports.
+ *
+ * Query Parameters (optional):
+ * - status: string
+ *   Filter reports by moderation status.
+ *   Allowed values:
+ *   - pending
+ *   - spam
+ *   - rejected
+ *   - completed
+ *
+ * - reported_user: number
+ *   Filter reports by the reported user ID.
+ *
+ * - reported_by: number
+ *   Filter reports by the reporting user ID.
+ *
+ * - page: number (default: 1)
+ * - perPage: number (default: 20)
+ *
+ * Behavior:
+ * - Validates admin session and permissions.
+ * - Applies optional filters and pagination.
+ * - Returns reports ordered by creation or moderation time.
+ *
+ * Notes:
+ * - Intended for admin dashboards and moderation tools.
+ * - Does not modify any report data.
+ */
+router.get(
+  "/reports",
+  botController.getReports
+);
+
+/**
+ * GET /bots/:botId/reports
+ * ------------------------------------------------------------
+ * Retrieves all reports associated with a specific bot user.
+ *
+ * Purpose:
+ * - Allows admins to review reports submitted against a bot.
+ * - Used for bot moderation, abuse analysis, and enforcement.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to view bot reports.
+ *
+ * Path Parameters:
+ * - botId: number (required)
+ *   The ID of the bot user whose reports are being retrieved.
+ *
+ * Query Parameters (optional):
+ * - status: string
+ *   Filter reports by moderation status.
+ *   Allowed values:
+ *   - pending
+ *   - spam
+ *   - rejected
+ *   - completed
+ *
+ * - page: number (default: 1)
+ * - perPage: number (default: 20)
+ *
+ * Behavior:
+ * - Validates admin session and role permissions.
+ * - Ensures the target user exists and is of type "bot".
+ * - Retrieves reports where the bot is the reported user.
+ * - Applies optional filters and pagination.
+ *
+ * Notes:
+ * - Only returns reports linked to the specified bot.
+ * - Useful for bot-specific moderation workflows.
+ */
+router.get(
+  "/bots/:botId/reports",
+  botController.getBotReports
+);
 
 
 module.exports = router;

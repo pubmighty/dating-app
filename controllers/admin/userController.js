@@ -1435,6 +1435,146 @@ async function uploadUserMedia(req, res) {
   }
 }
 
+async function deleteUserMedia(req, res) {
+  try {
+    // 1) Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid",
+        data: null,
+      });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+        data: null,
+      });
+    }
+
+    const canGo = await verifyAdminRole(admin, "deleteUserMedia");
+    if (!canGo) {
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
+    }
+
+    // 2) Validate params
+    const paramsSchema = Joi.object({
+      userId: Joi.number().integer().positive().required().messages({
+        "number.base": "Invalid userId.",
+        "number.integer": "Invalid userId.",
+        "number.positive": "Invalid userId.",
+        "any.required": "userId is required.",
+      }),
+      mediaId: Joi.number().integer().positive().required().messages({
+        "number.base": "Invalid mediaId.",
+        "number.integer": "Invalid mediaId.",
+        "number.positive": "Invalid mediaId.",
+        "any.required": "mediaId is required.",
+      }),
+    }).unknown(false);
+
+    const { error, value } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+        data: null,
+      });
+    }
+
+    const userId = Number(value.userId);
+    const mediaId = Number(value.mediaId);
+
+    // 3) Ensure target user exists (real user like your uploadUserMedia)
+    const targetUser = await User.findOne({
+      where: { id: userId },
+      attributes: ["id", "username", "type", "is_deleted", "is_active"],
+      raw: true,
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Real user not found.",
+        data: null,
+      });
+    }
+
+    const media = await FileUpload.findOne({
+      where: { id: mediaId, user_id: userId },
+      attributes: ["id", "user_id", "name", "folders"],
+      raw: true,
+    });
+
+    if (!media) {
+      return res.status(404).json({
+        success: false,
+        message: "Media record not found.",
+        data: null,
+      });
+    }
+      //To delete the file we are using the function deleteFile 
+    const ok = await deleteFile(media.name, media.folders, media.id, "normal");
+
+    if (!ok) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to delete media file or record.",
+        data: null,
+      });
+    }
+
+    // 5) Activity log (same style as uploadUserMedia)
+    try {
+      await logActivity(req, {
+        userId: adminId,
+        action: "admin deleted real user profile media",
+        entityType: "user_media",
+        entityId: userId,
+        metadata: {
+          userId,
+          username: targetUser.username,
+          mediaId: media.id,
+          name: media.name,
+        },
+      });
+    } catch (_) {}
+
+    return res.status(200).json({
+      success: true,
+      message: "User media deleted successfully.",
+      data: {
+        id: media.id,
+        user_id: media.user_id,
+        name: media.name,
+        folders: media.folders,
+      },
+    });
+  } catch (err) {
+    console.error("deleteUserMedia error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while deleting user media.",
+      data: null,
+    });
+  }
+}
+
+
+
 module.exports = {
   getUsers,
   getUser,
@@ -1443,4 +1583,5 @@ module.exports = {
   deleteUser,
   restoreUser,
   uploadUserMedia,
+  deleteUserMedia
 };
