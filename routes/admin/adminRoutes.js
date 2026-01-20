@@ -538,6 +538,51 @@ router.post(
 );
 
 /**
+ * GET /users/:userId/media
+ * ------------------------------------------------------------
+ * Retrieves all profile media (images and videos) for a user.
+ *
+ * Purpose:
+ * - Allows admins to view user profile media.
+ * - Used for moderation, verification, and profile review.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to view user media.
+ *
+ * Path Parameters:
+ * - userId: number (required)
+ *   The ID of the user whose media is being retrieved.
+ *
+ * Behavior:
+ * - Validates admin session and role permissions.
+ * - Ensures the target user exists and is not deleted.
+ * - Fetches all image and video media belonging to the user.
+ * - Returns media ordered by most recent first.
+ * - Formats media with a unified media path and media type.
+ *
+ * Response Data:
+ * - id: media ID
+ * - user_id: owner user ID
+ * - name: stored file name
+ * - file_type: file extension/type
+ * - mime_type: MIME type
+ * - size: file size in bytes
+ * - created_at: upload timestamp
+ * - media_path: public path to access media
+ * - media_type: image | video
+ *
+ * Notes:
+ * - Only image and video files are returned.
+ * - Documents and other file types are excluded.
+ * - This is a read-only operation.
+ */
+router.get(
+  "/users/:userId/media",
+  userController.getUserMedia
+);
+
+/**
  * POST /users/:userId/media/:mediaId/delete
  * ------------------------------------------------------------
  * Deletes a single profile media item for a user.

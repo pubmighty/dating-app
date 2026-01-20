@@ -1193,6 +1193,131 @@ async function restoreUser(req, res) {
   }
 }
 
+async function getUserMedia(req, res) {
+  try {
+    // 1) Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid",
+        data: null,
+      });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+        data: null,
+      });
+    }
+
+    const canGo = await verifyAdminRole(admin, "getUserMedia");
+    if (!canGo) {
+      return res.status(403).json({
+        success: false,
+        message: "Insufficient permissions",
+        data: null,
+      });
+    }
+
+    // 2) userId param
+    const paramsSchema = Joi.object({
+      userId: Joi.number().integer().positive().required().messages({
+        "number.base": "Invalid userId.",
+        "number.integer": "Invalid userId.",
+        "number.positive": "Invalid userId.",
+        "any.required": "userId is required.",
+      }),
+    }).unknown(false);
+
+    const { error, value } = paramsSchema.validate(req.params, {
+      abortEarly: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details[0].message,
+        data: null,
+      });
+    }
+
+    const userId = Number(value.userId);
+
+    // 3) Ensure user exists (same style as uploadUserMedia)
+    const user = await User.findOne({
+      where: { id: userId },
+      attributes: ["id", "username", "type", "is_deleted", "is_active"],
+      raw: true,
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Real user not found.",
+        data: null,
+      });
+    }
+
+    if (Number(user.is_deleted) === 1) {
+      return res.status(409).json({
+        success: false,
+        message: "User account is deleted.",
+        data: null,
+      });
+    }
+
+    const media = await FileUpload.findAll({
+  where: {
+    user_id: userId,
+    [Op.or]: [
+      { mime_type: { [Op.like]: "image/%" } },
+      { mime_type: { [Op.like]: "video/%" } },
+    ],
+  },
+      order: [["created_at", "DESC"]],
+      raw: true,
+    });
+   const formatted = media.map((m) => ({
+          id: m.id,
+          user_id: m.user_id,
+          name: m.name,
+          file_type: m.file_type,
+          mime_type: m.mime_type,
+          size: m.size,
+          created_at: m.created_at,
+          media_path: `/${m.folders}/${m.name}`,
+          media_type: m.mime_type?.startsWith("video/")
+            ? "video"
+            : m.mime_type?.startsWith("image/")
+            ? "image"
+            : "other",
+        }));
+
+    return res.status(200).json({
+      success: true,
+      message: "User media fetched successfully.",
+      data: {
+        user_id: userId,
+        total: formatted.length,
+        images: formatted,
+      },
+    });
+  } catch (err) {
+    console.error("getUserMedia error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while fetching media.",
+      data: null,
+    });
+  }
+}
+
 async function uploadUserMedia(req, res) {
   let incomingFiles = [];
 
@@ -1583,5 +1708,6 @@ module.exports = {
   deleteUser,
   restoreUser,
   uploadUserMedia,
-  deleteUserMedia
+  getUserMedia,
+  deleteUserMedia,
 };
