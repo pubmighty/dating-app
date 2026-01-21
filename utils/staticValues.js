@@ -116,6 +116,30 @@ const publicAdminAttributes = [
   "created_at",
   "updated_at",
 ];
+const ADMIN_USER_FIELDS = [
+  "id",
+  "username",
+  "email",
+  "phone",
+  "type",
+  "gender",
+  "dob",
+  "avatar",
+  "education",
+  "interests",
+  "coins",
+  "total_likes",
+  "total_matches",
+  "total_rejects",
+  "total_spent",
+  "is_active",
+  "is_verified",
+  "status",
+  "country",
+  "city",
+  "last_active",
+  "created_at",
+];
 
 module.exports = {
   publicFeedUserAttributes,
@@ -129,4 +153,5 @@ module.exports = {
   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON,
   noReplyMail,
   publicAdminAttributes,
+  ADMIN_USER_FIELDS
 };

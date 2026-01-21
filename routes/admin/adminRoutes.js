@@ -1478,7 +1478,7 @@ router.post(
  * - No push notifications are sent.
  */
 
-router.post(
+router.get(
   "/notifications/filter",
   adminNotificationController.adminPreviewFiltered
 );

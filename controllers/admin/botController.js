@@ -2316,6 +2316,7 @@ async function getReports(req, res) {
     if (qVal.status) where.status = qVal.status;
     if (qVal.reported_user) where.reported_user = Number(qVal.reported_user);
     if (qVal.reported_by) where.reported_by = Number(qVal.reported_by);
+    if (qVal.moderated_by) where.moderated_by = Number(qVal.moderated_by);
 
     const page = Number(qVal.page);
     const perPage = Number(qVal.perPage);

@@ -4,13 +4,18 @@ const { getAdmin } = require("../../config/firebaseAdmin");
 const User = require("../../models/User");
 const { Op } = require("sequelize");
 const sequelize = require("../../config/db");
-
+const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
+// change name/path if your purchase model is different:
+const CoinPurchaseTransaction = require("../../models/CoinPurchaseTransaction");
 function toStringData(data) {
   const out = {};
   if (!data || typeof data !== "object") return out;
   for (const key of Object.keys(data)) out[String(key)] = String(data[key]);
   return out;
 }
+const { getDaysWindow } = require("../../utils/helper");
+const {ADMIN_USER_FIELDS} =require("../staticValues")
+
 
 function buildMulticastPayload(tokens, title, content, image, data) {
   // Ensure image is a valid string URL only
@@ -24,13 +29,12 @@ function buildMulticastPayload(tokens, title, content, image, data) {
     notification: {
       title: String(title || ""),
       body: String(content || ""),
-      ...(safeImage ? { image: safeImage } : {}), 
+      ...(safeImage ? { image: safeImage } : {}),
     },
     data: toStringData(data), // must already return strings
     android: { priority: "high" },
   };
 }
-
 
 function normalizeFilters(filters = {}) {
   const out = { ...(filters || {}) };
@@ -106,10 +110,8 @@ function buildUserWhere(filters) {
   }
 
   // age filters -> dob range
-  const ageMin =
-    f.age_min !== undefined ? clampInt(f.age_min, 13, 100) : null;
-  const ageMax =
-    f.age_max !== undefined ? clampInt(f.age_max, 13, 100) : null;
+  const ageMin = f.age_min !== undefined ? clampInt(f.age_min, 13, 100) : null;
+  const ageMax = f.age_max !== undefined ? clampInt(f.age_max, 13, 100) : null;
 
   if (ageMin || ageMax) {
     const dobCond = {};
@@ -133,7 +135,7 @@ async function createAndSend(
   title,
   content,
   image = null,
-  data = {}
+  data = {},
 ) {
   if (!receiverId) throw new Error("receiverId is required");
   if (!type) throw new Error("type is required");
@@ -148,7 +150,7 @@ async function createAndSend(
     content,
     is_read: false,
   });
-  
+
   let push = { attempted: 0, success: 0, failed: 0 };
 
   try {
@@ -173,17 +175,11 @@ async function createAndSend(
     }
 
     const admin = getAdmin();
-    const payload = buildMulticastPayload(
-      tokens,
-      title,
-      content,
-       image,
-       {
-       notificationId: String(notification.id),
-        type: String(type),
-        ...data,
-      },
-    );
+    const payload = buildMulticastPayload(tokens, title, content, image, {
+      notificationId: String(notification.id),
+      type: String(type),
+      ...data,
+    });
 
     const fcmRes = await admin.messaging().sendEachForMulticast(payload);
 
@@ -212,7 +208,7 @@ async function createAndSendGlobal(
   type,
   title,
   content,
-  data = {}
+  data = {},
 ) {
   if (!type) throw new Error("type is required");
   if (!title) throw new Error("title is required");
@@ -242,7 +238,7 @@ async function createAndSendGlobal(
   }
 
   const receiverIds = Array.from(userIds).filter(
-    (x) => Number.isInteger(x) && x > 0
+    (x) => Number.isInteger(x) && x > 0,
   );
   const tokens = Array.from(tokensSet);
 
@@ -270,7 +266,10 @@ async function createAndSendGlobal(
     for (let i = 0; i < tokens.length; i += 500) {
       const chunk = tokens.slice(i, i + 500);
 
-      const payload = buildMulticastPayload(chunk,title,content,{ type, ...data },);
+      const payload = buildMulticastPayload(chunk, title, content, {
+        type,
+        ...data,
+      });
 
       const res = await admin.messaging().sendEachForMulticast(payload);
 
@@ -317,7 +316,7 @@ async function sendBotMatchNotificationToUser(userId, botId, chatId = null) {
       target_type: "bot",
       target_name: botName,
       target_avatar_path: avatarUrl,
-    }
+    },
   );
   return result;
 }
@@ -328,7 +327,7 @@ async function sendChatNotification(
   chatId,
   messageId,
   messageText = "",
-  messageType = "text"
+  messageType = "text",
 ) {
   if (!senderId || !receiverId || !chatId || !messageId) {
     throw new Error("senderId, receiverId, chatId, messageId are required");
@@ -364,12 +363,13 @@ async function sendChatNotification(
       senderName: String(senderName),
       senderAvatarUrl: String(avatarUrl),
       messageType: String(messageType),
-    }
+    },
   );
 }
 
 async function sendLikeNotificationToUser(senderId, receiverId) {
-  if (!senderId || !receiverId) throw new Error("senderId and receiverId are required");
+  if (!senderId || !receiverId)
+    throw new Error("senderId and receiverId are required");
 
   const sender = await User.findByPk(senderId, {
     attributes: ["id", "username", "full_name", "avatar", "type"],
@@ -385,9 +385,9 @@ async function sendLikeNotificationToUser(senderId, receiverId) {
   const avatarUrl = "https://i.imgur.com/CEnilHo.jpeg";
 
   const result = await createAndSend(
-    senderId,                     // sender (who liked)
-    receiverId,                   // receiver (who gets notification)
-    "like",                       // type
+    senderId, // sender (who liked)
+    receiverId, // receiver (who gets notification)
+    "like", // type
     "❤️ New Like!",
     `${senderName} liked you 👍`,
     avatarUrl,
@@ -396,14 +396,15 @@ async function sendLikeNotificationToUser(senderId, receiverId) {
       sender_id: senderId,
       sender_name: senderName,
       sender_avatar_path: avatarUrl,
-    }
+    },
   );
 
   return result;
 }
 
-async function sendRejectNotificationToUser( senderId, receiverId) {
-  if (!senderId || !receiverId) throw new Error("senderId and receiverId are required");
+async function sendRejectNotificationToUser(senderId, receiverId) {
+  if (!senderId || !receiverId)
+    throw new Error("senderId and receiverId are required");
 
   const sender = await User.findByPk(senderId, {
     attributes: ["id", "username", "full_name", "avatar", "type"],
@@ -429,36 +430,145 @@ async function sendRejectNotificationToUser( senderId, receiverId) {
       sender_id: senderId,
       sender_name: senderName,
       sender_avatar_path: avatarUrl,
-    }
+    },
   );
 
   return result;
 }
-
 
 /**
  * NEW: Preview how many users match filters (no sending)
  */
 async function previewFilteredUsers(filters) {
   const safeFilters = filters || {};
-  const { where, filters: normalized } = buildUserWhere(safeFilters);
-  const matched_users = await User.count({ where });
+  const { where: baseWhere, filters: normalized } = buildUserWhere(safeFilters);
+
+  const days = Number(safeFilters.days || 0);
+
+  // normalize balance threshold (prefer gte)
+  const balanceGteRaw =
+    safeFilters.require_balance_gte !== null &&
+    safeFilters.require_balance_gte !== undefined
+      ? safeFilters.require_balance_gte
+      : safeFilters.require_balance_gt;
+
+  const requireBalanceGte = Number.parseInt(balanceGteRaw, 10) || 0;
+
+  if (!Number.isInteger(days) || days <= 0) {
+    const users = await User.findAll({
+      where: baseWhere,
+      attributes: ADMIN_USER_FIELDS,
+      order: [["id", "DESC"]],
+      raw: true,
+    });
+
+    return {
+      matched_users: users.length,
+      users,
+      filters: {
+        ...normalized,
+        days,
+        require_balance_gte: requireBalanceGte,
+        require_balance_gt: requireBalanceGte, // backward compatible
+      },
+    };
+  }
+
+  const requireRecentPurchase = safeFilters.require_recent_purchase === true;
+
+  const { from, to } = getDaysWindow(days);
+
+  // 1) users who spent in window
+  const spentRows = await CoinSpentTransaction.findAll({
+    attributes: ["user_id"],
+    where: {
+      status: "completed",
+      date: { [Op.between]: [from, to] },
+    },
+    group: ["user_id"],
+    raw: true,
+  });
+
+  const spentUserIds = spentRows.map((r) => Number(r.user_id));
+  const finalWhere = { ...baseWhere };
+
+  // apply GTE on User.coins
+  if (requireBalanceGte > 0) {
+    finalWhere.coins = { [Op.gte]: requireBalanceGte };
+  }
+
+  // 2) optionally require recent purchase and no spend
+  if (requireRecentPurchase) {
+    const purchaseRows = await CoinPurchaseTransaction.findAll({
+      attributes: ["user_id"],
+      where: {
+        payment_status: "completed",
+        created_at: { [Op.between]: [from, to] },
+      },
+      group: ["user_id"],
+      raw: true,
+    });
+
+    const purchasedUserIds = purchaseRows.map((r) => Number(r.user_id));
+    const spentSet = new Set(spentUserIds);
+
+    const allowedUserIds = purchasedUserIds.filter((id) => !spentSet.has(id));
+
+    if (!allowedUserIds.length) {
+      return {
+        matched_users: 0,
+        users: [],
+        filters: {
+          ...normalized,
+          days,
+          require_recent_purchase: true,
+          require_balance_gte: requireBalanceGte,
+          require_balance_gt: requireBalanceGte, // backward compatible
+          window_from: from,
+          window_to: to,
+        },
+      };
+    }
+
+    finalWhere.id = { [Op.in]: allowedUserIds };
+  } else {
+    // 3) not-spent only
+    if (spentUserIds.length) {
+      finalWhere.id = { [Op.notIn]: spentUserIds };
+    }
+  }
+
+  const users = await User.findAll({
+    where: finalWhere,
+    attributes: ADMIN_USER_FIELDS,
+    order: [["id", "DESC"]],
+    raw: true,
+  });
 
   return {
-    matched_users,
-    filters: normalized,
+    matched_users: users.length,
+    users,
+    filters: {
+      ...normalized,
+      days,
+      require_recent_purchase: requireRecentPurchase,
+      require_balance_gte: requireBalanceGte,
+      require_balance_gt: requireBalanceGte, // backward compatible
+      window_from: from,
+      window_to: to,
+    },
   };
 }
 
 async function createAndSendFiltered(
-  senderId = null, // admin => null
+  senderId = null,
   type,
   title,
   content,
   image = null,
   data = {},
   filters = {},
-  max_users = 100000 // safety limit
+  max_users = 100000
 ) {
   if (!type) throw new Error("type is required");
   if (!title) throw new Error("title is required");
@@ -466,39 +576,153 @@ async function createAndSendFiltered(
 
   const maxUsers = clampInt(max_users, 1, 500000) || 100000;
 
-  const { where, filters: normalizedFilters } = buildUserWhere(filters);
+  const safeFilters = filters || {};
+  const { where: baseWhere, filters: normalizedFilters } =
+    buildUserWhere(safeFilters);
 
-  // 1) find matched users (IDs)
+  const days = Number.parseInt(safeFilters.days, 10) || 0;
+  const requireRecentPurchase = safeFilters.require_recent_purchase === true;
+
+  const balanceRaw =
+    safeFilters.require_balance_gte ??
+    safeFilters.require_balance_gt ??
+    0;
+
+  const requireBalanceGte = Number.parseInt(balanceRaw, 10) || 0;
+
+  if (!Number.isInteger(days) || days <= 0) {
+    const users = await User.findAll({
+      where: baseWhere,
+      attributes: ["id"],
+      order: [["id", "DESC"]],
+      limit: maxUsers,
+      raw: true,
+    });
+
+    const userIds = users.map(u => Number(u.id)).filter(Boolean);
+
+    if (!userIds.length) {
+      return {
+        matched_users: 0,
+        saved: 0,
+        push: { attempted: 0, success: 0, failed: 0 },
+        filters: normalizedFilters,
+      };
+    }
+
+    return await _savePushInline(
+      senderId,
+      userIds,
+      type,
+      title,
+      content,
+      image,
+      data,
+      normalizedFilters
+    );
+  }
+
+  const { from, to } = getDaysWindow(days);
+
+  // 1) users who spent coins in window
+  const spentRows = await CoinSpentTransaction.findAll({
+    attributes: ["user_id"],
+    where: {
+      status: "completed",
+      date: { [Op.between]: [from, to] },
+    },
+    group: ["user_id"],
+    raw: true,
+  });
+
+  const spentUserIds = spentRows.map(r => Number(r.user_id));
+  const finalWhere = { ...baseWhere };
+
+  //  COINS >= threshold (THIS WAS BROKEN BEFORE)
+  if (requireBalanceGte > 0) {
+    finalWhere.coins = { [Op.gte]: requireBalanceGte };
+  }
+
+  if (requireRecentPurchase) {
+    // purchased in window AND not spent
+    const purchaseRows = await CoinPurchaseTransaction.findAll({
+      attributes: ["user_id"],
+      where: {
+        payment_status: "completed",
+        created_at: { [Op.between]: [from, to] },
+      },
+      group: ["user_id"],
+      raw: true,
+    });
+
+    const purchasedUserIds = purchaseRows.map(r => Number(r.user_id));
+    const spentSet = new Set(spentUserIds);
+
+    const allowedUserIds = purchasedUserIds.filter(
+      id => !spentSet.has(id)
+    );
+
+    if (!allowedUserIds.length) {
+      return {
+        matched_users: 0,
+        saved: 0,
+        push: { attempted: 0, success: 0, failed: 0 },
+        filters: {
+          ...normalizedFilters,
+          days,
+          require_recent_purchase: true,
+          require_balance_gte: requireBalanceGte,
+          window_from: from,
+          window_to: to,
+        },
+      };
+    }
+
+    finalWhere.id = { [Op.in]: allowedUserIds };
+  } else {
+    // only NOT SPENT
+    if (spentUserIds.length) {
+      finalWhere.id = { [Op.notIn]: spentUserIds };
+    }
+  }
+
+  // 2) FINAL TARGET USERS
   const users = await User.findAll({
-    where,
+    where: finalWhere,
     attributes: ["id"],
     order: [["id", "DESC"]],
     limit: maxUsers,
+    raw: true,
   });
 
-  const userIds = users
-    .map((u) => Number(u.id))
-    .filter((x) => Number.isInteger(x) && x > 0);
+  const userIds = users.map(u => Number(u.id)).filter(Boolean);
 
   if (!userIds.length) {
     return {
       matched_users: 0,
       saved: 0,
       push: { attempted: 0, success: 0, failed: 0 },
-      filters: normalizedFilters,
+      filters: {
+        ...normalizedFilters,
+        days,
+        require_recent_purchase: requireRecentPurchase,
+        require_balance_gte: requireBalanceGte,
+        window_from: from,
+        window_to: to,
+      },
     };
   }
 
-  // 2) Save notifications in DB (bulk + chunked in transaction)
   let saved = 0;
   const t = await sequelize.transaction();
+
   try {
-    const bulkChunkSize = 5000;
+    const chunkSize = 5000;
 
-    for (let i = 0; i < userIds.length; i += bulkChunkSize) {
-      const chunkIds = userIds.slice(i, i + bulkChunkSize);
+    for (let i = 0; i < userIds.length; i += chunkSize) {
+      const chunk = userIds.slice(i, i + chunkSize);
 
-      const bulk = chunkIds.map((uid) => ({
+      const bulk = chunk.map(uid => ({
         sender_id: senderId,
         receiver_id: uid,
         type,
@@ -508,7 +732,7 @@ async function createAndSendFiltered(
       }));
 
       const created = await Notification.bulkCreate(bulk, { transaction: t });
-      saved += created?.length || 0;
+      saved += created.length;
     }
 
     await t.commit();
@@ -517,16 +741,16 @@ async function createAndSendFiltered(
     throw e;
   }
 
-  // 3) Collect tokens for matched users (chunked IN)
+  // collect tokens
   const tokensSet = new Set();
-  const inChunkSize = 10000;
 
-  for (let i = 0; i < userIds.length; i += inChunkSize) {
-    const chunkIds = userIds.slice(i, i + inChunkSize);
+  for (let i = 0; i < userIds.length; i += 10000) {
+    const chunk = userIds.slice(i, i + 10000);
 
     const rows = await NotificationToken.findAll({
-      where: { user_id: { [Op.in]: chunkIds }, is_active: true },
+      where: { user_id: { [Op.in]: chunk }, is_active: true },
       attributes: ["token"],
+      raw: true,
     });
 
     for (const r of rows) {
@@ -536,24 +760,19 @@ async function createAndSendFiltered(
 
   const tokens = Array.from(tokensSet);
 
-  // 4) Push (500 tokens per multicast)
   let push = { attempted: 0, success: 0, failed: 0 };
 
   try {
-    if (!tokens.length) {
-      push = { attempted: 0, success: 0, failed: 0 };
-    } else {
+    if (tokens.length) {
       const admin = getAdmin();
 
       for (let i = 0; i < tokens.length; i += 500) {
         const chunk = tokens.slice(i, i + 500);
 
-        const payload = buildMulticastPayload(chunk,title,content,image,
-          {
-            type: String(type),
-            ...toStringData(data),
-          },
-        );
+        const payload = buildMulticastPayload(chunk, title, content, image, {
+          type: String(type),
+          ...toStringData(data),
+        });
 
         const res = await admin.messaging().sendEachForMulticast(payload);
 
@@ -563,32 +782,33 @@ async function createAndSendFiltered(
       }
     }
   } catch (err) {
-    push = {
-      attempted: push.attempted || 0,
-      success: push.success || 0,
-      failed: push.failed || 0,
-      error: err.message || String(err),
-    };
+    push.error = err.message || String(err);
   }
 
   return {
     matched_users: userIds.length,
     saved,
     push,
-    filters: normalizedFilters,
+    filters: {
+      ...normalizedFilters,
+      days,
+      require_recent_purchase: requireRecentPurchase,
+      require_balance_gte: requireBalanceGte,
+      window_from: from,
+      window_to: to,
+    },
   };
 }
 
 
 
-
-module.exports = { 
+module.exports = {
   createAndSend,
   createAndSendGlobal,
-  createAndSendFiltered,    
+  createAndSendFiltered,
   previewFilteredUsers,
   sendBotMatchNotificationToUser,
   sendChatNotification,
   sendLikeNotificationToUser,
-  sendRejectNotificationToUser
- };
+  sendRejectNotificationToUser,
+};

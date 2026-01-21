@@ -374,6 +374,17 @@ function generateServerDeviceId() {
   return crypto.randomUUID(); // RFC 4122 compliant UUID v4
 }
 
+function getDaysWindow(days) {
+  const d = toInt(days, 0); // use your existing toInt helper
+  const safeDays = clampInt(d, 1, 3650); // use your clampInt helper
+
+  const to = new Date();
+  const from = new Date(to.getTime() - safeDays * 24 * 60 * 60 * 1000);
+
+  return { from, to, days: safeDays };
+}
+
+
 module.exports = {
   getRealIp,
   getOption,
@@ -403,5 +414,6 @@ module.exports = {
   toMoney,
   parseBool,
   escapeLike,
-  generateServerDeviceId
+  generateServerDeviceId,
+  getDaysWindow
 };
