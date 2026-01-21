@@ -15,18 +15,24 @@ function toStringData(data) {
   return out;
 }
 
-function buildMulticastPayload( tokens, title, content, image, data ) {
-  return {
+function buildMulticastPayload(tokens, title, content, image, data) {
+  const payload = {
     tokens,
     notification: {
       title: title || "",
       body: content || "",
-        image: image || undefined,
     },
-    data: toStringData(data), // must already return strings
-    android: { priority: "normal" },
+    data: toStringData(data),
+    android: { priority: "high" },
   };
+
+  if (typeof image === "string" && image.trim().length > 0) {
+    payload.notification.image = image.trim();
+  }
+
+  return payload;
 }
+
 
 
 function normalizeFilters(filters = {}) {
