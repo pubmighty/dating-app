@@ -7,34 +7,27 @@ const sequelize = require("../../config/db");
 const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
 // change name/path if your purchase model is different:
 const CoinPurchaseTransaction = require("../../models/CoinPurchaseTransaction");
+const{getDaysWindow} =require("../helper")
 function toStringData(data) {
   const out = {};
   if (!data || typeof data !== "object") return out;
   for (const key of Object.keys(data)) out[String(key)] = String(data[key]);
   return out;
 }
-const { getDaysWindow } = require("../../utils/helper");
-const {ADMIN_USER_FIELDS} =require("../staticValues")
 
-
-function buildMulticastPayload(tokens, title, content, image, data) {
-  // Ensure image is a valid string URL only
-  const safeImage =
-    typeof image === "string" && image.trim().length > 0
-      ? image.trim()
-      : undefined;
-
+function buildMulticastPayload( tokens, title, content, image, data ) {
   return {
     tokens,
     notification: {
-      title: String(title || ""),
-      body: String(content || ""),
-      ...(safeImage ? { image: safeImage } : {}),
+      title: title || "",
+      body: content || "",
+        image: image || undefined,
     },
     data: toStringData(data), // must already return strings
-    android: { priority: "high" },
+    android: { priority: "normal" },
   };
 }
+
 
 function normalizeFilters(filters = {}) {
   const out = { ...(filters || {}) };
@@ -110,8 +103,10 @@ function buildUserWhere(filters) {
   }
 
   // age filters -> dob range
-  const ageMin = f.age_min !== undefined ? clampInt(f.age_min, 13, 100) : null;
-  const ageMax = f.age_max !== undefined ? clampInt(f.age_max, 13, 100) : null;
+  const ageMin =
+    f.age_min !== undefined ? clampInt(f.age_min, 13, 100) : null;
+  const ageMax =
+    f.age_max !== undefined ? clampInt(f.age_max, 13, 100) : null;
 
   if (ageMin || ageMax) {
     const dobCond = {};
@@ -135,7 +130,7 @@ async function createAndSend(
   title,
   content,
   image = null,
-  data = {},
+  data = {}
 ) {
   if (!receiverId) throw new Error("receiverId is required");
   if (!type) throw new Error("type is required");
@@ -150,7 +145,7 @@ async function createAndSend(
     content,
     is_read: false,
   });
-
+  
   let push = { attempted: 0, success: 0, failed: 0 };
 
   try {
@@ -175,11 +170,17 @@ async function createAndSend(
     }
 
     const admin = getAdmin();
-    const payload = buildMulticastPayload(tokens, title, content, image, {
-      notificationId: String(notification.id),
-      type: String(type),
-      ...data,
-    });
+    const payload = buildMulticastPayload(
+      tokens,
+      title,
+      content,
+       image,
+       {
+       notificationId: String(notification.id),
+        type: String(type),
+        ...data,
+      },
+    );
 
     const fcmRes = await admin.messaging().sendEachForMulticast(payload);
 
@@ -208,7 +209,7 @@ async function createAndSendGlobal(
   type,
   title,
   content,
-  data = {},
+  data = {}
 ) {
   if (!type) throw new Error("type is required");
   if (!title) throw new Error("title is required");
@@ -238,7 +239,7 @@ async function createAndSendGlobal(
   }
 
   const receiverIds = Array.from(userIds).filter(
-    (x) => Number.isInteger(x) && x > 0,
+    (x) => Number.isInteger(x) && x > 0
   );
   const tokens = Array.from(tokensSet);
 
@@ -258,36 +259,39 @@ async function createAndSendGlobal(
   }
 
   //  Send push to all tokens (chunk 500)
-  let push = { attempted: 0, success: 0, failed: 0 };
+  // Send push to all tokens (chunk 500)
+let push = { attempted: 0, success: 0, failed: 0, errors: [] };
 
-  try {
-    const admin = getAdmin();
+try {
+  const admin = getAdmin();
 
-    for (let i = 0; i < tokens.length; i += 500) {
-      const chunk = tokens.slice(i, i + 500);
+  for (let i = 0; i < tokens.length; i += 500) {
+    const chunk = tokens.slice(i, i + 500);
 
-      const payload = buildMulticastPayload(chunk, title, content, {
-        type,
-        ...data,
-      });
+    const payload = buildMulticastPayload(chunk, title, content, { type, ...data });
 
-      const res = await admin.messaging().sendEachForMulticast(payload);
+    const res = await admin.messaging().sendEachForMulticast(payload);
 
-      push.attempted += chunk.length;
-      push.success += res.successCount || 0;
-      push.failed += res.failureCount || 0;
-    }
-  } catch (err) {
-    push = {
-      success: 0,
-      failed: 0,
-      error: err.message || String(err),
-    };
+    push.attempted += chunk.length;
+    push.success += res.successCount || 0;
+    push.failed += res.failureCount || 0;
+
+    (res.responses || []).forEach((r, idx) => {
+      if (!r.success) {
+        push.errors.push({
+          token: chunk[idx],
+          code: r.error?.code || null,
+          message: r.error?.message || null,
+        });
+      }
+    });
   }
+} catch (err) {
+  push.err = err.message || String(err);
+}
 
-  return {
-    push,
-  };
+return { push };
+
 }
 
 async function sendBotMatchNotificationToUser(userId, botId, chatId = null) {
