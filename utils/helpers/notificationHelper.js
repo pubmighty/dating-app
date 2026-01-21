@@ -12,15 +12,21 @@ function toStringData(data) {
   return out;
 }
 
-function buildMulticastPayload( tokens, title, content, image, data ) {
+function buildMulticastPayload(tokens, title, content, image, data) {
+  // Ensure image is a valid string URL only
+  const safeImage =
+    typeof image === "string" && image.trim().length > 0
+      ? image.trim()
+      : undefined;
+
   return {
     tokens,
     notification: {
-      title: title || "",
-      body: content || "",
-        image: image || undefined,
+      title: String(title || ""),
+      body: String(content || ""),
+      ...(safeImage ? { image: safeImage } : {}), 
     },
-    data: toStringData(data),
+    data: toStringData(data), // must already return strings
     android: { priority: "high" },
   };
 }

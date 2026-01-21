@@ -2290,7 +2290,7 @@ async function getReports(req, res) {
       status: Joi.string().trim().valid("pending", "spam", "rejected", "completed").allow("", null),
       reported_user: Joi.number().integer().positive(),
       reported_by: Joi.number().integer().positive(),
-
+      moderated_by:Joi.number().integer().positive(),
       page: Joi.number().integer().min(1).default(1),
       perPage: Joi.number().integer().min(1).max(100).default(20),
 
