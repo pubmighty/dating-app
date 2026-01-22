@@ -5,9 +5,10 @@ const User = require("../../models/User");
 const { Op } = require("sequelize");
 const sequelize = require("../../config/db");
 const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
-// change name/path if your purchase model is different:
 const CoinPurchaseTransaction = require("../../models/CoinPurchaseTransaction");
+const Admin=require("../../models/Admin/Admin")
 const{getDaysWindow} =require("../helper")
+const {ADMIN_USER_FIELDS}=require("../staticValues")
 function toStringData(data) {
   const out = {};
   if (!data || typeof data !== "object") return out;
@@ -126,6 +127,46 @@ function buildUserWhere(filters) {
   return { where, filters: f };
 }
 
+const _adminSenderCache = new Map();
+
+async function _isAdminSender(senderId) {
+  const id = Number(senderId);
+  if (!Number.isInteger(id) || id <= 0) return false;
+
+  if (_adminSenderCache.has(id)) return _adminSenderCache.get(id);
+
+  const row = await Admin.findByPk(id, { attributes: ["id"] });
+  const isAdmin = !!row;
+
+  _adminSenderCache.set(id, isAdmin);
+  return isAdmin;
+}
+
+async function savePushInline(
+  senderId,
+  userIds,
+  type,
+  title,
+  content,
+  image,
+  data,
+  normalizedFilters,
+  opts = {}
+) {
+  const isAdmin =
+    typeof opts.is_admin === "boolean" ? opts.is_admin : await _isAdminSender(senderId);
+  const bulk = userIds.map((uid) => ({
+    sender_id: senderId,
+    receiver_id: uid,
+    is_admin: isAdmin ? 1 : 0,
+    type,
+    title,
+    content,
+    is_read: false,
+  }));
+}
+
+
 /**
  * Create DB notification + send push to ALL active tokens of receiver
  */
@@ -136,22 +177,27 @@ async function createAndSend(
   title,
   content,
   image = null,
-  data = {}
+  data = {},
+  opts = {} 
 ) {
   if (!receiverId) throw new Error("receiverId is required");
   if (!type) throw new Error("type is required");
   if (!title) throw new Error("title is required");
   if (!content) throw new Error("content is required");
 
+  const isAdmin =
+    typeof opts.is_admin === "boolean" ? opts.is_admin : await _isAdminSender(senderId);
+
   const notification = await Notification.create({
     sender_id: senderId,
     receiver_id: receiverId,
+    is_admin: isAdmin ? 1 : 0, 
     type,
     title,
     content,
     is_read: false,
   });
-  
+
   let push = { attempted: 0, success: 0, failed: 0 };
 
   try {
@@ -176,17 +222,11 @@ async function createAndSend(
     }
 
     const admin = getAdmin();
-    const payload = buildMulticastPayload(
-      tokens,
-      title,
-      content,
-       image,
-       {
-       notificationId: String(notification.id),
-        type: String(type),
-        ...data,
-      },
-    );
+    const payload = buildMulticastPayload(tokens, title, content, image, {
+      notificationId: String(notification.id),
+      type: String(type),
+      ...data,
+    });
 
     const fcmRes = await admin.messaging().sendEachForMulticast(payload);
 
@@ -215,11 +255,15 @@ async function createAndSendGlobal(
   type,
   title,
   content,
-  data = {}
+  data = {},
+  opts = {} 
 ) {
   if (!type) throw new Error("type is required");
   if (!title) throw new Error("title is required");
   if (!content) throw new Error("content is required");
+
+  const isAdmin =
+    typeof opts.is_admin === "boolean" ? opts.is_admin : await _isAdminSender(senderId);
 
   // Get all active tokens (and their user_id)
   const rows = await NotificationToken.findAll({
@@ -244,60 +288,62 @@ async function createAndSendGlobal(
     if (r.token) tokensSet.add(r.token);
   }
 
-  const receiverIds = Array.from(userIds).filter(
-    (x) => Number.isInteger(x) && x > 0
-  );
+  const receiverIds = Array.from(userIds).filter((x) => Number.isInteger(x) && x > 0);
   const tokens = Array.from(tokensSet);
 
   // Save notifications in DB for all users (bulk insert)
-  // NOTE: If you have millions of users, do this in chunks too.
+  let saved = 0;
+
   if (receiverIds.length) {
     const bulk = receiverIds.map((uid) => ({
       sender_id: senderId,
       receiver_id: uid,
+      is_admin: isAdmin ? 1 : 0, 
       type,
       title,
       content,
       is_read: false,
     }));
 
-    await Notification.bulkCreate(bulk);
+    const created = await Notification.bulkCreate(bulk);
+    saved = created.length || 0;
   }
 
-  //  Send push to all tokens (chunk 500)
   // Send push to all tokens (chunk 500)
-let push = { attempted: 0, success: 0, failed: 0, errors: [] };
+  let push = { attempted: 0, success: 0, failed: 0, errors: [] };
 
-try {
-  const admin = getAdmin();
+  try {
+    const admin = getAdmin();
 
-  for (let i = 0; i < tokens.length; i += 500) {
-    const chunk = tokens.slice(i, i + 500);
+    for (let i = 0; i < tokens.length; i += 500) {
+      const chunk = tokens.slice(i, i + 500);
 
-    const payload = buildMulticastPayload(chunk, title, content, { type, ...data });
+      const payload = buildMulticastPayload(chunk, title, content, null, {
+        type: String(type),
+        ...toStringData(data),
+      });
 
-    const res = await admin.messaging().sendEachForMulticast(payload);
+      const res = await admin.messaging().sendEachForMulticast(payload);
 
-    push.attempted += chunk.length;
-    push.success += res.successCount || 0;
-    push.failed += res.failureCount || 0;
+      push.attempted += chunk.length;
+      push.success += res.successCount || 0;
+      push.failed += res.failureCount || 0;
 
-    (res.responses || []).forEach((r, idx) => {
-      if (!r.success) {
-        push.errors.push({
-          token: chunk[idx],
-          code: r.error?.code || null,
-          message: r.error?.message || null,
-        });
-      }
-    });
+      (res.responses || []).forEach((r, idx) => {
+        if (!r.success) {
+          push.errors.push({
+            token: chunk[idx],
+            code: r.error?.code || null,
+            message: r.error?.message || null,
+          });
+        }
+      });
+    }
+  } catch (err) {
+    push.err = err.message || String(err);
   }
-} catch (err) {
-  push.err = err.message || String(err);
-}
 
-return { push };
-
+  return { saved, push };
 }
 
 async function sendBotMatchNotificationToUser(userId, botId, chatId = null) {
@@ -578,26 +624,25 @@ async function createAndSendFiltered(
   image = null,
   data = {},
   filters = {},
-  max_users = 100000
+  max_users = 100000,
+  opts = {} 
 ) {
   if (!type) throw new Error("type is required");
   if (!title) throw new Error("title is required");
   if (!content) throw new Error("content is required");
 
+  const isAdmin =
+    typeof opts.is_admin === "boolean" ? opts.is_admin : await _isAdminSender(senderId);
+
   const maxUsers = clampInt(max_users, 1, 500000) || 100000;
 
   const safeFilters = filters || {};
-  const { where: baseWhere, filters: normalizedFilters } =
-    buildUserWhere(safeFilters);
+  const { where: baseWhere, filters: normalizedFilters } = buildUserWhere(safeFilters);
 
   const days = Number.parseInt(safeFilters.days, 10) || 0;
   const requireRecentPurchase = safeFilters.require_recent_purchase === true;
 
-  const balanceRaw =
-    safeFilters.require_balance_gte ??
-    safeFilters.require_balance_gt ??
-    0;
-
+  const balanceRaw = safeFilters.require_balance_gte ?? safeFilters.require_balance_gt ?? 0;
   const requireBalanceGte = Number.parseInt(balanceRaw, 10) || 0;
 
   if (!Number.isInteger(days) || days <= 0) {
@@ -609,7 +654,7 @@ async function createAndSendFiltered(
       raw: true,
     });
 
-    const userIds = users.map(u => Number(u.id)).filter(Boolean);
+    const userIds = users.map((u) => Number(u.id)).filter(Boolean);
 
     if (!userIds.length) {
       return {
@@ -620,7 +665,7 @@ async function createAndSendFiltered(
       };
     }
 
-    return await _savePushInline(
+    return await savePushInline(
       senderId,
       userIds,
       type,
@@ -628,7 +673,8 @@ async function createAndSendFiltered(
       content,
       image,
       data,
-      normalizedFilters
+      normalizedFilters,
+      { is_admin: isAdmin } 
     );
   }
 
@@ -645,16 +691,15 @@ async function createAndSendFiltered(
     raw: true,
   });
 
-  const spentUserIds = spentRows.map(r => Number(r.user_id));
+  const spentUserIds = spentRows.map((r) => Number(r.user_id));
   const finalWhere = { ...baseWhere };
 
-  //  COINS >= threshold (THIS WAS BROKEN BEFORE)
+  // COINS >= threshold
   if (requireBalanceGte > 0) {
     finalWhere.coins = { [Op.gte]: requireBalanceGte };
   }
 
   if (requireRecentPurchase) {
-    // purchased in window AND not spent
     const purchaseRows = await CoinPurchaseTransaction.findAll({
       attributes: ["user_id"],
       where: {
@@ -665,12 +710,10 @@ async function createAndSendFiltered(
       raw: true,
     });
 
-    const purchasedUserIds = purchaseRows.map(r => Number(r.user_id));
+    const purchasedUserIds = purchaseRows.map((r) => Number(r.user_id));
     const spentSet = new Set(spentUserIds);
 
-    const allowedUserIds = purchasedUserIds.filter(
-      id => !spentSet.has(id)
-    );
+    const allowedUserIds = purchasedUserIds.filter((id) => !spentSet.has(id));
 
     if (!allowedUserIds.length) {
       return {
@@ -690,7 +733,6 @@ async function createAndSendFiltered(
 
     finalWhere.id = { [Op.in]: allowedUserIds };
   } else {
-    // only NOT SPENT
     if (spentUserIds.length) {
       finalWhere.id = { [Op.notIn]: spentUserIds };
     }
@@ -705,7 +747,7 @@ async function createAndSendFiltered(
     raw: true,
   });
 
-  const userIds = users.map(u => Number(u.id)).filter(Boolean);
+  const userIds = users.map((u) => Number(u.id)).filter(Boolean);
 
   if (!userIds.length) {
     return {
@@ -732,9 +774,10 @@ async function createAndSendFiltered(
     for (let i = 0; i < userIds.length; i += chunkSize) {
       const chunk = userIds.slice(i, i + chunkSize);
 
-      const bulk = chunk.map(uid => ({
+      const bulk = chunk.map((uid) => ({
         sender_id: senderId,
         receiver_id: uid,
+        is_admin: isAdmin ? 1 : 0, 
         type,
         title,
         content,

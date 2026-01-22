@@ -20,6 +20,12 @@ const Notification = sequelize.define(
       allowNull: false,
     },
 
+    is_admin: {
+      type: DataTypes.BOOLEAN, // stored as tinyint(1) in MySQL
+      allowNull: false,
+      defaultValue: false,
+    },
+
     type: {
       type: DataTypes.STRING(50),
       allowNull: false,
@@ -49,6 +55,10 @@ const Notification = sequelize.define(
       {
         name: "idx_receiver_id_is_read_created_at",
         fields: ["receiver_id", "is_read", "created_at"],
+      },
+      {
+        name: "idx_is_admin_created_at",
+        fields: ["is_admin", "created_at"],
       },
     ],
   }

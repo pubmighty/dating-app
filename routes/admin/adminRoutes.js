@@ -1516,6 +1516,43 @@ router.post(
 );
 
 /**
+ * GET /notifications/sent
+ * ------------------------------------------------------------
+ * Fetches notifications that were sent by admins (admin-sent only).
+ *
+ * Purpose:
+ * - Lets admin panel list / audit previously sent notifications.
+ * - Useful for history, review, troubleshooting delivery, and reporting.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to send notifications (same permission used for sending).
+ *
+ * Query Params (optional):
+ * - page: number (default: 1)
+ * - limit: number (default: 50, max: 200)
+ * - receiver_id: number (filter by a specific user)
+ * - sender_id: number (filter by a specific admin sender)
+ * - type: string (filter by notification type)
+ * - q: string (search in title/content)
+ * - from: ISO date (filter by created_at >= from)   [if implemented]
+ * - to: ISO date (filter by created_at <= to)       [if implemented]
+ *
+ * Behavior:
+ * - Returns only notifications where `is_admin = 1`.
+ * - Results are ordered by newest first (id DESC).
+ * - Returns pagination metadata (totalItems, totalPages, currentPage, perPage).
+ *
+ * Notes:
+ * - This endpoint is for admin-side history; it does NOT return user-to-user notifications.
+ * - Ensure `pb_notifications.is_admin` column exists and is correctly filled during send flows.
+ */
+router.get(
+  "/notifications/sent",
+  adminNotificationController.getSentNotifications
+);
+
+/**
  * POST /bots/:botId/upload-video
  * ------------------------------------------------------------
  * Uploads one or more call/intro videos for a specific bot user.

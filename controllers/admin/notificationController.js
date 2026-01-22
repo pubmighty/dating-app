@@ -15,7 +15,7 @@ const {
   previewFilteredUsers,
   createAndSendFiltered,
 } = require("../../utils/helpers/notificationHelper");
-
+const Notification=require("../../models/Notification")
 
 async function adminSendToUser(req, res) {
   try {
@@ -174,21 +174,6 @@ async function adminSendGlobal(req, res) {
       });
   }
 }
-
-async function getSpentUserIds(from, to) {
-  const rows = await CoinSpentTransaction.findAll({
-    attributes: ["user_id"],
-    where: {
-      status: "completed",
-      date: { [Op.between]: [from, to] }, 
-    },
-    group: ["user_id"],
-    raw: true,
-  });
-
-  return rows.map((r) => Number(r.user_id));
-}
-
 
 async function adminPreviewFiltered(req, res) {
   try {
@@ -363,12 +348,10 @@ async function adminSendFiltered(req, res) {
     const payload = bodyCheck.value;
     const filters = queryCheck.value;
 
-    // ✅ HARDEN: force clean ints (prevents weird huge numbers)
     filters.days = Number.parseInt(filters.days, 10) || 1;
     filters.require_balance_gt =
       Number.parseInt(filters.require_balance_gt, 10) || 0;
 
-    // ✅ optional: normalize empty strings to null (avoid "all users" confusion)
     if (!filters.type) filters.type = null;
     if (!filters.gender) filters.gender = null;
     if (!filters.country) filters.country = null;
@@ -406,9 +389,119 @@ async function adminSendFiltered(req, res) {
   }
 }
 
+async function getSentNotifications(req, res) {
+  try {
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin session invalid", data: null });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin not found", data: null });
+    }
+
+    const canGo = await verifyAdminRole(admin, "sendNotifications");
+    if (!canGo) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Permission denied", data: null });
+    }
+
+    const schema = Joi.object({
+      page: Joi.number().integer().min(1).max(100000).default(1),
+      limit: Joi.number().integer().min(1).max(200).default(50),
+
+      // optional filters
+      receiver_id: Joi.number().integer().positive().allow(null),
+      sender_id: Joi.number().integer().positive().allow(null),
+      type: Joi.string().trim().max(50).allow("", null),
+      q: Joi.string().trim().max(200).allow("", null),
+    });
+
+    const { error, value } = schema.validate(req.query, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message,
+        data: null,
+      });
+    }
+
+    const page = value.page;
+    const limit = value.limit;
+    const offset = (page - 1) * limit;
+
+    const where = { is_admin: 1 };
+
+    if (value.receiver_id) where.receiver_id = value.receiver_id;
+    if (value.sender_id) where.sender_id = value.sender_id;
+    if (value.type) where.type = value.type;
+
+    if (value.q) {
+      where[Op.or] = [
+        { title: { [Op.like]: `%${value.q}%` } },
+        { content: { [Op.like]: `%${value.q}%` } },
+      ];
+    }
+
+    const { rows, count } = await Notification.findAndCountAll({
+      where,
+      attributes: [
+        "id",
+        "sender_id",
+        "receiver_id",
+        "is_admin",
+        "type",
+        "title",
+        "content",
+        "is_read",
+        "created_at",
+      ],
+      order: [["id", "DESC"]],
+      limit,
+      offset,
+      raw: true,
+    });
+
+    return res.json({
+      success: true,
+      message: "Admin sent notifications fetched",
+      data: {
+        notifications: rows,
+        pagination: {
+          totalItems: count,
+          totalPages: Math.ceil(count / limit),
+          currentPage: page,
+          perPage: limit,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("adminGetAdminSentNotifications error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch admin notifications",
+      data: null,
+    });
+  }
+}
+
+
 module.exports = {
   adminSendToUser,
   adminSendGlobal,
   adminPreviewFiltered,
   adminSendFiltered,
+  getSentNotifications
 };
