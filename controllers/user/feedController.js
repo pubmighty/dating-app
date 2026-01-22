@@ -4,11 +4,11 @@ const User = require("../../models/User");
 const UserSetting = require("../../models/UserSetting");
 const { Op, literal } = require("sequelize");
 const { isUserSessionValid } = require("../../utils/helpers/authHelper");
-const { getOption, maskEmail, maskPhone } = require("../../utils/helper");
+const { getOption, maskEmail, maskPhone,CHAT_TABLE } = require("../../utils/helper");
 const { publicFeedUserAttributes } = require("../../utils/staticValues");
 const FileUpload = require("../../models/FileUpload");
 const UserBlock=require("../../models/UserBlock")
-
+const Chat=require("../../models/Chat")
 /**
  * Get feed with filters + sorting + interaction flags
  * Works for both guest and logged-in users
@@ -290,11 +290,41 @@ async function getRandomFeed(req, res) {
               [literal("1"), "canLike"],
             ],
           };
+          
+const chatTableRaw = Chat.getTableName ? Chat.getTableName() : "pb_chats";
+const CHAT_TABLE =
+typeof chatTableRaw === "string" ? chatTableRaw : chatTableRaw.tableName;
+
+    const chatIdAttribute =
+      isLoggedIn && userId
+        ? [
+            literal(`(
+              SELECT c.id
+              FROM \`${CHAT_TABLE}\` c
+              WHERE
+                (
+                  (c.participant_1_id = ${sequelize.escape(
+                    userId
+                  )} AND c.participant_2_id = \`User\`.\`id\`)
+                  OR
+                  (c.participant_2_id = ${sequelize.escape(
+                    userId
+                  )} AND c.participant_1_id = \`User\`.\`id\`)
+                )
+              LIMIT 1
+            )`),
+            "chat_id",
+          ]
+        : [literal("NULL"), "chat_id"];
 
     const result = await User.findAndCountAll({
       where,
-      attributes: [...publicFeedUserAttributes, ...interactionAttributes.include],
-      order: sequelize.random(), // random rows
+      attributes: [
+        ...publicFeedUserAttributes,
+        ...interactionAttributes.include,
+        chatIdAttribute,
+      ],
+      order: sequelize.random(),
       limit: perPage,
       offset,
     });
@@ -308,13 +338,8 @@ async function getRandomFeed(req, res) {
     const sanitizedRows = rows.map((user) => {
       const data = user.toJSON ? user.toJSON() : { ...user };
 
-      if (data.email) {
-        data.email = maskEmail(data.email);
-      }
-
-      if (data.phone) {
-        data.phone = maskPhone(data.phone);
-      }
+      if (data.email) data.email = maskEmail(data.email);
+      if (data.phone) data.phone = maskPhone(data.phone);
 
       return data;
     });
