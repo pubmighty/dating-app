@@ -41,11 +41,90 @@ const Notification = sequelize.define(
       allowNull: false,
     },
 
+     landing_url: {
+      type: DataTypes.STRING(800),
+      allowNull: true,
+      comment: "Deep link or web URL",
+    },
+
+    image_url: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+      comment: "Notification image",
+    },
+
     is_read: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false,
     },
+
+      status: {
+      type: DataTypes.ENUM(
+        "draft",
+        "scheduled",
+        "queued",
+        "sending",
+        "sent",
+        "failed",
+        "canceled"
+      ),
+      allowNull: false,
+      defaultValue: "draft",
+    },
+
+    scheduled_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+    sent_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
+     priority: {
+      type: DataTypes.ENUM("normal", "high"),
+      allowNull: false,
+      defaultValue: "normal",
+      comment: "FCM priority",
+    },
+
+      total_targeted: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
+
+    total_sent: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
+
+    total_delivered: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
+
+    total_clicked: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
+
+    total_failed: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
+
+      last_error: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+    },
+
   },
   {
     tableName: "pb_notifications",
@@ -60,6 +139,14 @@ const Notification = sequelize.define(
         name: "idx_is_admin_created_at",
         fields: ["is_admin", "created_at"],
       },
+      //  {
+      //   name: "idx_status_scheduled_at",
+      //   fields: ["status", "scheduled_at"],
+      // },
+      //  {
+      //   name: "idx_sent_at",
+      //   fields: ["sent_at"],
+      // },
     ],
   }
 );

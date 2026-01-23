@@ -2040,7 +2040,7 @@ async function deleteBotVideo(req, res) {
       video.name,
       video.folders,
       null,
-      "chat"
+      "video"
     );
 
     // 6) Delete DB row from CallFile

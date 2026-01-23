@@ -236,6 +236,7 @@ async function initiateVideoCall(req, res) {
     // 3) Validate body
     const schema = Joi.object({
       callType: Joi.string().valid("video", "audio").default("video"),
+      folder: Joi.string().trim().max(300).optional(),
     });
 
     const { error, value } = schema.validate(req.body || {}, {
@@ -258,14 +259,8 @@ async function initiateVideoCall(req, res) {
     if (!Number.isFinite(perMinuteCost) || perMinuteCost <= 0)
       perMinuteCost = 25;
 
-    const rawMinBalance = await getOption(
-      "video_call_minimum_start_balance",
-      perMinuteCost
-    );
-    let minimumStartBalance = Number.parseInt(
-      String(rawMinBalance ?? perMinuteCost),
-      10
-    );
+    const rawMinBalance = await getOption("video_call_minimum_start_balance", perMinuteCost);
+    let minimumStartBalance = Number.parseInt(String(rawMinBalance ?? perMinuteCost), 10);
     if (!Number.isFinite(minimumStartBalance) || minimumStartBalance <= 0) {
       minimumStartBalance = perMinuteCost;
     }
@@ -278,15 +273,12 @@ async function initiateVideoCall(req, res) {
     });
 
     try {
-      // 6) Fetch chat ONLY if caller is participant (single DB query)
+      // Chat lock
       const chat = await Chat.findOne({
-        where: {
-          id: chatId,
-          participant_2_id: callerId,
-        },
+        where: { id: chatId, participant_2_id: callerId },
         attributes: ["id", "participant_1_id", "participant_2_id"],
         transaction,
-        lock: transaction.LOCK.UPDATE, // prevents racey parallel initiations on same chat row (optional but helpful)
+        lock: transaction.LOCK.UPDATE,
       });
 
       if (!chat) {
@@ -330,7 +322,50 @@ async function initiateVideoCall(req, res) {
         });
       }
 
-      // 8) Lock & validate caller balance with row lock
+      const receiver = await User.findByPk(receiverId, {
+        attributes: ["id", "type"],
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (!receiver) {
+        await transaction.rollback();
+        return res.status(404).json({ success: false, message: "Receiver not found." });
+      }
+
+      let pickedVideo = null;
+
+      if (receiver.type === "bot") {
+        const callFileWhere = { user_id: receiverId, status: 1 };
+
+        // If you store multiple folders and want to restrict:
+        if (value.folder) callFileWhere.folders = value.folder;
+
+        //  Just check existence first (fast)
+        const hasAnyVideo = await CallFile.count({
+          where: callFileWhere,
+          transaction,
+        });
+
+        if (!hasAnyVideo) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: "This bot has no active call video, so call cannot be started.",
+          });
+        }
+
+        //  Pick one deterministically
+        // simplest: latest uploaded
+        pickedVideo = await CallFile.findOne({
+          where: callFileWhere,
+          order: [["id", "DESC"]],
+          transaction,
+          lock: transaction.LOCK.SHARE,
+        });
+      }
+
+      // Lock caller balance
       const caller = await User.findByPk(callerId, {
         transaction,
         lock: transaction.LOCK.UPDATE,
@@ -401,14 +436,6 @@ async function initiateVideoCall(req, res) {
         { transaction }
       );
 
-      const video = await CallFile.findOne({
-        where: {
-          user_id: call.receiver_id,
-          status: 1,
-        },
-        order: sequelize.literal("RAND()"),
-      });
-
       await transaction.commit();
 
       return res.status(200).json({
@@ -421,12 +448,11 @@ async function initiateVideoCall(req, res) {
           receiverId: call.receiver_id,
           callType: call.call_type,
           status: call.status,
-
           costPerMinute: perMinuteCost,
           minimumStartBalance,
           coinsDeducted: initialCharge,
           coinsBalance: newCoinBalance,
-          video,
+          video: pickedVideo, // may be null for non-bot receivers
         },
         meta: {
           ms: Date.now() - startedAt,
