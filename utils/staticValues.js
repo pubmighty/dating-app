@@ -140,6 +140,10 @@ const ADMIN_USER_FIELDS = [
   "last_active",
   "created_at",
 ];
+const USER_TYPE = ["new", "existing", "all"];
+const USER_TIME = ["morning", "afternoon", "evening", "night", "all"];
+const BOT_GENDER = ["male", "female", "any"];
+const STATUS = ["active", "inactive"];
 
 module.exports = {
   publicFeedUserAttributes,
@@ -153,5 +157,9 @@ module.exports = {
   GOOGLE_PLAY_SERVICE_ACCOUNT_JSON,
   noReplyMail,
   publicAdminAttributes,
-  ADMIN_USER_FIELDS
+  ADMIN_USER_FIELDS,
+  USER_TYPE,
+  USER_TIME,
+  BOT_GENDER,
+  STATUS,
 };

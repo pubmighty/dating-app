@@ -74,7 +74,7 @@ async function run() {
     await set("admin_forgot_password_captcha_enabled", "false");
 
     await set("default_per_page_notifications", 10);
-
+    await set("base_url","!add domain") //add the domian tp show avatar
     console.log("Options inserted/verified");
     process.exit(0);
   } catch (e) {

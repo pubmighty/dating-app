@@ -199,7 +199,7 @@ async function adminPreviewFiltered(req, res) {
         .json({ success: false, message: "Permission denied", data: null });
     }
 
-    // ✅ GET: take filters from query params
+    //  GET: take filters from query params
     const schema = Joi.object({
       age_min: Joi.number().integer().min(13).max(100).allow(null),
       age_max: Joi.number().integer().min(13).max(100).allow(null),
@@ -219,11 +219,11 @@ async function adminPreviewFiltered(req, res) {
       status: Joi.number().integer().valid(0, 1, 2, 3).allow(null),
       last_active_days: Joi.number().integer().min(1).max(3650).allow(null),
 
-      // ✅ coin filter fields
+      //  coin filter fields
       days: Joi.number().integer().min(1).max(3650).optional(),
       require_recent_purchase: Joi.boolean().default(false),
 
-      // ✅ IMPORTANT: default should be 0 unless you want strict
+      //  IMPORTANT: default should be 0 unless you want strict
       require_balance_gt: Joi.number().integer().min(0).default(0),
 
       // optional paging/limit for preview
@@ -234,7 +234,7 @@ async function adminPreviewFiltered(req, res) {
     const { error, value } = schema.validate(req.query, {
       abortEarly: true,
       stripUnknown: true,
-      convert: true, // ✅ converts "7" -> 7, "true" -> true
+      convert: true,
     });
 
     if (error) {
@@ -245,7 +245,7 @@ async function adminPreviewFiltered(req, res) {
       });
     }
 
-    // ✅ pass validated query object directly as filters
+    //  pass validated query object directly as filters
     const result = await previewFilteredUsers(value);
 
     return res.json({ success: true, message: "Preview OK", data: result });

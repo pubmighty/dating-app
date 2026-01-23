@@ -21,6 +21,8 @@ async function initiateVideoCallByBot(req, res) {
 
   const schema = Joi.object({
       callType: Joi.string().valid("video", "audio").default("video"),
+      botId: Joi.number().integer().positive().optional(),
+      folder: Joi.string().trim().max(300).optional(), 
     });
 
     const { error, value } = schema.validate(req.body || {}, {
@@ -40,17 +42,60 @@ async function initiateVideoCallByBot(req, res) {
     });
 
     try {
+      // If you only want a specific folder, use value.folder.
+      const callFileWhere = {
+        status: 1,
+      };
+
+      if (value.folder) {
+        callFileWhere.folders = value.folder;
+      }
+
+      // If you store audio/video both here, and want only video:
+      // Add a filter based on mime_type or file_type.
+      // Example: only video mime types:
+      // callFileWhere.mime_type = { [Op.like]: "video/%" };
+
+      const botVideoRows = await CallFile.findAll({
+        attributes: [
+          [sequelize.fn("DISTINCT", sequelize.col("user_id")), "user_id"],
+        ],
+        where: callFileWhere,
+        raw: true,
+        transaction,
+      });
+
+      const botIdsWithVideo = botVideoRows.map((r) => Number(r.user_id));
+
+      if (!botIdsWithVideo.length) {
+        await transaction.rollback();
+        return res.status(404).json({
+          success: false,
+          code: "NO_BOT_VIDEOS",
+          message:
+            "No bot has any video file available (pb_call_files empty / inactive), so random call is disabled.",
+        });
+      }
+
+      // If a specific bot is requested, it must have at least one video
+      if (value.botId && !botIdsWithVideo.includes(Number(value.botId))) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          code: "BOT_HAS_NO_VIDEO",
+          message: "Selected bot has no active video files, cannot initiate call.",
+        });
+      }
+
       // 1) Find ONE random eligible chat (bot is P1, user is P2)
       //    Add your own rules inside WHERE as needed.
       const whereChat = {
-        //only call active bots
-          chat_status_p1: "active",
-          chat_status_p2: "active",
+        chat_status_p1: "active",
+        chat_status_p2: "active",
+        participant_1_id: value.botId
+          ? Number(value.botId)
+          : { [Op.in]: botIdsWithVideo }, // only bots with videos
       };
-
-      if (value.botId) {
-        whereChat.participant_1_id = value.botId;
-      }
 
       const randomChat = await Chat.findOne({
         where: whereChat,

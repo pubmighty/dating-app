@@ -9,6 +9,7 @@ const CoinPurchaseTransaction = require("../../models/CoinPurchaseTransaction");
 const Admin=require("../../models/Admin/Admin")
 const{getDaysWindow} =require("../helper")
 const {ADMIN_USER_FIELDS}=require("../staticValues")
+const { getOption } = require("../../utils/helper");
 function toStringData(data) {
   const out = {};
   if (!data || typeof data !== "object") return out;
@@ -355,7 +356,7 @@ async function sendBotMatchNotificationToUser(userId, botId, chatId = null) {
 
   const botName = bot?.full_name?.trim() || bot?.username?.trim() || "someone";
 
-  // const BASE_URL = process.env.BASE_URL || "http://192.168.0.156:5002";
+  // const BASE_URL = await getOption("base_url","! add_domain");
   // const avatarUrl = `${BASE_URL}/uploads/avatar/${bot.avatar}`;
   const avatarUrl = "https://i.imgur.com/CEnilHo.jpeg";
   const result = await createAndSend(

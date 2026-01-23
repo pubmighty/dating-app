@@ -7,7 +7,7 @@ const botController = require("../../controllers/admin/botController");
 const coinPackageController = require("../../controllers/admin/coinPackageController");
 const chatController = require("../../controllers/admin/chatController");
 const adminNotificationController = require("../../controllers/admin/notificationController");
-
+const adminGetMasterPrompts=require("../../controllers/admin/masterPromptController")
 /**
  *  GET /chats
  * ------------------------------------------------------------
@@ -1842,6 +1842,190 @@ router.get(
   "/bots/:botId/reports",
   botController.getBotReports
 );
+
+/**
+ * GET /master-prompts
+ * ------------------------------------------------------------
+ * Retrieves a paginated list of all master prompts.
+ *
+ * Purpose:
+ * - Allows admins to view and manage all configured master prompts.
+ * - Used to inspect AI prompt rules for bots and AI conversations.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to view master prompts.
+ *
+ * Query Parameters (optional):
+ * - page: number (default: 1)
+ *   Pagination page number.
+ * - perPage: number (default: 20)
+ *   Number of records per page.
+ * - status: string
+ *   Filter prompts by status (e.g., active, inactive).
+ * - keyword: string
+ *   Search filter for prompt title or content.
+ *
+ * Behavior:
+ * - Validates admin session.
+ * - Fetches master prompt records from database.
+ * - Applies pagination, filters, and search.
+ * - Returns formatted prompt data for admin panel usage.
+ *
+ * Notes:
+ * - Used in Admin Panel → AI Prompt Management → List View.
+ * - Supports dynamic filtering for large datasets.
+ */
+router.get(
+  "/master-prompts",
+  adminGetMasterPrompts.adminGetMasterPrompts
+);
+
+
+/**
+ * GET /master-prompts/:id
+ * ------------------------------------------------------------
+ * Retrieves full details of a specific master prompt.
+ *
+ * Purpose:
+ * - Allows admins to view prompt configuration for review or editing.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to view prompt details.
+ *
+ * Path Parameters:
+ * - id: number (required)
+ *   Unique ID of the master prompt.
+ *
+ * Behavior:
+ * - Validates admin session.
+ * - Fetches prompt data by ID.
+ * - Returns full prompt configuration.
+ *
+ * Notes:
+ * - Used when opening the edit/view dialog in admin panel.
+ */
+router.get(
+  "/master-prompts/:id",
+  adminGetMasterPrompts.adminGetMasterPromptById
+);
+
+
+/**
+ * POST /master-prompts/add
+ * ------------------------------------------------------------
+ * Creates a new master prompt configuration.
+ *
+ * Purpose:
+ * - Enables admins to define AI behavior patterns.
+ * - Controls how bots generate replies based on context.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to create prompts.
+ *
+ * Payload:
+ * - title: string (required)
+ *   Name of the prompt rule.
+ * - prompt: string (required)
+ *   AI instruction template.
+ * - type: string (required)
+ *   Context type (e.g., match, chat, follow-up).
+ * - gender: string (optional)
+ *   Target bot gender (male/female/all).
+ * - time: string (optional)
+ *   Time category (morning/afternoon/evening/night).
+ * - status: boolean (default: true)
+ *   Active/inactive state.
+ *
+ * Behavior:
+ * - Validates input schema.
+ * - Stores new master prompt into database.
+ * - Makes prompt available instantly for AI execution.
+ *
+ * Notes:
+ * - Critical for AI personalization & engagement tuning.
+ * - High impact API – misuse can affect entire bot ecosystem.
+ */
+router.post(
+  "/master-prompts/add",
+  adminGetMasterPrompts.adminCreateMasterPrompt
+);
+
+
+/**
+ * POST /master-prompts/edit/:id
+ * ------------------------------------------------------------
+ * Updates an existing master prompt configuration.
+ *
+ * Purpose:
+ * - Allows admins to tune AI behavior and conversation logic.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to update prompts.
+ *
+ * Path Parameters:
+ * - id: number (required)
+ *   Master prompt ID to be updated.
+ *
+ * Payload:
+ * - title: string (optional)
+ * - prompt: string (optional)
+ * - type: string (optional)
+ * - gender: string (optional)
+ * - time: string (optional)
+ * - status: boolean (optional)
+ *
+ * Behavior:
+ * - Validates admin session and request payload.
+ * - Updates prompt fields dynamically.
+ * - Reflects changes immediately in AI reply generation.
+ *
+ * Notes:
+ * - Used for live AI optimization & behavior correction.
+ * - Changes affect real-time user-bot interactions.
+ */
+router.post(
+  "/master-prompts/edit/:id",
+  adminGetMasterPrompts.adminUpdateMasterPrompt
+);
+
+
+/**
+ * POST /master-prompts/delete/:id
+ * ------------------------------------------------------------
+ * Deletes a master prompt configuration.
+ *
+ * Purpose:
+ * - Allows admins to permanently remove unused or faulty prompts.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to delete prompts.
+ *
+ * Path Parameters:
+ * - id: number (required)
+ *   Master prompt ID to be deleted.
+ *
+ * Behavior:
+ * - Validates admin session.
+ * - Verifies prompt existence.
+ * - Deletes prompt record from database.
+ *
+ * Warning:
+ * - Deleting prompts may impact bot AI flows.
+ * - Ensure no dependent logic is using the prompt.
+ *
+ * Notes:
+ * - Recommended to disable instead of delete for safety.
+ */
+router.post(
+  "/master-prompts/delete/:id",
+  adminGetMasterPrompts.adminDeleteMasterPrompt
+);
+
 
 
 module.exports = router;
