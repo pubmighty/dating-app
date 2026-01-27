@@ -9,10 +9,6 @@ const TempUser = sequelize.define(
       primaryKey: true,
       autoIncrement: true,
     },
-    username: {
-      type: DataTypes.STRING(50),
-      allowNull: false,
-    },
     email: {
       type: DataTypes.STRING(300),
       allowNull: true,

@@ -64,30 +64,16 @@ router.get("/setting", utilController.getSiteSettings);
  *    - Validates provider token and maps external identity to internal user record.
  *    - Must prevent duplicate accounts and handle provider-linked users safely.
  */
-router.post("/register/google", authController.registerWithGoogle);
+// EMAIL: one API for both signup + login (based on existence)
+router.post("/auth/email/exist", authController.emailExist);
 
-/**
- * 2. /register
- *    - Handles standard email-based user registration.
- *    - Triggers email verification process with OTP.
- *    - Creates a temp user record if verification on otherise create normal user.
- */
-router.post("/register", authController.registerUser);
 
-/**
- * 3. /register/verify
- *    - Verifies registration via OTP.
- *    - Activates the user account only after successful verification.
- */
-router.post("/register/verify", authController.verifyRegister);
+// EMAIL: one verify API for both signup + login (based on existence)
+router.post("/auth/email/verify", authController.verifyEmail);
 
-/**
- * 4. /login
- *    - Authenticates user credentials.
- *    - Issues session tokens on success.
- *    - Must NOT reveal whether email or password was incorrect.
- */
-router.post("/login", authController.loginUser);
+
+// PHONE: one API for both signup + login (based on existence)
+router.post("/auth/phone/exist", authController.phoneExist);
 
 /**
  *  /logout
