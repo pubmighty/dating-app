@@ -100,7 +100,7 @@ const CoinPurchaseTransaction = sequelize.define(
       { fields: ["product_id"] },
       { fields: ["provider"] },
     ],
-  }
+  },
 );
 
 module.exports = CoinPurchaseTransaction;

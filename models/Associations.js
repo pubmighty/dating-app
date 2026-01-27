@@ -4,11 +4,13 @@ const Chat = require("./Chat");
 const Message = require("./Message");
 const CoinPackage = require("./CoinPackage");
 const CoinPurchaseTransaction = require("./CoinPurchaseTransaction");
+const Admin = require("./Admin/Admin");
+const CoinSpentTransaction = require("./CoinSpentTransaction");
 const UserMedia = require("./UserMedia");
 const ActivityLog = require("./ActivityLog");
 const MessageFile = require("./MessageFile");
 const VideoCall = require("./VideoCall");
-const Notification=require("./Notification")
+const Notification = require("./Notification");
 const UserBlock = require("./UserBlock");
 const FileUpload = require("./FileUpload");
 
@@ -149,28 +151,68 @@ function setupAssociations() {
     as: "chat",
   });
   Notification.belongsTo(User, {
-  foreignKey: "sender_id",
-  as: "sender",
-});
+    foreignKey: "sender_id",
+    as: "sender",
+  });
 
   UserBlock.belongsTo(User, {
-   foreignKey: "user_id", 
-   as: "blockedUser"
-   });
-  UserBlock.belongsTo(User, { 
-  foreignKey: "blocked_by", 
-  as: "blocker" 
+    foreignKey: "user_id",
+    as: "blockedUser",
+  });
+  UserBlock.belongsTo(User, {
+    foreignKey: "blocked_by",
+    as: "blocker",
   });
 
   User.hasMany(UserBlock, {
-  foreignKey: "blocked_by",
-   as: "myBlocked"
-   });
+    foreignKey: "blocked_by",
+    as: "myBlocked",
+  });
   User.hasMany(UserBlock, {
-  foreignKey: "user_id", 
-  as: "blockedMe"
- });
+    foreignKey: "user_id",
+    as: "blockedMe",
+  });
+  CoinPurchaseTransaction.belongsTo(User, {
+    foreignKey: "user_id",
+    as: "user",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+  User.hasMany(CoinPurchaseTransaction, {
+    foreignKey: "user_id",
+    as: "coinPurchases",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+  // Coin spent -> User
+  CoinSpentTransaction.belongsTo(User, {
+    foreignKey: "user_id",
+    as: "user",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
 
+  User.hasMany(CoinSpentTransaction, {
+    foreignKey: "user_id",
+    as: "coinSpends",
+    onDelete: "CASCADE",
+    onUpdate: "CASCADE",
+  });
+
+  // Optional: if you want join message + videoCall details
+  CoinSpentTransaction.belongsTo(Message, {
+    foreignKey: "message_id",
+    as: "message",
+    onDelete: "SET NULL",
+    onUpdate: "CASCADE",
+  });
+
+  CoinSpentTransaction.belongsTo(VideoCall, {
+    foreignKey: "video_call_id",
+    as: "videoCall",
+    onDelete: "SET NULL",
+    onUpdate: "CASCADE",
+  });
 }
 
 module.exports = { setupAssociations };

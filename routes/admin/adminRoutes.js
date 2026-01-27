@@ -7,7 +7,7 @@ const botController = require("../../controllers/admin/botController");
 const coinPackageController = require("../../controllers/admin/coinPackageController");
 const chatController = require("../../controllers/admin/chatController");
 const adminNotificationController = require("../../controllers/admin/notificationController");
-const adminGetMasterPrompts=require("../../controllers/admin/masterPromptController")
+const adminGetMasterPrompts = require("../../controllers/admin/masterPromptController");
 /**
  *  GET /chats
  * ------------------------------------------------------------
@@ -74,7 +74,7 @@ router.get("/chats/:chatId/messages", chatController.adminGetChatMessages);
  */
 router.get(
   "/chats/:chatId/messages/cursor",
-  chatController.adminGetChatMessagesCursor
+  chatController.adminGetChatMessagesCursor,
 );
 
 /**
@@ -203,7 +203,7 @@ router.post("/chats/:chatId/delete", chatController.adminDeleteChat);
  *   - unread_count_p1 / unread_count_p2
  */
 router.post("/chats/mark-as-read", chatController.adminMarkChatMessagesRead);
-
+router.get("/chats/users", chatController.getAllUsers);
 /**
  * POST /login
  * ------------------------------------------------------------
@@ -319,7 +319,7 @@ router.post("/forgot-password", authController.forgotAdminPassword);
  */
 router.post(
   "/forgot-password/verify",
-  authController.verifyAdminForgotPassword
+  authController.verifyAdminForgotPassword,
 );
 
 /**
@@ -400,6 +400,7 @@ router.post("/altcha-captcha-challenge", authController.altchaCaptchaChallenge);
  * - Does not expose sensitive fields such as passwords or tokens.
  * - Returns paginated results with metadata.
  */
+
 router.get("/users", userController.getUsers);
 
 /**
@@ -461,7 +462,7 @@ router.get("/users/:userId", userController.getUser);
 router.post(
   "/users/add",
   fileUploader.single("avatar"),
-  userController.addUser
+  userController.addUser,
 );
 
 /**
@@ -496,7 +497,7 @@ router.post(
 router.post(
   "/users/:userId",
   fileUploader.single("avatar"),
-  userController.editUser
+  userController.editUser,
 );
 
 /**
@@ -534,7 +535,7 @@ router.post(
 router.post(
   "/users/:userId/media",
   fileUploader.array("media", 10),
-  userController.uploadUserMedia
+  userController.uploadUserMedia,
 );
 
 /**
@@ -577,10 +578,7 @@ router.post(
  * - Documents and other file types are excluded.
  * - This is a read-only operation.
  */
-router.get(
-  "/users/:userId/media",
-  userController.getUserMedia
-);
+router.get("/users/:userId/media", userController.getUserMedia);
 
 /**
  * POST /users/:userId/media/:mediaId/delete
@@ -617,7 +615,7 @@ router.get(
  */
 router.post(
   "/users/:userId/media/:mediaId/delete",
-  userController.deleteUserMedia
+  userController.deleteUserMedia,
 );
 
 /**
@@ -672,10 +670,7 @@ router.post(
  * - Media URLs assume `/public` is exposed via Express static middleware.
  * - Deleted or inactive bot users can be optionally blocked from access.
  */
-router.get(
-  "/bots/:botId/media",
-  botController.getBotMedia
-);
+router.get("/bots/:botId/media", botController.getBotMedia);
 
 /**
  * POST /users/:userId/media
@@ -713,7 +708,7 @@ router.get(
 router.post(
   "/users/:userId/media",
   fileUploader.array("media", 10),
-  userController.uploadUserMedia
+  userController.uploadUserMedia,
 );
 
 /**
@@ -777,6 +772,7 @@ router.post("/bots/:botId/media/:mediaId/delete", botController.deleteBotMedia);
  * Notes:
  * - Soft-deleted users still reserve their email and username.
  */
+
 router.post("/users/:userId/delete", userController.deleteUser);
 
 /**
@@ -844,6 +840,8 @@ router.post("/users/:userId/restore", userController.restoreUser);
  * - Returns paginated results with metadata.
  */
 router.get("/bots", botController.getBots);
+
+
 
 /**
  * GET /bots/:userId
@@ -947,7 +945,7 @@ router.post("/bots/add", fileUploader.single("avatar"), botController.addBot);
 router.post(
   "/bots/:userId",
   fileUploader.single("avatar"),
-  botController.editBot
+  botController.editBot,
 );
 
 /**
@@ -985,7 +983,12 @@ router.post(
 router.post(
   "/bots/:userId/media",
   fileUploader.array("media", 10),
-  botController.uploadBotMedia
+  botController.uploadBotMedia,
+);
+router.get(
+  "/bots/:userId/media",
+
+  botController.getBotMedia,
 );
 
 /**
@@ -1078,6 +1081,14 @@ router.post("/bots/:userId/restore", botController.restoreBot);
  * - Uses server-side pagination with configurable page size.
  * - Returns total record count and pagination metadata.
  */
+router.get(
+  "/coin-packages/coin-purchase-transaction",
+  coinPackageController.getCoinPurchaseTransactions,
+);
+router.get(
+  "/coin-packages/coin-spent-transaction",
+  coinPackageController.getCoinSpentTransactions,
+);
 router.get("/coin-packages", coinPackageController.getCoinPackages);
 
 /**
@@ -1102,7 +1113,7 @@ router.get("/coin-packages", coinPackageController.getCoinPackages);
  */
 router.get(
   "/coin-packages/:coinPackageId",
-  coinPackageController.getCoinPackage
+  coinPackageController.getCoinPackage,
 );
 
 /**
@@ -1145,7 +1156,7 @@ router.get(
 router.post(
   "/coin-packages/add",
   fileUploader.single("cover"),
-  coinPackageController.addCoinPackage
+  coinPackageController.addCoinPackage,
 );
 
 /**
@@ -1191,7 +1202,7 @@ router.post(
 router.post(
   "/coin-packages/:coinPackageId",
   fileUploader.single("cover"),
-  coinPackageController.editCoinPackage
+  coinPackageController.editCoinPackage,
 );
 
 /**
@@ -1228,7 +1239,7 @@ router.post(
  */
 router.post(
   "/coin-packages/:coinPackageId/delete",
-  coinPackageController.deleteCoinPackage
+  coinPackageController.deleteCoinPackage,
 );
 
 /**
@@ -1317,7 +1328,7 @@ router.get("/manage-admins/:id", adminController.getAdmin);
  *   Allowed: 0 | 1 | 2
  *
  * Multipart Form Data:
- * - avtar: file (optional)
+ * - avatar: file (optional)
  *   Admin profile avatar image.
  *
  * Behavior:
@@ -1334,7 +1345,7 @@ router.get("/manage-admins/:id", adminController.getAdmin);
 router.post(
   "/manage-admins/add",
   fileUploader.single("avatar"),
-  adminController.addAdmin
+  adminController.addAdmin,
 );
 
 /**
@@ -1364,7 +1375,7 @@ router.post(
  * - twoFactorEnabled: number (optional)
  *
  * Multipart Form Data:
- * - avtar: file (optional)
+ * - avatar: file (optional)
  *   Updated admin profile avatar image.
  *
  * Behavior:
@@ -1381,7 +1392,13 @@ router.post(
 router.post(
   "/manage-admins/:id",
   fileUploader.single("avatar"),
-  adminController.editAdmin
+  adminController.editAdmin,
+);
+
+router.post(
+  "/update-profile",
+  fileUploader.single("avatar"),
+  adminController.updateAdminProfile,
 );
 
 /**
@@ -1415,7 +1432,7 @@ router.post(
  */
 router.post(
   "/notifications/send-user",
-  adminNotificationController.adminSendToUser
+  adminNotificationController.adminSendToUser,
 );
 
 /**
@@ -1448,7 +1465,7 @@ router.post(
  */
 router.post(
   "/notifications/send-global",
-  adminNotificationController.adminSendGlobal
+  adminNotificationController.adminSendGlobal,
 );
 /**
  * POST /notifications/preview-filter
@@ -1478,9 +1495,9 @@ router.post(
  * - No push notifications are sent.
  */
 
-router.get(
+router.post(
   "/notifications/filter",
-  adminNotificationController.adminPreviewFiltered
+  adminNotificationController.adminPreviewFiltered,
 );
 /**
  * POST /notifications/send-filtered
@@ -1512,7 +1529,7 @@ router.get(
  */
 router.post(
   "/notifications/send-filtered-user",
-  adminNotificationController.adminSendFiltered
+  adminNotificationController.adminSendFiltered,
 );
 
 /**
@@ -1547,10 +1564,7 @@ router.post(
  * - This endpoint is for admin-side history; it does NOT return user-to-user notifications.
  * - Ensure `pb_notifications.is_admin` column exists and is correctly filled during send flows.
  */
-router.get(
-  "/notifications/sent",
-  adminNotificationController.getSentNotifications
-);
+router.get("/notifications", adminNotificationController.getSentNotifications);
 
 /**
  * POST /bots/:botId/upload-video
@@ -1598,7 +1612,7 @@ router.get(
 router.post(
   "/bots/:botId/video",
   fileUploader.array("files", 10),
-  botController.uploadBotVideo
+  botController.uploadBotVideo,
 );
 
 /**
@@ -1654,10 +1668,7 @@ router.post(
  * - If a video file is missing on disk, the DB record
  *   is still returned (DB is the source of truth).
  */
-router.get(
-  "/bots/:botId/video",
-  botController.getBotVideos
-);
+router.get("/bots/:botId/video", botController.getBotVideos);
 
 /**
  * POST /bots/:botId/video/:videoId
@@ -1705,10 +1716,7 @@ router.get(
  * - File path structure:
  *   /public/uploads/videos/{botId}/{filename}
  */
-router.post(
-  "/bots/:botId/video/:videoId",
-  botController.deleteBotVideo
-);
+router.post("/bots/:botId/video/:videoId", botController.deleteBotVideo);
 
 /**
  * POST /admin/bots/:botId/reports/:reportId
@@ -1749,10 +1757,7 @@ router.post(
  *   - moderator_note (optional)
  * - Does not allow cross-bot or invalid report manipulation.
  */
-router.post(
-  "/bots/:botId/reports/:reportId",
-  botController.updateBotReport
-);
+router.post("/bots/:botId/reports/:reportId", botController.updateBotReport);
 
 /**
  * GET /reports
@@ -1794,10 +1799,7 @@ router.post(
  * - Intended for admin dashboards and moderation tools.
  * - Does not modify any report data.
  */
-router.get(
-  "/reports",
-  botController.getReports
-);
+router.get("/reports", botController.getReports);
 
 /**
  * GET /bots/:botId/reports
@@ -1838,10 +1840,7 @@ router.get(
  * - Only returns reports linked to the specified bot.
  * - Useful for bot-specific moderation workflows.
  */
-router.get(
-  "/bots/:botId/reports",
-  botController.getBotReports
-);
+router.get("/bots/:botId/reports", botController.getBotReports);
 
 /**
  * GET /master-prompts
@@ -1876,11 +1875,7 @@ router.get(
  * - Used in Admin Panel → AI Prompt Management → List View.
  * - Supports dynamic filtering for large datasets.
  */
-router.get(
-  "/master-prompts",
-  adminGetMasterPrompts.adminGetMasterPrompts
-);
-
+router.get("/master-prompts", adminGetMasterPrompts.adminGetMasterPrompts);
 
 /**
  * GET /master-prompts/:id
@@ -1908,9 +1903,8 @@ router.get(
  */
 router.get(
   "/master-prompts/:id",
-  adminGetMasterPrompts.adminGetMasterPromptById
+  adminGetMasterPrompts.adminGetMasterPromptById,
 );
-
 
 /**
  * POST /master-prompts/add
@@ -1950,9 +1944,8 @@ router.get(
  */
 router.post(
   "/master-prompts/add",
-  adminGetMasterPrompts.adminCreateMasterPrompt
+  adminGetMasterPrompts.adminCreateMasterPrompt,
 );
-
 
 /**
  * POST /master-prompts/edit/:id
@@ -1989,9 +1982,8 @@ router.post(
  */
 router.post(
   "/master-prompts/edit/:id",
-  adminGetMasterPrompts.adminUpdateMasterPrompt
+  adminGetMasterPrompts.adminUpdateMasterPrompt,
 );
-
 
 /**
  * POST /master-prompts/delete/:id
@@ -2023,9 +2015,7 @@ router.post(
  */
 router.post(
   "/master-prompts/delete/:id",
-  adminGetMasterPrompts.adminDeleteMasterPrompt
+  adminGetMasterPrompts.adminDeleteMasterPrompt,
 );
-
-
 
 module.exports = router;

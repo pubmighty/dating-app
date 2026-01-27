@@ -139,14 +139,14 @@ const Notification = sequelize.define(
         name: "idx_is_admin_created_at",
         fields: ["is_admin", "created_at"],
       },
-      //  {
-      //   name: "idx_status_scheduled_at",
-      //   fields: ["status", "scheduled_at"],
-      // },
-      //  {
-      //   name: "idx_sent_at",
-      //   fields: ["sent_at"],
-      // },
+       {
+        name: "idx_status_scheduled_at",
+        fields: ["status", "scheduled_at"],
+      },
+       {
+        name: "idx_sent_at",
+        fields: ["sent_at"],
+      },
     ],
   }
 );

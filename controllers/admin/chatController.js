@@ -1,6 +1,7 @@
 const Joi = require("joi");
 const { Op } = require("sequelize");
 const sequelize = require("../../config/db");
+const { getOption, escapeLike } = require("../../utils/helper");
 
 const {
   isAdminSessionValid,
@@ -172,7 +173,7 @@ async function adminGetChatMessages(req, res) {
     if (markReadForUserId) {
       readResult = await adminMarkChatMessagesReadInternal(
         chatId,
-        markReadForUserId
+        markReadForUserId,
       );
     }
 
@@ -340,7 +341,7 @@ async function adminGetChatMessagesCursor(req, res) {
     if (markReadForUserId) {
       readResult = await adminMarkChatMessagesReadInternal(
         chatId,
-        markReadForUserId
+        markReadForUserId,
       );
     }
 
@@ -435,7 +436,7 @@ async function adminDeleteMessage(req, res) {
         message_type: "text",
         read_at: null,
       },
-      { where: { id: messageId } }
+      { where: { id: messageId } },
     );
 
     return res.json({
@@ -708,14 +709,14 @@ async function adminPinChats(req, res) {
       if (p1Ids.length) {
         await Chat.update(
           { is_pin_p1: isPin },
-          { where: { id: { [Op.in]: p1Ids } }, transaction: t }
+          { where: { id: { [Op.in]: p1Ids } }, transaction: t },
         );
       }
 
       if (p2Ids.length) {
         await Chat.update(
           { is_pin_p2: isPin },
-          { where: { id: { [Op.in]: p2Ids } }, transaction: t }
+          { where: { id: { [Op.in]: p2Ids } }, transaction: t },
         );
       }
 
@@ -1089,7 +1090,7 @@ async function adminMarkChatMessagesRead(req, res) {
     const result = await adminMarkChatMessagesReadInternal(
       Number(value.chatId),
       Number(value.userId),
-      value.lastMessageId ? Number(value.lastMessageId) : null
+      value.lastMessageId ? Number(value.lastMessageId) : null,
     );
 
     return res.json({
@@ -1112,7 +1113,7 @@ async function adminMarkChatMessagesRead(req, res) {
 async function adminMarkChatMessagesReadInternal(
   chatId,
   userId,
-  lastMessageId = null
+  lastMessageId = null,
 ) {
   const t = await sequelize.transaction();
   try {
@@ -1152,7 +1153,7 @@ async function adminMarkChatMessagesReadInternal(
 
     const [updatedCount] = await Message.update(
       { is_read: true, read_at: new Date(), status: "read" },
-      { where, transaction: t }
+      { where, transaction: t },
     );
 
     const remainingUnread = await Message.count({
@@ -1178,6 +1179,193 @@ async function adminMarkChatMessagesReadInternal(
   }
 }
 
+async function getAllUsers(req, res) {
+  try {
+    // Admin auth
+    const session = await isAdminSessionValid(req);
+    if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, msg: "Admin session invalid" });
+    }
+
+    // Role check
+    const admin = await Admin.findByPk(session.data);
+    if (!admin) {
+      return res.status(401).json({ success: false, msg: "Admin not found" });
+    }
+    const canGo = await verifyAdminRole(admin, "getUsers");
+    if (!canGo) {
+      return res
+        .status(403)
+        .json({ success: false, msg: "Insufficient permissions" });
+    }
+
+    // Query validation
+    const schema = Joi.object({
+      page: Joi.number().integer().min(1).default(1),
+
+      status: Joi.number()
+        .integer()
+        .valid(0, 1, 2, 3)
+        .allow(null)
+        .default(null),
+
+      is_active: Joi.boolean()
+        .truthy("true")
+        .falsy("false")
+        .allow(null)
+        .default(null),
+
+      is_verified: Joi.boolean()
+        .truthy("true")
+        .falsy("false")
+        .allow(null)
+        .default(null),
+
+      username: Joi.string().trim().max(50).empty("").default(null),
+      email: Joi.string().trim().max(300).empty("").default(null),
+      phone: Joi.string().trim().max(50).empty("").default(null),
+      full_name: Joi.string().trim().max(300).empty("").default(null),
+      country: Joi.string().trim().max(100).empty("").default(null),
+
+      gender: Joi.string()
+        .valid("male", "female", "other", "prefer_not_to_say")
+        .empty("")
+        .default(null),
+
+      register_type: Joi.string()
+        .valid("gmail", "manual")
+        .empty("")
+        .default(null),
+
+      // better than is_deleted param
+      include_deleted: Joi.boolean()
+        .truthy("true")
+        .falsy("false")
+        .default(false),
+
+      sortBy: Joi.string()
+        .valid(
+          "created_at",
+          "updated_at",
+          "username",
+          "email",
+          "status",
+          "last_active",
+          "coins",
+          "total_spent",
+        )
+        .default("created_at"),
+
+      sortOrder: Joi.string()
+        .valid("asc", "desc", "ASC", "DESC")
+        .default("DESC"),
+    });
+
+    const { error, value } = schema.validate(req.query || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        msg: error.details?.[0]?.message || "Invalid query params",
+      });
+    }
+
+    // 3) Pagination using your option-based cap + page size
+    let pageNumber = parseInt(value.page, 10);
+    if (Number.isNaN(pageNumber) || pageNumber < 1) pageNumber = 1;
+
+    let maxPages = parseInt(await getOption("max_pages_admin", 1000), 10);
+    if (Number.isNaN(maxPages) || maxPages < 1) maxPages = 1000;
+    pageNumber = Math.min(pageNumber, maxPages);
+
+    // Use a users-specific option key (your old key coin_packages_per_page is misleading for users)
+    let pageSize = parseInt(await getOption("users_per_page_admin", 20), 10);
+    if (Number.isNaN(pageSize) || pageSize < 1) pageSize = 20;
+
+    const offset = (pageNumber - 1) * pageSize;
+
+    // 4) Build WHERE
+    const where = {};
+
+    if (value.is_active !== null) where.is_active = value.is_active;
+
+    if (value.gender !== null) where.gender = value.gender;
+
+    // Hide deleted unless explicitly included
+    if (!value.include_deleted) where.is_deleted = 0;
+
+    if (value.status !== null) where.status = value.status;
+
+    if (value.is_verified !== null) where.is_verified = value.is_verified;
+    if (value.register_type) where.register_type = value.register_type;
+
+    if (value.username) {
+      const s = escapeLike(value.username);
+      where.username = { [Op.like]: `${s}%` };
+    }
+    if (value.email) {
+      const s = escapeLike(value.email);
+      where.email = { [Op.like]: `${s}%` };
+    }
+    if (value.phone) {
+      const s = escapeLike(value.phone);
+      where.phone = { [Op.like]: `${s}%` };
+    }
+    if (value.full_name) {
+      const s = escapeLike(value.full_name);
+      where.full_name = { [Op.like]: `${s}%` };
+    }
+
+    if (value.country) {
+      const s = escapeLike(value.country);
+      where.country = { [Op.like]: `${s}%` };
+    }
+
+    // 5) Order (stable pagination)
+    const normalizedOrder =
+      String(value.sortOrder).toUpperCase() === "ASC" ? "ASC" : "DESC";
+
+    const { rows, count } = await User.findAndCountAll({
+      where,
+      limit: pageSize,
+      offset,
+      order: [
+        [value.sortBy, normalizedOrder],
+        ["id", "DESC"], // stable tie-breaker
+      ],
+      attributes: {
+        exclude: ["password"],
+      },
+      distinct: true,
+    });
+
+    return res.status(200).json({
+      success: true,
+      msg: "Users fetched successfully",
+      data: {
+        items: rows,
+        pagination: {
+          totalItems: count,
+          totalPages: Math.ceil(count / pageSize),
+          currentPage: pageNumber,
+          perPage: pageSize,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Error during getUsers:", err);
+    return res.status(500).json({
+      success: false,
+      msg: "Internal server error",
+    });
+  }
+}
 module.exports = {
   adminGetChats,
   adminGetChatMessages,
@@ -1187,4 +1375,5 @@ module.exports = {
   adminBlockChat,
   adminDeleteChat,
   adminMarkChatMessagesRead,
+  getAllUsers,
 };

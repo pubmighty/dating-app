@@ -38,7 +38,7 @@ async function getAdmins(req, res) {
           "role",
           "status",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
         )
         .default("createdAt"),
 
@@ -505,7 +505,7 @@ async function editAdmin(req, res) {
         "superAdmin",
         "staff",
         "paymentManager",
-        "support"
+        "support",
       ),
       status: Joi.number().integer().valid(0, 1, 2, 3),
 
@@ -632,7 +632,7 @@ async function editAdmin(req, res) {
             updatePayload.email && conflict.email === updatePayload.email;
           const clashField = emailClash ? "email" : "username";
           const err = new Error(
-            `An admin with this ${clashField} already exists.`
+            `An admin with this ${clashField} already exists.`,
           );
           err.statusCode = 409;
           throw err;
@@ -706,10 +706,251 @@ async function editAdmin(req, res) {
       .json({ success: false, msg: "Internal server error" });
   }
 }
+async function updateAdminProfile(req, res) {
+  try {
+    //  Validate body
+    const bodySchema = Joi.object({
+      username: Joi.string().trim().min(3).max(50).allow("", null),
+      email: Joi.string().trim().email().max(255).allow("", null),
 
+      first_name: Joi.string().trim().max(100).allow("", null),
+      last_name: Joi.string().trim().max(100).allow("", null),
+
+      old_password: Joi.string().min(8).max(255).allow("", null),
+      password: Joi.string()
+        .min(8)
+        .max(255)
+        .allow("", null)
+        .pattern(/^(?=.*[A-Za-z])(?=.*\d).+$/)
+        .messages({
+          "string.pattern.base":
+            "Password must contain at least 1 letter and 1 number.",
+        }),
+    });
+
+    const { error: bErr, value: body } = bodySchema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (bErr) {
+      return res
+        .status(400)
+        .json({ success: false, msg: bErr.details[0].message });
+    }
+
+    // Auth: validate session
+    const session = await isAdminSessionValid(req);
+    if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, msg: session?.msg || "Unauthorized" });
+    }
+
+    const adminId = session.data;
+
+    //  Load authenticated admin
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res.status(404).json({ success: false, msg: "Admin not found" });
+    }
+
+    // Block suspended/inactive admins
+    if (admin.status !== 1) {
+      return res.status(403).json({ success: false, msg: "Forbidden" });
+    }
+
+    //  if  permission gating for self-profile updates
+    // if (!verifyAdminRole(admin, "updateProfile")) {
+    //   return res.status(403).json({ success: false, msg: "Forbidden" });
+    // }
+
+    //  Build update payload
+    const updatePayload = {};
+
+    const setNullIfEmpty = (v) => {
+      if (typeof v === "undefined") return undefined;
+      if (v === null) return null;
+      const s = String(v).trim();
+      return s === "" ? null : s;
+    };
+
+    // username
+    if (Object.prototype.hasOwnProperty.call(body, "username")) {
+      const u = String(body.username || "").trim();
+      if (!u) {
+        return res
+          .status(400)
+          .json({ success: false, msg: "Username cannot be empty." });
+      }
+      updatePayload.username = u;
+    }
+
+    // email
+    if (Object.prototype.hasOwnProperty.call(body, "email")) {
+      const e = String(body.email || "")
+        .trim()
+        .toLowerCase();
+      if (!e) {
+        return res
+          .status(400)
+          .json({ success: false, msg: "Email cannot be empty." });
+      }
+      updatePayload.email = e;
+    }
+
+    // names
+    if (Object.prototype.hasOwnProperty.call(body, "first_name")) {
+      updatePayload.first_name = setNullIfEmpty(body.first_name);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "last_name")) {
+      updatePayload.last_name = setNullIfEmpty(body.last_name);
+    }
+
+    //  Password change (requires old_password)
+    if (typeof body.password === "string" && body.password.trim() !== "") {
+      if (!body.old_password || String(body.old_password).trim() === "") {
+        return res.status(400).json({
+          success: false,
+          msg: "Old password is required to change password.",
+        });
+      }
+
+      const isOldValid = await bcrypt.compare(
+        String(body.old_password),
+        admin.password,
+      );
+
+      if (!isOldValid) {
+        return res.status(400).json({
+          success: false,
+          msg: "Old password is incorrect.",
+        });
+      }
+
+      updatePayload.password = await bcrypt.hash(body.password.trim(), 12);
+    }
+
+    // vatar upload (multer field: "avtar")
+
+    let newAvatarFilename = null;
+
+    if (req.file) {
+      const ok = await verifyFileType(req.file);
+      if (!ok) {
+        return res
+          .status(400)
+          .json({ success: false, msg: "Invalid file type" });
+      }
+
+      const stored = await uploadFile(req.file, "uploads/avatar/admin");
+      newAvatarFilename = stored?.filename || null;
+
+      if (newAvatarFilename) {
+        updatePayload.avatar = newAvatarFilename;
+      }
+    }
+
+    //  Transaction: uniqueness checks + update + safe response
+    const updatedSafe = await sequelize.transaction(async (t) => {
+      // uniqueness check only if username/email changed
+      if (updatePayload.username || updatePayload.email) {
+        const or = [];
+        if (updatePayload.username)
+          or.push({ username: updatePayload.username });
+        if (updatePayload.email) or.push({ email: updatePayload.email });
+
+        const conflict = await Admin.findOne({
+          where: {
+            [Op.and]: [{ id: { [Op.ne]: adminId } }, { [Op.or]: or }],
+          },
+          attributes: ["id", "username", "email"],
+          transaction: t,
+          lock: t.LOCK.UPDATE,
+        });
+
+        if (conflict) {
+          const emailClash =
+            updatePayload.email && conflict.email === updatePayload.email;
+          const clashField = emailClash ? "email" : "username";
+          const err = new Error(
+            `Another admin with this ${clashField} already exists.`,
+          );
+          err.statusCode = 409;
+          throw err;
+        }
+      }
+
+      // Apply update
+      await admin.update(updatePayload, { transaction: t });
+
+      // Cleanup old avatar after DB update succeeded (best effort)
+      if (newAvatarFilename) {
+        const oldAvatar = admin.previous("avatar");
+        if (oldAvatar) {
+          try {
+            await deleteFile(oldAvatar, "uploads/avatar/admin");
+          } catch (e) {
+            console.error("Avatar cleanup failed:", e?.message || e);
+          }
+        }
+      }
+
+      // Return safe admin
+      const fresh = await Admin.findByPk(adminId, {
+        attributes: {
+          exclude: [
+            "password",
+            "two_fa_secret",
+            "otp_secret",
+            "recovery_codes",
+            "reset_token",
+            "resetToken",
+          ],
+        },
+        transaction: t,
+      });
+
+      if (!fresh) {
+        const err = new Error("Failed to load updated admin");
+        err.statusCode = 500;
+        throw err;
+      }
+
+      return fresh.toJSON();
+    });
+
+    return res.status(200).json({
+      success: true,
+      msg: "Profile updated successfully.",
+      data: updatedSafe,
+    });
+  } catch (err) {
+    const statusCode = err?.statusCode || 500;
+
+    if (err?.name === "SequelizeUniqueConstraintError") {
+      const field = err?.errors?.[0]?.path || "unique field";
+      return res.status(409).json({
+        success: false,
+        msg: `Duplicate value for ${field}.`,
+      });
+    }
+
+    if (statusCode === 409 || statusCode === 400) {
+      return res.status(statusCode).json({ success: false, msg: err.message });
+    }
+
+    console.error("Error during updateAdminProfile:", err?.message || err);
+    return res
+      .status(500)
+      .json({ success: false, msg: "Internal server error" });
+  }
+}
 module.exports = {
   getAdmins,
   getAdmin,
   addAdmin,
   editAdmin,
+  updateAdminProfile,
 };

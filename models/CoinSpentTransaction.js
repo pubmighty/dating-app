@@ -69,7 +69,7 @@ const CoinSpentTransaction = sequelize.define(
       { fields: ["date"] },
       { fields: ["status"] },
     ],
-  }
+  },
 );
 
 module.exports = CoinSpentTransaction;

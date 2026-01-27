@@ -17,7 +17,9 @@ function toStringData(data) {
   return out;
 }
 
-function buildMulticastPayload(tokens, title, content, image, data) {
+function buildMulticastPayload(tokens, title, content, image, data, opts = {}) {
+  const priority = opts.priority === "high" ? "high" : "normal";
+
   const payload = {
     tokens,
     notification: {
@@ -25,7 +27,7 @@ function buildMulticastPayload(tokens, title, content, image, data) {
       body: content || "",
     },
     data: toStringData(data),
-    android: { priority: "high" },
+    android: { priority }, 
   };
 
   if (typeof image === "string" && image.trim().length > 0) {
@@ -142,7 +144,56 @@ async function _isAdminSender(senderId) {
   _adminSenderCache.set(id, isAdmin);
   return isAdmin;
 }
+function normalizeNotifOpts(opts = {}, image = null) {
+  const out = { ...(opts || {}) };
 
+  // allow passing image via param or opts.image_url
+  if (!out.image_url && typeof image === "string" && image.trim()) {
+    out.image_url = image.trim();
+  }
+
+  out.landing_url =
+    typeof out.landing_url === "string" ? out.landing_url.trim() || null : null;
+
+  out.image_url =
+    typeof out.image_url === "string" ? out.image_url.trim() || null : null;
+
+  out.priority = out.priority === "high" ? "high" : "normal";
+
+  const now = Date.now();
+  const sch = out.scheduled_at ? new Date(out.scheduled_at) : null;
+  const schValid = sch && !Number.isNaN(sch.getTime());
+
+  out.scheduled_at = schValid ? sch : null;
+
+  // status
+  const allowed = new Set([
+    "draft",
+    "scheduled",
+    "queued",
+    "sending",
+    "sent",
+    "failed",
+    "canceled",
+  ]);
+
+  if (!allowed.has(out.status)) {
+    out.status =
+      out.scheduled_at && out.scheduled_at.getTime() > now ? "scheduled" : "sent";
+  }
+
+  if (out.status === "scheduled") out.sent_at = null;
+
+  return out;
+}
+
+// used to update analytics on created notifications
+async function updateNotifAnalytics(notificationIds = [], patch = {}, t = null) {
+  if (!notificationIds.length) return;
+  const where = { id: { [Op.in]: notificationIds } };
+  const options = t ? { where, transaction: t } : { where };
+  await Notification.update(patch, options);
+}
 async function savePushInline(
   senderId,
   userIds,
@@ -156,15 +207,134 @@ async function savePushInline(
 ) {
   const isAdmin =
     typeof opts.is_admin === "boolean" ? opts.is_admin : await _isAdminSender(senderId);
-  const bulk = userIds.map((uid) => ({
-    sender_id: senderId,
-    receiver_id: uid,
-    is_admin: isAdmin ? 1 : 0,
-    type,
-    title,
-    content,
-    is_read: false,
-  }));
+
+  const nopts = normalizeNotifOpts(opts, image);
+
+  let saved = 0;
+  const createdIds = [];
+
+  const t = await sequelize.transaction();
+  try {
+    const chunkSize = 5000;
+
+    for (let i = 0; i < userIds.length; i += chunkSize) {
+      const chunk = userIds.slice(i, i + chunkSize);
+
+      const bulk = chunk.map((uid) => ({
+        sender_id: senderId,
+        receiver_id: uid,
+        is_admin: isAdmin ? 1 : 0,
+        type,
+        title,
+        content,
+
+        landing_url: nopts.landing_url,
+        image_url: nopts.image_url,
+        priority: nopts.priority,
+
+        status: nopts.status,
+        scheduled_at: nopts.scheduled_at,
+        sent_at: nopts.status === "sent" ? new Date() : null,
+
+        is_read: false,
+
+        total_targeted: 0,
+        total_sent: 0,
+        total_delivered: 0,
+        total_clicked: 0,
+        total_failed: 0,
+        last_error: null,
+      }));
+
+      const created = await Notification.bulkCreate(bulk, { transaction: t });
+      saved += created.length;
+
+      for (const row of created) if (row?.id) createdIds.push(Number(row.id));
+    }
+
+    await t.commit();
+  } catch (e) {
+    await t.rollback();
+    throw e;
+  }
+
+  // Scheduled: don't push now
+  if (nopts.status === "scheduled") {
+    return {
+      matched_users: userIds.length,
+      saved,
+      push: { attempted: 0, success: 0, failed: 0, scheduled: true },
+      filters: normalizedFilters,
+    };
+  }
+
+  // Collect tokens
+  const tokensSet = new Set();
+
+  for (let i = 0; i < userIds.length; i += 10000) {
+    const chunk = userIds.slice(i, i + 10000);
+
+    const rows = await NotificationToken.findAll({
+      where: { user_id: { [Op.in]: chunk }, is_active: true },
+      attributes: ["token"],
+      raw: true,
+    });
+
+    for (const r of rows) if (r?.token) tokensSet.add(r.token);
+  }
+
+  const tokens = Array.from(tokensSet);
+
+  let push = { attempted: 0, success: 0, failed: 0 };
+
+  try {
+    if (tokens.length) {
+      const admin = getAdmin();
+
+      for (let i = 0; i < tokens.length; i += 500) {
+        const chunk = tokens.slice(i, i + 500);
+
+        const payload = buildMulticastPayload(
+          chunk,
+          title,
+          content,
+          nopts.image_url,
+          {
+            type: String(type),
+            landing_url: nopts.landing_url ? String(nopts.landing_url) : "",
+            ...toStringData(data),
+          },
+          { priority: nopts.priority }
+        );
+
+        const res = await admin.messaging().sendEachForMulticast(payload);
+
+        push.attempted += chunk.length;
+        push.success += res.successCount || 0;
+        push.failed += res.failureCount || 0;
+      }
+    }
+  } catch (err) {
+    push.error = err.message || String(err);
+  }
+
+  // Update analytics for created notifications
+  await updateNotifAnalytics(createdIds, {
+    total_targeted: tokens.length,
+    total_sent: push.attempted || 0,
+    total_delivered: push.success || 0,
+    total_failed: push.failed || 0,
+    last_error: push.error || null,
+    sent_at: new Date(),
+    status: push.error ? "failed" : "sent",
+  });
+
+  return {
+    matched_users: userIds.length,
+    saved,
+    push,
+    filters: normalizedFilters,
+  };
 }
 
 
@@ -179,7 +349,7 @@ async function createAndSend(
   content,
   image = null,
   data = {},
-  opts = {} 
+  opts = {}
 ) {
   if (!receiverId) throw new Error("receiverId is required");
   if (!type) throw new Error("type is required");
@@ -189,23 +359,47 @@ async function createAndSend(
   const isAdmin =
     typeof opts.is_admin === "boolean" ? opts.is_admin : await _isAdminSender(senderId);
 
+  const nopts = normalizeNotifOpts(opts, image);
+
   const notification = await Notification.create({
     sender_id: senderId,
     receiver_id: receiverId,
-    is_admin: isAdmin ? 1 : 0, 
+    is_admin: isAdmin ? 1 : 0,
     type,
     title,
     content,
+
+    landing_url: nopts.landing_url,
+    image_url: nopts.image_url,
+    priority: nopts.priority,
+
+    status: nopts.status,
+    scheduled_at: nopts.scheduled_at,
+    sent_at: nopts.status === "sent" ? new Date() : null,
+
     is_read: false,
+
+    total_targeted: 0,
+    total_sent: 0,
+    total_delivered: 0,
+    total_clicked: 0,
+    total_failed: 0,
+    last_error: null,
   });
+
+  // Scheduled: do not send push now
+  if (nopts.status === "scheduled") {
+    return {
+      notification,
+      push: { attempted: 0, success: 0, failed: 0, scheduled: true },
+    };
+  }
 
   let push = { attempted: 0, success: 0, failed: 0 };
 
   try {
     const userId = Number(receiverId);
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return { notification, push };
-    }
+    if (!Number.isInteger(userId) || userId <= 0) return { notification, push };
 
     const rows = await NotificationToken.findAll({
       where: { user_id: userId, is_active: true },
@@ -213,21 +407,23 @@ async function createAndSend(
       order: [["id", "DESC"]],
     });
 
-    if (!rows.length) {
-      return { notification, push };
-    }
-
     const tokens = [...new Set(rows.map((r) => r.token).filter(Boolean))];
-    if (!tokens.length) {
-      return { notification, push };
-    }
+    if (!tokens.length) return { notification, push };
 
     const admin = getAdmin();
-    const payload = buildMulticastPayload(tokens, title, content, image, {
-      notificationId: String(notification.id),
-      type: String(type),
-      ...data,
-    });
+    const payload = buildMulticastPayload(
+      tokens,
+      title,
+      content,
+      nopts.image_url,
+      {
+        notificationId: String(notification.id),
+        type: String(type),
+        landing_url: nopts.landing_url ? String(nopts.landing_url) : "",
+        ...toStringData(data),
+      },
+      { priority: nopts.priority }
+    );
 
     const fcmRes = await admin.messaging().sendEachForMulticast(payload);
 
@@ -245,6 +441,20 @@ async function createAndSend(
     };
   }
 
+  // analytics update
+  await Notification.update(
+    {
+      total_targeted: push.attempted || 0,
+      total_sent: push.attempted || 0,
+      total_delivered: push.success || 0,
+      total_failed: push.failed || 0,
+      last_error: push.error || null,
+      sent_at: new Date(),
+      status: push.error ? "failed" : "sent",
+    },
+    { where: { id: notification.id } }
+  );
+
   return { notification, push };
 }
 
@@ -257,7 +467,7 @@ async function createAndSendGlobal(
   title,
   content,
   data = {},
-  opts = {} 
+  opts = {}
 ) {
   if (!type) throw new Error("type is required");
   if (!title) throw new Error("title is required");
@@ -266,7 +476,8 @@ async function createAndSendGlobal(
   const isAdmin =
     typeof opts.is_admin === "boolean" ? opts.is_admin : await _isAdminSender(senderId);
 
-  // Get all active tokens (and their user_id)
+  const nopts = normalizeNotifOpts(opts, null); // INSIDE function
+
   const rows = await NotificationToken.findAll({
     where: { is_active: true },
     attributes: ["user_id", "token"],
@@ -274,13 +485,9 @@ async function createAndSendGlobal(
   });
 
   if (!rows.length) {
-    return {
-      saved: 0,
-      push: { attempted: 0, success: 0, failed: 0 },
-    };
+    return { saved: 0, push: { attempted: 0, success: 0, failed: 0 } };
   }
 
-  // Unique users + unique tokens
   const userIds = new Set();
   const tokensSet = new Set();
 
@@ -292,25 +499,46 @@ async function createAndSendGlobal(
   const receiverIds = Array.from(userIds).filter((x) => Number.isInteger(x) && x > 0);
   const tokens = Array.from(tokensSet);
 
-  // Save notifications in DB for all users (bulk insert)
   let saved = 0;
+  let createdIds = [];
 
   if (receiverIds.length) {
     const bulk = receiverIds.map((uid) => ({
       sender_id: senderId,
       receiver_id: uid,
-      is_admin: isAdmin ? 1 : 0, 
+      is_admin: isAdmin ? 1 : 0,
       type,
       title,
       content,
+
+      landing_url: nopts.landing_url,
+      image_url: nopts.image_url,
+      priority: nopts.priority,
+
+      status: nopts.status,
+      scheduled_at: nopts.scheduled_at,
+      sent_at: nopts.status === "sent" ? new Date() : null,
+
       is_read: false,
+
+      total_targeted: 0,
+      total_sent: 0,
+      total_delivered: 0,
+      total_clicked: 0,
+      total_failed: 0,
+      last_error: null,
     }));
 
     const created = await Notification.bulkCreate(bulk);
-    saved = created.length || 0;
+    createdIds = created.map((x) => Number(x.id)).filter(Boolean);
+    saved = createdIds.length || 0;
   }
 
-  // Send push to all tokens (chunk 500)
+  // Scheduled: don't push now
+  if (nopts.status === "scheduled") {
+    return { saved, push: { attempted: 0, success: 0, failed: 0, scheduled: true } };
+  }
+
   let push = { attempted: 0, success: 0, failed: 0, errors: [] };
 
   try {
@@ -319,10 +547,18 @@ async function createAndSendGlobal(
     for (let i = 0; i < tokens.length; i += 500) {
       const chunk = tokens.slice(i, i + 500);
 
-      const payload = buildMulticastPayload(chunk, title, content, null, {
-        type: String(type),
-        ...toStringData(data),
-      });
+      const payload = buildMulticastPayload(
+        chunk,
+        title,
+        content,
+        nopts.image_url,
+        {
+          type: String(type),
+          landing_url: nopts.landing_url ? String(nopts.landing_url) : "",
+          ...toStringData(data),
+        },
+        { priority: nopts.priority }
+      );
 
       const res = await admin.messaging().sendEachForMulticast(payload);
 
@@ -341,7 +577,20 @@ async function createAndSendGlobal(
       });
     }
   } catch (err) {
-    push.err = err.message || String(err);
+    push.error = err.message || String(err);
+  }
+
+  // Optional: update analytics on created notifications
+  if (createdIds.length) {
+    await updateNotifAnalytics(createdIds, {
+      total_targeted: tokens.length,
+      total_sent: push.attempted || 0,
+      total_delivered: push.success || 0,
+      total_failed: push.failed || 0,
+      last_error: push.error || null,
+      sent_at: new Date(),
+      status: push.err ? "failed" : "sent",
+    });
   }
 
   return { saved, push };
@@ -667,16 +916,23 @@ async function createAndSendFiltered(
     }
 
     return await savePushInline(
-      senderId,
-      userIds,
-      type,
-      title,
-      content,
-      image,
-      data,
-      normalizedFilters,
-      { is_admin: isAdmin } 
-    );
+  senderId,
+  userIds,
+  type,
+  title,
+  content,
+  image,
+  data,
+  {
+    ...normalizedFilters,
+    days,
+    require_recent_purchase: requireRecentPurchase,
+    require_balance_gte: requireBalanceGte,
+    window_from: from,
+    window_to: to,
+  },
+  { ...opts, is_admin: isAdmin }
+);
   }
 
   const { from, to } = getDaysWindow(days);

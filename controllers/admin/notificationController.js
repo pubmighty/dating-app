@@ -1,9 +1,10 @@
-// controllers/admin/adminNotificationController.js
 const Joi = require("joi");
+const { Op } = require("sequelize");
 
 const Admin = require("../../models/Admin/Admin");
 const User = require("../../models/User");
-const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
+const Notification = require("../../models/Notification");
+
 const {
   isAdminSessionValid,
   verifyAdminRole,
@@ -15,7 +16,21 @@ const {
   previewFilteredUsers,
   createAndSendFiltered,
 } = require("../../utils/helpers/notificationHelper");
-const Notification=require("../../models/Notification")
+
+function pickNotifOpts(value) {
+  return {
+    landing_url: value?.landing_url || null,
+    image_url: value?.image_url || null,
+    priority: value?.priority || "normal",
+    scheduled_at: value?.scheduled_at || null,
+    status: value?.status || null,
+  };
+}
+
+function pickImage(value) {
+  // allow either "image" or "image_url" from UI
+  return value?.image || value?.image_url || null;
+}
 
 async function adminSendToUser(req, res) {
   try {
@@ -28,16 +43,18 @@ async function adminSendToUser(req, res) {
 
     const adminId = Number(session.data);
     const admin = await Admin.findByPk(adminId);
-    if (!admin)
+    if (!admin) {
       return res
         .status(401)
         .json({ success: false, message: "Admin not found", data: null });
+    }
 
     const canGo = await verifyAdminRole(admin, "sendNotifications");
-    if (!canGo)
+    if (!canGo) {
       return res
         .status(403)
         .json({ success: false, message: "Permission denied", data: null });
+    }
 
     const schema = Joi.object({
       receiverId: Joi.number().integer().positive().required(),
@@ -45,6 +62,14 @@ async function adminSendToUser(req, res) {
       title: Joi.string().trim().min(1).max(120).required(),
       content: Joi.string().trim().min(1).max(500).required(),
       image: Joi.string().trim().uri().allow("", null),
+      landing_url: Joi.string().trim().uri().allow("", null),
+      image_url: Joi.string().trim().uri().allow("", null),
+      priority: Joi.string().valid("normal", "high").default("normal"),
+      scheduled_at: Joi.date().iso().allow(null),
+      status: Joi.string()
+        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .allow(null),
+
       data: Joi.object().unknown(true).default({}),
     });
 
@@ -53,24 +78,30 @@ async function adminSendToUser(req, res) {
       stripUnknown: true,
       convert: true,
     });
-    if (error)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: error.details?.[0]?.message,
-          data: null,
-        });
 
-    // optional: ensure user exists
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message,
+        data: null,
+      });
+    }
+
     const user = await User.findOne({
       where: { id: value.receiverId, is_deleted: 0 },
       attributes: ["id"],
     });
-    if (!user)
+
+    if (!user) {
       return res
         .status(404)
         .json({ success: false, message: "User not found", data: null });
+    }
+
+    const opts = {
+      ...pickNotifOpts(value),
+      is_admin: true, 
+    };
 
     const result = await createAndSend(
       adminId,
@@ -78,28 +109,27 @@ async function adminSendToUser(req, res) {
       value.type,
       value.title,
       value.content,
-      value.image || null,
+      pickImage(value),
       {
         ...value.data,
         event: "ADMIN_SINGLE",
         sender_admin_id: String(adminId),
       },
+      opts
     );
 
     return res.json({
       success: true,
-      message: "Notification sent",
+      message: "Notification processed",
       data: result,
     });
   } catch (err) {
     console.error("adminSendToUser error:", err);
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to send notification",
-        data: null,
-      });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send notification",
+      data: null,
+    });
   }
 }
 
@@ -114,21 +144,32 @@ async function adminSendGlobal(req, res) {
 
     const adminId = Number(session.data);
     const admin = await Admin.findByPk(adminId);
-    if (!admin)
+    if (!admin) {
       return res
         .status(401)
         .json({ success: false, message: "Admin not found", data: null });
+    }
 
     const canGo = await verifyAdminRole(admin, "sendNotifications");
-    if (!canGo)
+    if (!canGo) {
       return res
         .status(403)
         .json({ success: false, message: "Permission denied", data: null });
+    }
 
     const schema = Joi.object({
       type: Joi.string().trim().min(1).max(50).required(),
       title: Joi.string().trim().min(1).max(120).required(),
       content: Joi.string().trim().min(1).max(500).required(),
+      image: Joi.string().trim().uri().allow("", null),
+      landing_url: Joi.string().trim().uri().allow("", null),
+      image_url: Joi.string().trim().uri().allow("", null),
+      priority: Joi.string().valid("normal", "high").default("normal"),
+      scheduled_at: Joi.date().iso().allow(null),
+      status: Joi.string()
+        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .allow(null),
+
       data: Joi.object().unknown(true).default({}),
     });
 
@@ -137,14 +178,19 @@ async function adminSendGlobal(req, res) {
       stripUnknown: true,
       convert: true,
     });
-    if (error)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: error.details?.[0]?.message,
-          data: null,
-        });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message,
+        data: null,
+      });
+    }
+
+    const opts = {
+      ...pickNotifOpts(value),
+      is_admin: true,
+    };
 
     const result = await createAndSendGlobal(
       adminId,
@@ -156,22 +202,21 @@ async function adminSendGlobal(req, res) {
         event: "ADMIN_GLOBAL",
         sender_admin_id: String(adminId),
       },
+      opts
     );
 
     return res.json({
       success: true,
-      message: "Global notification sent",
+      message: "Global notification processed",
       data: result,
     });
   } catch (err) {
     console.error("adminSendGlobal error:", err);
-    return res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to send global notification",
-        data: null,
-      });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send global notification",
+      data: null,
+    });
   }
 }
 
@@ -199,7 +244,6 @@ async function adminPreviewFiltered(req, res) {
         .json({ success: false, message: "Permission denied", data: null });
     }
 
-    //  GET: take filters from query params
     const schema = Joi.object({
       age_min: Joi.number().integer().min(13).max(100).allow(null),
       age_max: Joi.number().integer().min(13).max(100).allow(null),
@@ -218,15 +262,9 @@ async function adminPreviewFiltered(req, res) {
       is_active: Joi.boolean().allow(null),
       status: Joi.number().integer().valid(0, 1, 2, 3).allow(null),
       last_active_days: Joi.number().integer().min(1).max(3650).allow(null),
-
-      //  coin filter fields
       days: Joi.number().integer().min(1).max(3650).optional(),
       require_recent_purchase: Joi.boolean().default(false),
-
-      //  IMPORTANT: default should be 0 unless you want strict
       require_balance_gt: Joi.number().integer().min(0).default(0),
-
-      // optional paging/limit for preview
       limit: Joi.number().integer().min(1).max(5000).default(2000),
       page: Joi.number().integer().min(1).max(100000).default(1),
     });
@@ -245,9 +283,7 @@ async function adminPreviewFiltered(req, res) {
       });
     }
 
-    //  pass validated query object directly as filters
     const result = await previewFilteredUsers(value);
-
     return res.json({ success: true, message: "Preview OK", data: result });
   } catch (err) {
     console.error("adminPreviewFiltered error:", err);
@@ -291,6 +327,14 @@ async function adminSendFiltered(req, res) {
       title: Joi.string().trim().min(1).max(120).required(),
       content: Joi.string().trim().min(1).max(500).required(),
       image: Joi.string().trim().uri().allow("", null),
+      landing_url: Joi.string().trim().uri().allow("", null),
+      image_url: Joi.string().trim().uri().allow("", null),
+      priority: Joi.string().valid("normal", "high").default("normal"),
+      scheduled_at: Joi.date().iso().allow(null),
+      status: Joi.string()
+        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .allow(null),
+
       data: Joi.object().unknown(true).default({}),
       max_users: Joi.number().integer().min(1).max(500000).default(100000),
     });
@@ -314,8 +358,6 @@ async function adminSendFiltered(req, res) {
       days: Joi.number().integer().min(1).max(3650).required(),
       require_recent_purchase: Joi.boolean().default(false),
       require_balance_gt: Joi.number().integer().min(0).default(0),
-
-      // optional user filters
       type: Joi.string().valid("real", "bot").allow("", null),
       gender: Joi.string()
         .valid("male", "female", "other", "prefer_not_to_say")
@@ -358,25 +400,30 @@ async function adminSendFiltered(req, res) {
     if (!filters.state) filters.state = null;
     if (!filters.city) filters.city = null;
     if (!filters.region) filters.region = null;
+    const opts = {
+      ...pickNotifOpts(payload),
+      is_admin: true,
+    };
 
     const result = await createAndSendFiltered(
       adminId,
       payload.type,
       payload.title,
       payload.content,
-      payload.image || null,
+      pickImage(payload),
       {
         ...payload.data,
         event: "ADMIN_FILTERED",
         sender_admin_id: String(adminId),
       },
       filters,
-      payload.max_users
+      payload.max_users,
+      opts
     );
 
     return res.json({
       success: true,
-      msg: "Filtered notification sent",
+      msg: "Filtered notification processed",
       data: result,
     });
   } catch (err) {
@@ -417,10 +464,13 @@ async function getSentNotifications(req, res) {
       page: Joi.number().integer().min(1).max(100000).default(1),
       limit: Joi.number().integer().min(1).max(200).default(50),
 
-      // optional filters
       receiver_id: Joi.number().integer().positive().allow(null),
       sender_id: Joi.number().integer().positive().allow(null),
       type: Joi.string().trim().max(50).allow("", null),
+      status: Joi.string()
+        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .allow("", null),
+
       q: Joi.string().trim().max(200).allow("", null),
     });
 
@@ -447,6 +497,7 @@ async function getSentNotifications(req, res) {
     if (value.receiver_id) where.receiver_id = value.receiver_id;
     if (value.sender_id) where.sender_id = value.sender_id;
     if (value.type) where.type = value.type;
+    if (value.status) where.status = value.status;
 
     if (value.q) {
       where[Op.or] = [
@@ -465,8 +516,20 @@ async function getSentNotifications(req, res) {
         "type",
         "title",
         "content",
+        "landing_url",
+        "image_url",
+        "priority",
+        "status",
+        "scheduled_at",
+        "sent_at",
         "is_read",
         "created_at",
+        "total_targeted",
+        "total_sent",
+        "total_delivered",
+        "total_clicked",
+        "total_failed",
+        "last_error",
       ],
       order: [["id", "DESC"]],
       limit,
@@ -488,7 +551,7 @@ async function getSentNotifications(req, res) {
       },
     });
   } catch (err) {
-    console.error("adminGetAdminSentNotifications error:", err);
+    console.error("getSentNotifications error:", err);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch admin notifications",
@@ -497,11 +560,10 @@ async function getSentNotifications(req, res) {
   }
 }
 
-
 module.exports = {
   adminSendToUser,
   adminSendGlobal,
   adminPreviewFiltered,
   adminSendFiltered,
-  getSentNotifications
+  getSentNotifications,
 };

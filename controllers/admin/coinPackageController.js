@@ -18,8 +18,10 @@ const {
 } = require("../../utils/helpers/fileUpload");
 const sequelize = require("../../config/db");
 const Admin = require("../../models/Admin/Admin");
+const User = require("../../models/User");
 const CoinPackage = require("../../models/CoinPackage");
 const CoinPurchaseTransaction = require("../../models/CoinPurchaseTransaction");
+const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
 
 async function getCoinPackages(req, res) {
   try {
@@ -363,7 +365,7 @@ async function addCoinPackage(req, res) {
     const calc = computeFinalPrice(
       value.price,
       value.discount_type,
-      value.discount_value
+      value.discount_value,
     );
     if (!calc.ok) {
       return res.status(400).json({
@@ -377,7 +379,7 @@ async function addCoinPackage(req, res) {
       typeof value.google_product_id === "string" &&
       value.google_product_id.trim() === ""
         ? null
-        : value.google_product_id ?? null;
+        : (value.google_product_id ?? null);
 
     // 5) Ensure google_product_id uniqueness yourself
     if (googleProductId) {
@@ -485,7 +487,7 @@ async function editCoinPackage(req, res) {
 
     const { error: pErr, value: pVal } = paramsSchema.validate(
       { coinPackageId: req.params.coinPackageId },
-      { abortEarly: true, convert: true }
+      { abortEarly: true, convert: true },
     );
 
     if (pErr) {
@@ -594,7 +596,7 @@ async function editCoinPackage(req, res) {
         typeof value.google_product_id === "string" &&
         value.google_product_id.trim() === ""
           ? null
-          : value.google_product_id ?? undefined;
+          : (value.google_product_id ?? undefined);
 
       if (googleProductId !== undefined) {
         if (googleProductId) {
@@ -672,7 +674,7 @@ async function editCoinPackage(req, res) {
         const calc = computeFinalPrice(
           pkg.price,
           pkg.discount_type,
-          pkg.discount_value
+          pkg.discount_value,
         );
 
         if (!calc.ok) {
@@ -749,7 +751,7 @@ async function deleteCoinPackage(req, res) {
 
     const { error: bodyError, value: bodyVal } = bodySchema.validate(
       req.body || {},
-      { abortEarly: true, convert: true }
+      { abortEarly: true, convert: true },
     );
 
     if (bodyError) {
@@ -813,7 +815,7 @@ async function deleteCoinPackage(req, res) {
       const [purchaseTransactionReassigned] =
         await CoinPurchaseTransaction.update(
           { coin_pack_id: targetId },
-          { where: { coin_pack_id: sourceId }, transaction: t }
+          { where: { coin_pack_id: sourceId }, transaction: t },
         );
 
       // Delete coin package
@@ -858,10 +860,540 @@ async function deleteCoinPackage(req, res) {
   }
 }
 
+async function getCoinPurchaseTransactions(req, res) {
+  try {
+    // 1) Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Unauthorized", data: null });
+    }
+
+    // 2) Load admin + permission
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin not found", data: null });
+    }
+
+    const canGo = await verifyAdminRole(admin, "getCoinPurchaseTransactions");
+    if (!canGo) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Forbidden", data: null });
+    }
+
+    // 3) Validate query
+    const schema = Joi.object({
+      page: Joi.number().integer().min(1).default(1),
+      limit: Joi.number().integer().min(1).max(100).default(20),
+
+      id: Joi.number().integer().positive().optional(),
+      user_id: Joi.number().integer().positive().optional(),
+      coin_pack_id: Joi.number().integer().positive().optional(),
+
+      provider: Joi.string().valid("google_play").optional(),
+
+      status: Joi.string()
+        .valid("pending", "completed", "failed", "refunded")
+        .optional(),
+      payment_status: Joi.string()
+        .valid("pending", "completed", "failed", "refunded")
+        .optional(),
+
+      // text search
+      order_id: Joi.string().min(2).max(128).optional(),
+      product_id: Joi.string().min(2).max(100).optional(),
+      transaction_id: Joi.string().min(2).max(100).optional(),
+      purchase_token: Joi.string().min(5).max(255).optional(),
+      package_name: Joi.string().min(2).max(200).optional(),
+
+      // amount range (decimal)
+      min_amount: Joi.number().min(0).optional(),
+      max_amount: Joi.number().min(0).optional(),
+
+      // coins_received range
+      min_coins: Joi.number().integer().min(0).optional(),
+      max_coins: Joi.number().integer().min(0).optional(),
+
+      // date range (by `date` column)
+      start_date: Joi.date().iso().optional(),
+      end_date: Joi.date().iso().optional(),
+
+      // sorting
+      sortBy: Joi.string().optional().default("created_at"),
+      order: Joi.string().valid("ASC", "DESC", "asc", "desc").default("DESC"),
+
+      // include relations toggles (safe defaults)
+      include_user: Joi.alternatives()
+        .try(Joi.boolean(), Joi.string().valid("1", "0", "true", "false"))
+        .default(false),
+      include_package: Joi.alternatives()
+        .try(Joi.boolean(), Joi.string().valid("1", "0", "true", "false"))
+        .default(true),
+    });
+
+    const { error, value } = schema.validate(req.query, {
+      abortEarly: true,
+      convert: true,
+      stripUnknown: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid query",
+        data: null,
+      });
+    }
+    const SORT_WHITELIST = new Set([
+      "id",
+      "user_id",
+      "coin_pack_id",
+      "coins_received",
+      "amount",
+      "provider",
+      "order_id",
+      "product_id",
+      "transaction_id",
+      "status",
+      "payment_status",
+      "date",
+      "created_at",
+      "updated_at",
+    ]);
+    //  Pagination with options cap
+    let page = Number(value.page);
+    let limit = Number(value.limit);
+
+    let maxPages = parseInt(await getOption("max_pages_admin", 1000), 10);
+    if (Number.isNaN(maxPages) || maxPages < 1) maxPages = 1000;
+    page = Math.min(page, maxPages);
+
+    let defaultPerPage = parseInt(
+      await getOption("coin_purchase_tx_per_page", 20),
+      10,
+    );
+    if (Number.isNaN(defaultPerPage) || defaultPerPage < 1) defaultPerPage = 20;
+
+    // if client didn’t pass limit explicitly, keep your option value
+    if (!req.query.limit) limit = defaultPerPage;
+
+    const offset = (page - 1) * limit;
+    0;
+
+    //  Build where
+    const where = {};
+
+    if (value.id) where.id = Number(value.id);
+    if (value.user_id) where.user_id = Number(value.user_id);
+    if (value.coin_pack_id) where.coin_pack_id = Number(value.coin_pack_id);
+
+    if (value.provider) where.provider = value.provider;
+    if (value.status) where.status = value.status;
+    if (value.payment_status) where.payment_status = value.payment_status;
+
+    // LIKE filters (prefix match where helpful)
+    if (value.order_id) where.order_id = { [Op.like]: `${value.order_id}%` };
+    if (value.product_id)
+      where.product_id = { [Op.like]: `${value.product_id}%` };
+    if (value.transaction_id)
+      where.transaction_id = { [Op.like]: `${value.transaction_id}%` };
+    if (value.purchase_token)
+      where.purchase_token = { [Op.like]: `${value.purchase_token}%` };
+    if (value.package_name)
+      where.package_name = { [Op.like]: `${value.package_name}%` };
+
+    // amount range
+    if (
+      typeof value.min_amount === "number" ||
+      typeof value.max_amount === "number"
+    ) {
+      where.amount = {};
+      if (typeof value.min_amount === "number")
+        where.amount[Op.gte] = value.min_amount;
+      if (typeof value.max_amount === "number")
+        where.amount[Op.lte] = value.max_amount;
+    }
+
+    // coins range
+    if (
+      typeof value.min_coins === "number" ||
+      typeof value.max_coins === "number"
+    ) {
+      where.coins_received = {};
+      if (typeof value.min_coins === "number")
+        where.coins_received[Op.gte] = value.min_coins;
+      if (typeof value.max_coins === "number")
+        where.coins_received[Op.lte] = value.max_coins;
+    }
+
+    // date range (use `date` column)
+    if (value.start_date || value.end_date) {
+      where.date = {};
+      if (value.start_date) where.date[Op.gte] = new Date(value.start_date);
+      if (value.end_date) where.date[Op.lte] = new Date(value.end_date);
+    }
+
+    //  Sorting
+    const sortBy = SORT_WHITELIST.has(value.sortBy)
+      ? value.sortBy
+      : "created_at";
+    const orderDir = value.order.toUpperCase() == "ASC" ? "ASC" : "DESC";
+
+    //  Includes (package is already associated)
+    const include = [];
+
+    const includePackage =
+      value.include_package === true ||
+      String(value.include_package) === "1" ||
+      String(value.include_package).toLowerCase() === "true";
+
+    if (includePackage) {
+      include.push({
+        model: CoinPackage,
+        as: "package",
+        required: false,
+        attributes: [
+          "id",
+          "name",
+          "coins",
+          "price",
+          "final_price",
+          "currency",
+          "provider",
+          "google_product_id",
+          "status",
+          "is_popular",
+          "is_ads_free",
+          "display_order",
+        ],
+      });
+    }
+
+    const includeUser =
+      value.include_user === true ||
+      String(value.include_user) === "1" ||
+      String(value.include_user).toLowerCase() === "true";
+
+    if (includeUser) {
+      include.push({
+        model: User,
+        as: "user",
+        required: false,
+        attributes: [
+          "id",
+          "username",
+          "email",
+          "phone",
+          "avatar",
+          "is_active",
+          "country",
+        ],
+      });
+    }
+
+    //  Query
+    const { count, rows } = await CoinPurchaseTransaction.findAndCountAll({
+      where,
+      attributes: [
+        "id",
+        "user_id",
+        "coin_pack_id",
+        "coins_received",
+        "amount",
+        "payment_method",
+        "provider",
+        "order_id",
+        "package_name",
+        "product_id",
+        "transaction_id",
+        "status",
+        "payment_status",
+        "purchase_token",
+        "provider_payload",
+        "date",
+        "created_at",
+        "updated_at",
+      ],
+      include,
+      order: [
+        [sortBy, orderDir],
+        ["id", "DESC"],
+      ],
+      limit,
+      offset,
+      distinct: true,
+      subQuery: false,
+    });
+
+    return res.json({
+      success: true,
+      message: "Coin purchase transactions fetched successfully",
+      data: {
+        transactions: rows,
+        pagination: {
+          page,
+          limit,
+          total: count,
+          totalPages: Math.ceil(count / limit),
+          hasMore: offset + rows.length < count,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("getCoinPurchaseTransactions error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error", data: null });
+  }
+}
+
+async function getCoinSpentTransactions(req, res) {
+  try {
+    // 1) Admin session
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Unauthorized", data: null });
+    }
+
+    // 2) Admin + permission
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin not found", data: null });
+    }
+
+    const canGo = await verifyAdminRole(admin, "getCoinSpentTransactions");
+    if (!canGo) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Forbidden", data: null });
+    }
+
+    // 3) Validate query
+    const schema = Joi.object({
+      page: Joi.number().integer().min(1).default(1),
+      limit: Joi.number().integer().min(1).max(100).default(20),
+
+      id: Joi.number().integer().positive().optional(),
+      user_id: Joi.number().integer().positive().optional(),
+
+      spent_on: Joi.string()
+        .valid("message", "video_call", "unlock_feature", "other")
+        .optional(),
+
+      message_id: Joi.number().integer().positive().optional(),
+      video_call_id: Joi.number().integer().positive().optional(),
+
+      status: Joi.string().valid("completed", "refunded").optional(),
+
+      // text search
+      description: Joi.string().min(2).max(255).optional(),
+
+      // coins range
+      min_coins: Joi.number().integer().min(0).optional(),
+      max_coins: Joi.number().integer().min(0).optional(),
+
+      // date range (by `date` column)
+      start_date: Joi.date().iso().optional(),
+      end_date: Joi.date().iso().optional(),
+
+      // sorting
+      sortBy: Joi.string().optional().default("date"),
+      order: Joi.string().valid("ASC", "DESC", "asc", "desc").default("DESC"),
+
+      // include toggles
+      include_user: Joi.alternatives()
+        .try(Joi.boolean(), Joi.string().valid("1", "0", "true", "false"))
+        .default(false),
+    });
+
+    const { error, value } = schema.validate(req.query, {
+      abortEarly: true,
+      convert: true,
+      stripUnknown: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid query",
+        data: null,
+      });
+    }
+
+    const SORT_WHITELIST = new Set([
+      "id",
+      "user_id",
+      "coins",
+      "spent_on",
+      "message_id",
+      "video_call_id",
+      "status",
+      "date",
+      "created_at",
+    ]);
+
+    // 4) Pagination
+    const page = Number(value.page);
+    const limit = Number(value.limit);
+    const offset = (page - 1) * limit;
+
+    // 5) Build where
+    const where = {};
+
+    if (value.id) where.id = Number(value.id);
+    if (value.user_id) where.user_id = Number(value.user_id);
+
+    if (value.spent_on) where.spent_on = value.spent_on;
+    if (value.message_id) where.message_id = Number(value.message_id);
+    if (value.video_call_id) where.video_call_id = Number(value.video_call_id);
+
+    if (value.status) where.status = value.status;
+
+    if (value.description) {
+      where.description = { [Op.like]: `%${value.description}%` };
+    }
+
+    // coins range
+    if (
+      typeof value.min_coins === "number" ||
+      typeof value.max_coins === "number"
+    ) {
+      where.coins = {};
+      if (typeof value.min_coins === "number")
+        where.coins[Op.gte] = value.min_coins;
+      if (typeof value.max_coins === "number")
+        where.coins[Op.lte] = value.max_coins;
+    }
+
+    // date range (use `date` column)
+    if (value.start_date || value.end_date) {
+      where.date = {};
+      if (value.start_date) where.date[Op.gte] = new Date(value.start_date);
+      if (value.end_date) where.date[Op.lte] = new Date(value.end_date);
+    }
+
+    // 6) Sorting
+    const sortBy = SORT_WHITELIST.has(value.sortBy) ? value.sortBy : "date";
+    const orderDir = value.order.toUpperCase() === "ASC" ? "ASC" : "DESC";
+
+    // 7) Includes
+    const include = [];
+
+    const includeUser =
+      value.include_user === true ||
+      String(value.include_user) === "1" ||
+      String(value.include_user).toLowerCase() === "true";
+
+    if (includeUser) {
+      include.push({
+        model: User,
+        as: "user",
+        required: false,
+        attributes: [
+          "id",
+          "username",
+          "email",
+          "phone",
+          "avatar",
+          "is_active",
+          "country",
+        ],
+      });
+    }
+
+    const includeMessage =
+      value.include_message === true ||
+      String(value.include_message) === "1" ||
+      String(value.include_message).toLowerCase() === "true";
+
+    if (includeMessage) {
+      include.push({
+        model: Message,
+        as: "message",
+        required: false,
+        attributes: ["id", "message", "message_type", "status", "created_at"],
+      });
+    }
+
+    const includeVideoCall =
+      value.include_video_call === true ||
+      String(value.include_video_call) === "1" ||
+      String(value.include_video_call).toLowerCase() === "true";
+
+    if (includeVideoCall) {
+      include.push({
+        model: VideoCall,
+        as: "videoCall",
+        required: false,
+        attributes: ["id", "status", "start_time", "end_time", "created_at"],
+      });
+    }
+
+    // 8) Query
+    const { count, rows } = await CoinSpentTransaction.findAndCountAll({
+      where,
+      attributes: [
+        "id",
+        "user_id",
+
+        "coins",
+        "spent_on",
+        "message_id",
+        "video_call_id",
+        "description",
+        "status",
+        "date",
+        "created_at",
+      ],
+      include,
+      order: [
+        [sortBy, orderDir],
+        ["id", "DESC"],
+      ],
+      limit,
+      offset,
+      distinct: true,
+      subQuery: false,
+    });
+
+    return res.json({
+      success: true,
+      message: "Coin spent transactions fetched successfully",
+      data: {
+        transactions: rows,
+        pagination: {
+          page,
+          limit,
+          total: count,
+          totalPages: Math.ceil(count / limit),
+          hasMore: offset + rows.length < count,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("getCoinSpentTransactions error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error", data: null });
+  }
+}
+
 module.exports = {
   getCoinPackages,
   getCoinPackage,
   addCoinPackage,
   editCoinPackage,
   deleteCoinPackage,
+  getCoinPurchaseTransactions,
+  getCoinSpentTransactions,
 };
