@@ -1703,7 +1703,7 @@ async function deleteChat(req, res) {
   try {
     // 1) Validate body early
     const paramSchema = Joi.object({
-      chat_id: Joi.number().integer().positive().required(),
+      chatId: Joi.number().integer().positive().required(),
     });
 
     const { error, value } = paramSchema.validate(req.params, {
@@ -1719,7 +1719,7 @@ async function deleteChat(req, res) {
       });
     }
 
-    const chatId = Number(value.chat_id);
+    const chatId = Number(value.chatId);
 
     // 2) Session check
     const sessionResult = await isUserSessionValid(req);
