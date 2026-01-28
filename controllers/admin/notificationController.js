@@ -86,7 +86,7 @@ async function adminSendToUser(req, res) {
       is_admin: true,
     };
 
-    // ✅ 1) per-user notification row + push (admin-only helper)
+    //  1) per-user notification row + push (admin-only helper)
     const result = await createAndSendAdminToUser(
       adminId,
       value.receiverId,
@@ -102,7 +102,7 @@ async function adminSendToUser(req, res) {
       opts
     );
 
-    // ✅ 2) single-row admin campaign log (pb_notifications_global)
+    //  2) single-row admin campaign log (pb_notifications_global)
     // receiver_id filled for single-user sends
     try {
       const push = result?.push || { attempted: 0, success: 0, failed: 0 };
@@ -110,7 +110,7 @@ async function adminSendToUser(req, res) {
 
       await NotificationGlobal.create({
         sender_id: adminId,
-        receiver_id: Number(value.receiverId), // ✅ store receiver id (single user)
+        receiver_id: Number(value.receiverId), //  store receiver id (single user)
 
         type: value.type,
         title: value.title,
