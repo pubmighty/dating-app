@@ -233,7 +233,7 @@ async function getNotifications(req, res) {
     {
       model: User,
       as: "sender",
-      attributes: ["id", "username", "avatar"],
+      attributes: ["id", "full_name", "avatar"],
       required: false, // VERY IMPORTANT (system notifications)
     },
   ],

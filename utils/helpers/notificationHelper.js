@@ -602,10 +602,10 @@ async function sendBotMatchNotificationToUser(userId, botId, chatId = null) {
   if (!userId || !botId) throw new Error("userId and botId are required");
 
   const bot = await User.findByPk(botId, {
-    attributes: ["id", "username", "full_name", "avatar"],
+    attributes: ["id", "full_name", "full_name", "avatar"],
   });
 
-  const botName = bot?.full_name?.trim() || bot?.username?.trim() || "someone";
+  const botName = bot?.full_name?.trim() || bot?.full_name?.trim() || "someone";
 
   // const BASE_URL = await getOption("base_url","! add_domain");
   // const avatarUrl = `${BASE_URL}/uploads/avatar/${bot.avatar}`;
@@ -642,11 +642,11 @@ async function sendChatNotification(
   }
 
   const sender = await User.findByPk(senderId, {
-    attributes: ["id", "username", "full_name", "avatar"],
+    attributes: ["id", "full_name", "avatar"],
   });
 
   const senderName =
-    sender?.full_name?.trim() || sender?.username?.trim() || "Someone";
+    sender?.full_name?.trim() || sender?.full_name?.trim() || "Someone";
 
   const preview =
     messageType !== "text" && !messageText
@@ -680,11 +680,11 @@ async function sendLikeNotificationToUser(senderId, receiverId) {
     throw new Error("senderId and receiverId are required");
 
   const sender = await User.findByPk(senderId, {
-    attributes: ["id", "username", "full_name", "avatar", "type"],
+    attributes: ["id", "full_name", "avatar", "type"],
   });
 
   const senderName =
-    sender?.full_name?.trim() || sender?.username?.trim() || "someone";
+    sender?.full_name?.trim() || sender?.full_name?.trim() || "someone";
 
   // const BASE_URL = process.env.BASE_URL || "http://192.168.0.156:5000";
   // const avatarUrl = sender?.avatar ? `${BASE_URL}/uploads/avatar/${sender.avatar}` : null;
@@ -715,11 +715,11 @@ async function sendRejectNotificationToUser(senderId, receiverId) {
     throw new Error("senderId and receiverId are required");
 
   const sender = await User.findByPk(senderId, {
-    attributes: ["id", "username", "full_name", "avatar", "type"],
+    attributes: ["id", "full_name", "avatar", "type"],
   });
 
   const senderName =
-    sender?.full_name?.trim() || sender?.username?.trim() || "someone";
+    sender?.full_name?.trim() || sender?.full_name?.trim() || "someone";
 
   // const BASE_URL = process.env.BASE_URL || "http://192.168.0.156:5002";
   // const avatarUrl = sender?.avatar ? `${BASE_URL}/uploads/avatar/${sender.avatar}` : null;
