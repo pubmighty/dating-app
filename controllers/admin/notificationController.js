@@ -15,9 +15,8 @@ const {
   previewFilteredUsers,
   createAndSendFiltered,
   pickImage,
-  pickNotifOpts
+  pickNotifOpts,
 } = require("../../utils/helpers/notificationHelper");
-
 
 async function adminSendToUser(req, res) {
   try {
@@ -54,7 +53,15 @@ async function adminSendToUser(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .valid(
+          "draft",
+          "scheduled",
+          "queued",
+          "sending",
+          "sent",
+          "failed",
+          "canceled",
+        )
         .allow(null),
       data: Joi.object().unknown(true).default({}),
     });
@@ -86,7 +93,7 @@ async function adminSendToUser(req, res) {
 
     const opts = {
       ...pickNotifOpts(value),
-      is_admin: true, 
+      is_admin: true,
     };
 
     const result = await createAndSend(
@@ -101,7 +108,7 @@ async function adminSendToUser(req, res) {
         event: "ADMIN_SINGLE",
         sender_admin_id: String(adminId),
       },
-      opts
+      opts,
     );
 
     return res.json({
@@ -153,7 +160,15 @@ async function adminSendGlobal(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .valid(
+          "draft",
+          "scheduled",
+          "queued",
+          "sending",
+          "sent",
+          "failed",
+          "canceled",
+        )
         .allow(null),
 
       data: Joi.object().unknown(true).default({}),
@@ -188,7 +203,7 @@ async function adminSendGlobal(req, res) {
         event: "ADMIN_GLOBAL",
         sender_admin_id: String(adminId),
       },
-      opts
+      opts,
     );
 
     return res.json({
@@ -314,7 +329,15 @@ async function adminSendFiltered(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .valid(
+          "draft",
+          "scheduled",
+          "queued",
+          "sending",
+          "sent",
+          "failed",
+          "canceled",
+        )
         .allow(null),
 
       data: Joi.object().unknown(true).default({}),
@@ -400,7 +423,7 @@ async function adminSendFiltered(req, res) {
       },
       filters,
       payload.max_users,
-      opts
+      opts,
     );
 
     return res.json({
@@ -441,17 +464,36 @@ async function getSentNotifications(req, res) {
         .status(403)
         .json({ success: false, message: "Permission denied", data: null });
     }
-
     const schema = Joi.object({
-      page: Joi.number().integer().min(1).max(100000).default(1),
+      page: Joi.number().integer().min(1).max(100).default(1),
       limit: Joi.number().integer().min(1).max(200).default(50),
-      receiver_id: Joi.number().integer().positive().allow(null),
-      sender_id: Joi.number().integer().positive().allow(null),
+
+      id: Joi.number().integer().positive().allow("", null),
+      receiver_id: Joi.number().integer().positive().allow("", null),
+      sender_id: Joi.number().integer().positive().allow("", null),
       type: Joi.string().trim().max(50).allow("", null),
-      status: Joi.string()
-        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
-        .allow("", null),
-      query: Joi.string().trim().max(200).allow("", null),
+
+      title: Joi.string().trim().max(200).allow("", null),
+      content: Joi.string().trim().max(500).allow("", null),
+
+      is_read: Joi.string().valid("", "true", "false").allow("", null),
+
+      created_from: Joi.string().trim().allow("", null), // YYYY-MM-DD
+      created_to: Joi.string().trim().allow("", null), // YYYY-MM-DD
+
+      sortBy: Joi.string()
+        .valid(
+          "id",
+          "sender_id",
+          "receiver_id",
+          "title",
+          "is_read",
+          "created_at",
+          "updated_at",
+        )
+        .default("created_at"),
+
+      order: Joi.string().valid("ASC", "DESC").default("DESC"),
     });
 
     const { error, value } = schema.validate(req.query, {
@@ -474,17 +516,38 @@ async function getSentNotifications(req, res) {
 
     const where = { is_admin: 1 };
 
-    if (value.receiver_id) where.receiver_id = value.receiver_id;
-    if (value.sender_id) where.sender_id = value.sender_id;
+    if (value.id) where.id = Number(value.id);
+    if (value.receiver_id) where.receiver_id = Number(value.receiver_id);
+    if (value.sender_id) where.sender_id = Number(value.sender_id);
     if (value.type) where.type = value.type;
-    if (value.status) where.status = value.status;
 
-    if (value.query) {
-      where[Op.or] = [
-        { title: { [Op.like]: `%${value.query}%` } },
-        { content: { [Op.like]: `%${value.query}%` } },
-      ];
+    if (value.title) where.title = { [Op.like]: `%${value.title}%` };
+    if (value.content) where.content = { [Op.like]: `%${value.content}%` };
+
+    if (value.is_read === "true") where.is_read = true;
+    if (value.is_read === "false") where.is_read = false;
+
+    if (value.created_from || value.created_to) {
+      const from = value.created_from ? `${value.created_from} 00:00:00` : null;
+      const to = value.created_to ? `${value.created_to} 23:59:59` : null;
+
+      if (from && to) where.created_at = { [Op.between]: [from, to] };
+      else if (from) where.created_at = { [Op.gte]: from };
+      else if (to) where.created_at = { [Op.lte]: to };
     }
+
+    const sortMap = {
+      id: "id",
+      sender_id: "sender_id",
+      receiver_id: "receiver_id",
+      title: "title",
+      is_read: "is_read",
+      created_at: "created_at",
+      updated_at: "updated_at",
+    };
+
+    const sortCol = sortMap[value.sortBy] || "created_at";
+    const sortOrder = value.order || "DESC";
 
     const { rows, count } = await Notification.findAndCountAll({
       where,
@@ -496,22 +559,25 @@ async function getSentNotifications(req, res) {
         "type",
         "title",
         "content",
-        "landing_url",
-        "image_url",
-        "priority",
-        "status",
-        "scheduled_at",
-        "sent_at",
         "is_read",
         "created_at",
-        "total_targeted",
-        "total_sent",
-        "total_delivered",
-        "total_clicked",
-        "total_failed",
-        "last_error",
+        "updated_at",
       ],
-      order: [["id", "DESC"]],
+      include: [
+        {
+          model: User,
+          as: "receiver",
+          attributes: ["id", "username", "email", "avatar"],
+          required: false,
+        },
+        {
+          model: Admin,
+          as: "senderAdmin",
+          attributes: ["id", "username", "email", "avatar", "role"],
+          required: false,
+        },
+      ],
+      order: [[sortCol, sortOrder]],
       limit,
       offset,
     });

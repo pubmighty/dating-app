@@ -150,11 +150,16 @@ function setupAssociations() {
     foreignKey: "chat_id",
     as: "chat",
   });
-  Notification.belongsTo(User, {
-    foreignKey: "sender_id",
-    as: "sender",
-  });
 
+
+Notification.belongsTo(Admin, {
+  foreignKey: "sender_id",
+  as: "senderAdmin",
+});
+Notification.belongsTo(User, {
+  foreignKey: "receiver_id",
+  as: "receiver",
+});
   UserBlock.belongsTo(User, {
     foreignKey: "user_id",
     as: "blockedUser",

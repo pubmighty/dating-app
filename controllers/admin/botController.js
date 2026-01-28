@@ -2149,7 +2149,7 @@ async function updateBotReport(req, res) {
           "any.only": "Invalid status.",
           "any.required": "status is required.",
         }),
-
+      moderated_by: Joi.number().integer().positive().optional(),
       moderator_note: Joi.string()
         .trim()
         .max(1000)
@@ -2213,7 +2213,7 @@ async function updateBotReport(req, res) {
     await Report.update(
       {
         status: botVal.status,
-        moderated_by: adminId,
+        moderated_by: botVal.moderated_by,
         moderator_note: botVal.moderator_note,
         moderated_at: new Date(),
       },

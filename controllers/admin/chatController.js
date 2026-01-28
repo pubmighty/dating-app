@@ -554,7 +554,7 @@ async function adminGetChats(req, res) {
           as: "participant1",
           attributes: [
             "id",
-            "username",
+            "full_name",
             "avatar",
             "is_active",
             "last_active",
@@ -568,7 +568,7 @@ async function adminGetChats(req, res) {
           as: "participant2",
           attributes: [
             "id",
-            "username",
+            "full_name",
             "avatar",
             "is_active",
             "last_active",

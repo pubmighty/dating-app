@@ -41,7 +41,7 @@ const Notification = sequelize.define(
       allowNull: false,
     },
 
-     landing_url: {
+    landing_url: {
       type: DataTypes.STRING(200),
       allowNull: true,
       comment: "Deep link or web URL",
@@ -59,7 +59,7 @@ const Notification = sequelize.define(
       defaultValue: false,
     },
 
-      status: {
+    status: {
       type: DataTypes.ENUM(
         "draft",
         "scheduled",
@@ -67,7 +67,7 @@ const Notification = sequelize.define(
         "sending",
         "sent",
         "failed",
-        "canceled"
+        "canceled",
       ),
       allowNull: false,
       defaultValue: "draft",
@@ -83,14 +83,14 @@ const Notification = sequelize.define(
       allowNull: true,
     },
 
-     priority: {
+    priority: {
       type: DataTypes.ENUM("normal", "high"),
       allowNull: false,
       defaultValue: "normal",
       comment: "FCM priority",
     },
 
-      total_targeted: {
+    total_targeted: {
       type: DataTypes.INTEGER.UNSIGNED,
       allowNull: false,
       defaultValue: 0,
@@ -120,11 +120,10 @@ const Notification = sequelize.define(
       defaultValue: 0,
     },
 
-      last_error: {
+    last_error: {
       type: DataTypes.STRING(100),
       allowNull: true,
     },
-
   },
   {
     tableName: "pb_notifications",
@@ -139,16 +138,16 @@ const Notification = sequelize.define(
         name: "idx_is_admin_created_at",
         fields: ["is_admin", "created_at"],
       },
-       {
+      {
         name: "idx_status_scheduled_at",
         fields: ["status", "scheduled_at"],
-      }, 
-       {
+      },
+      {
         name: "idx_sent_at",
         fields: ["sent_at"],
       },
     ],
-  }
+  },
 );
 
 module.exports = Notification;

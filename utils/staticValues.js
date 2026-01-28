@@ -119,7 +119,7 @@ const publicAdminAttributes = [
 ];
 const ADMIN_USER_FIELDS = [
   "id",
-  "username",
+  "full_name",
   "email",
   "phone",
   "type",

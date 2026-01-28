@@ -41,12 +41,12 @@ async function cleanupUploadedFiles(uploadedFiles, userId) {
         uf.fileName, // file name
         uf.folder, // folder path
         uf.id, // user id
-        "chat" // record type
+        "chat", // record type
       );
     } catch (delErr) {
       console.error(
         `[cleanupUploadedFiles] Failed to delete file ${uf.storedName}:`,
-        delErr
+        delErr,
       );
     }
   }
@@ -60,7 +60,7 @@ async function sendMessage(req, res) {
 
   const { error: pErr, value: pVal } = paramsSchema.validate(
     { chatId: req.params.chatId },
-    { abortEarly: true }
+    { abortEarly: true },
   );
 
   if (pErr) {
@@ -199,10 +199,10 @@ async function sendMessage(req, res) {
         kind === "image"
           ? maxImageMB
           : kind === "audio"
-          ? maxAudioMB
-          : kind === "video"
-          ? maxVideoMB
-          : maxFileMB;
+            ? maxAudioMB
+            : kind === "video"
+              ? maxVideoMB
+              : maxFileMB;
 
       if (Number(f.size || 0) > sizeLimitBytes(maxMB)) {
         throw Object.assign(new Error(`${kind} too large (max ${maxMB}MB)`), {
@@ -223,34 +223,34 @@ async function sendMessage(req, res) {
               "image/jpg",
             ]
           : kind === "audio"
-          ? [
-              "audio/mpeg",
-              "audio/mp3",
-              "audio/mp4",
-              "audio/aac",
-              "audio/ogg",
-              "audio/webm",
-              "audio/wav",
-              "audio/weba",
-              "video/webm",
-            ]
-          : kind === "video"
-          ? [
-              "video/mp4",
-              "video/quicktime",
-              "video/webm",
-              "video/3gpp",
-              "video/x-matroska",
-              "video/mkv",
-              "video/avi",
-            ]
-          : [
-              "application/pdf",
-              "application/zip",
-              "application/x-zip-compressed",
-              "application/msword",
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ];
+            ? [
+                "audio/mpeg",
+                "audio/mp3",
+                "audio/mp4",
+                "audio/aac",
+                "audio/ogg",
+                "audio/webm",
+                "audio/wav",
+                "audio/weba",
+                "video/webm",
+              ]
+            : kind === "video"
+              ? [
+                  "video/mp4",
+                  "video/quicktime",
+                  "video/webm",
+                  "video/3gpp",
+                  "video/x-matroska",
+                  "video/mkv",
+                  "video/avi",
+                ]
+              : [
+                  "application/pdf",
+                  "application/zip",
+                  "application/x-zip-compressed",
+                  "application/msword",
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ];
 
       const detect = await verifyFileType(f, allowed);
 
@@ -307,7 +307,7 @@ async function sendMessage(req, res) {
       const myStatus = isUserP1 ? chat.chat_status_p1 : chat.chat_status_p2;
       if (myStatus === "blocked") {
         const e = new Error(
-          "You have blocked this user. Unblock to send messages."
+          "You have blocked this user. Unblock to send messages.",
         );
         e.statusCode = 403;
         e.code = "YOU_BLOCKED_USER";
@@ -322,7 +322,7 @@ async function sendMessage(req, res) {
         {
           where: { chat_id: chatId, receiver_id: userId, is_read: false },
           transaction: t,
-        }
+        },
       );
 
       // Reset unread count for sender
@@ -390,7 +390,7 @@ async function sendMessage(req, res) {
           is_paid: messageCost > 0,
           price: messageCost > 0 ? messageCost : 0,
         },
-        { transaction: t }
+        { transaction: t },
       );
 
       // ========================================
@@ -400,7 +400,7 @@ async function sendMessage(req, res) {
         const uploader_ip = getRealIp(req);
         const user_agent = String(req.headers["user-agent"] || "").slice(
           0,
-          300
+          300,
         );
 
         for (const plan of filePlans) {
@@ -410,10 +410,10 @@ async function sendMessage(req, res) {
             kind === "image"
               ? `uploads/chat/images/${userId}`
               : kind === "audio"
-              ? `uploads/chat/audios/${userId}`
-              : kind === "video"
-              ? `uploads/chat/videos/${userId}`
-              : `uploads/chat/files/${userId}`;
+                ? `uploads/chat/audios/${userId}`
+                : kind === "video"
+                  ? `uploads/chat/videos/${userId}`
+                  : `uploads/chat/files/${userId}`;
 
           // Upload file (with message reference for tracking)
           const storedFile = await uploadFile(
@@ -424,7 +424,7 @@ async function sendMessage(req, res) {
             user_agent,
             userId,
             "chat",
-            createdMessage // Pass message object for relation
+            createdMessage, // Pass message object for relation
           );
 
           // Track uploaded file for cleanup on failure
@@ -444,7 +444,7 @@ async function sendMessage(req, res) {
       if (messageCost > 0) {
         await sender.update(
           { coins: Number(sender.coins || 0) - messageCost },
-          { transaction: t }
+          { transaction: t },
         );
 
         await CoinSpentTransaction.create(
@@ -455,7 +455,7 @@ async function sendMessage(req, res) {
             message_id: createdMessage.id,
             status: "completed",
           },
-          { transaction: t }
+          { transaction: t },
         );
       }
 
@@ -489,14 +489,14 @@ async function sendMessage(req, res) {
     // Cleanup any remaining temp files
     await cleanupTempFiles(incomingFiles);
     if (!isBotReceiver && receiverId && receiverId !== userId) {
-     sendChatNotification({
-  senderId: userId,
-  receiverId,
-  chatId,
-  messageId: result.message.id,
-  messageText: captionOrText || "",
-  messageType: result.message.message_type || "text",
-}).catch((e) => console.error("Chat notify failed:", e));
+      sendChatNotification({
+        senderId: userId,
+        receiverId,
+        chatId,
+        messageId: result.message.id,
+        messageText: captionOrText || "",
+        messageType: result.message.message_type || "text",
+      }).catch((e) => console.error("Chat notify failed:", e));
     }
     // If non-bot, respond immediately
     if (!isBotReceiver) {
@@ -522,7 +522,7 @@ async function sendMessage(req, res) {
     try {
       botReplyText = await generateBotReplyForChat(
         chatId,
-        captionOrText || "sent a file"
+        captionOrText || "sent a file",
       );
     } catch (aiErr) {
       console.error("[sendMessage] AI bot reply error:", aiErr);
@@ -541,13 +541,13 @@ async function sendMessage(req, res) {
           {
             is_read: true,
             read_at: new Date(),
-            status: "read"
+            status: "read",
           },
           {
             where: {
               chat_id: chatId,
             },
-          }
+          },
         );
         const botMessageSaved = await Message.create(
           {
@@ -564,7 +564,7 @@ async function sendMessage(req, res) {
             is_paid: false,
             price: 0,
           },
-          { transaction: t2 }
+          { transaction: t2 },
         );
 
         // Lock chat for update
@@ -589,16 +589,15 @@ async function sendMessage(req, res) {
         return botMessageSaved;
       });
       if (botSaved && botSaved.id) {
-      sendChatNotification(
+        sendChatNotification(
           receiverId,
           userId,
           chatId,
           botSaved.id,
           botSaved.message || "",
-          botSaved.message_type || "text"
+          botSaved.message_type || "text",
         ).catch((e) => console.error("Bot chat notify failed:", e));
-
-      }   
+      }
       return res.json({
         success: true,
         message: "Message sent (bot replied)",
@@ -721,7 +720,7 @@ async function getChatMessages(req, res) {
         message: "You are not allowed to view this chat",
       });
     }
-     const myChatStatus = isP1 ? chat.chat_status_p1 : chat.chat_status_p2;
+    const myChatStatus = isP1 ? chat.chat_status_p1 : chat.chat_status_p2;
     // 4) Fetch messages (no transaction needed)
     // Use DESC for performance (newest first), then reverse for client if needed.
     const where = {
@@ -825,7 +824,7 @@ async function getChatMessages(req, res) {
             status: { [Op.ne]: "deleted" },
           },
           transaction: t,
-        }
+        },
       );
 
       if (lockedChat.participant_1_id === userId)
@@ -1036,7 +1035,7 @@ async function getChatMessagesCursor(req, res) {
             status: { [Op.ne]: "deleted" },
           },
           transaction: t,
-        }
+        },
       );
 
       if (lockedChat.participant_1_id === userId)
@@ -1159,7 +1158,7 @@ async function deleteMessage(req, res) {
       },
       {
         where: { id: messageId },
-      }
+      },
     );
 
     return res.json({
@@ -1533,14 +1532,14 @@ async function pinChats(req, res) {
       if (p1ChatIds.length) {
         await Chat.update(
           { is_pin_p1: isPin },
-          { where: { id: { [Op.in]: p1ChatIds } }, transaction: t }
+          { where: { id: { [Op.in]: p1ChatIds } }, transaction: t },
         );
       }
 
       if (p2ChatIds.length) {
         await Chat.update(
           { is_pin_p2: isPin },
-          { where: { id: { [Op.in]: p2ChatIds } }, transaction: t }
+          { where: { id: { [Op.in]: p2ChatIds } }, transaction: t },
         );
       }
 
@@ -1901,7 +1900,7 @@ async function markChatMessagesRead(req, res) {
         {
           where,
           transaction: t,
-        }
+        },
       );
 
       // 5) Compute remaining unread
@@ -1950,9 +1949,9 @@ module.exports = {
   getChatMessagesCursor,
   deleteMessage,
   getUserChats,
- // getBlockedChats,
+  // getBlockedChats,
   pinChats,
-//  blockChat,
+  //  blockChat,
   deleteChat,
   markChatMessagesRead,
 };

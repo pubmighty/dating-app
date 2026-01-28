@@ -88,7 +88,7 @@ const Admin = sequelize.define(
         fields: ["email"],
       },
     ],
-  }
+  },
 );
 
 module.exports = Admin;
