@@ -70,7 +70,7 @@ async function getUsers(req, res) {
         .allow(null)
         .default(null),
       id: Joi.number().integer().positive().allow(null).default(null),
-      username: Joi.string().trim().max(50).empty("").default(null),
+
       email: Joi.string().trim().max(300).empty("").default(null),
       phone: Joi.string().trim().max(50).empty("").default(null),
       full_name: Joi.string().trim().max(300).empty("").default(null),
@@ -96,7 +96,7 @@ async function getUsers(req, res) {
         .valid(
           "created_at",
           "updated_at",
-          "username",
+          "full_name",
           "email",
           "status",
           "last_active",
@@ -152,10 +152,6 @@ async function getUsers(req, res) {
     if (value.is_verified !== null) where.is_verified = value.is_verified;
     if (value.register_type) where.register_type = value.register_type;
 
-    if (value.username) {
-      const s = escapeLike(value.username);
-      where.username = { [Op.like]: `${s}%` };
-    }
     if (value.email) {
       const s = escapeLike(value.email);
       where.email = { [Op.like]: `${s}%` };
@@ -336,13 +332,6 @@ async function addUser(req, res) {
 
     // 2) Joi validation (STRICT)
     const schema = Joi.object({
-      username: Joi.string()
-        .trim()
-        .min(3)
-        .max(50)
-        .pattern(/^[a-zA-Z0-9._-]+$/)
-        .required(),
-
       password: Joi.string()
         .min(8)
         .max(128)
@@ -431,7 +420,7 @@ async function addUser(req, res) {
     }
 
     // Normalize
-    const username = value.username.trim().toLowerCase();
+    const full_name = value.full_name.trim().toLowerCase();
     const email = value.email?.trim() ? value.email.trim().toLowerCase() : null;
     const phone = value.phone?.trim() ? value.phone.trim() : null;
 
@@ -470,7 +459,7 @@ async function addUser(req, res) {
 
     // 5) Uniqueness checks
     const [u1, u2, u3] = await Promise.all([
-      User.findOne({ where: { username, is_deleted: 0 }, attributes: ["id"] }),
+      User.findOne({ where: { full_name, is_deleted: 0 }, attributes: ["id"] }),
       email
         ? User.findOne({ where: { email, is_deleted: 0 }, attributes: ["id"] })
         : null,
@@ -482,7 +471,7 @@ async function addUser(req, res) {
     if (u1)
       return res.status(409).json({
         success: false,
-        message: "Username already exists",
+        message: "name already exists",
         data: null,
       });
     if (u2)
@@ -500,7 +489,6 @@ async function addUser(req, res) {
 
       const user = await User.create(
         {
-          username,
           email,
           phone,
           password: hashed,
@@ -549,8 +537,8 @@ async function addUser(req, res) {
     if (err?.name === "SequelizeUniqueConstraintError") {
       const field = err.errors?.[0]?.path;
       const msg =
-        field === "username"
-          ? "Username already exists"
+        field === "full_name"
+          ? "name already exists"
           : field === "email"
             ? "Email already exists"
             : field === "phone"
@@ -625,14 +613,6 @@ async function editUser(req, res) {
     // We do NOT force email/phone here because it's edit; user might already have one.
     // But we DO prevent ending up with both empty.
     const bodySchema = Joi.object({
-      username: Joi.string()
-        .trim()
-        .min(3)
-        .max(50)
-        .pattern(/^[a-zA-Z0-9._-]+$/)
-        .optional()
-        .allow(null, ""),
-
       email: Joi.string()
         .trim()
         .lowercase()
@@ -762,12 +742,12 @@ async function editUser(req, res) {
     };
 
     // Normalize username/email/phone
-    if ("username" in value) {
+    if ("full_name" in value) {
       const u =
-        value.username && String(value.username).trim()
-          ? String(value.username).trim().toLowerCase()
+        value.full_name && String(value.full_name).trim()
+          ? String(value.full_name).trim().toLowerCase()
           : null;
-      setIfProvided("username", u);
+      setIfProvided("full_name", u);
     }
     if ("email" in value) {
       const e =
@@ -864,13 +844,13 @@ async function editUser(req, res) {
 
     // 7) Uniqueness checks (only when changed)
     if (
-      "username" in update &&
-      update.username &&
-      update.username !== existing.username
+      "full_name" in update &&
+      update.full_name &&
+      update.full_name !== existing.full_name
     ) {
       const dupe = await User.findOne({
         where: {
-          username: update.username,
+          full_name: update.full_name,
           id: { [Op.ne]: userId },
           is_deleted: 0,
         },
@@ -879,7 +859,7 @@ async function editUser(req, res) {
       if (dupe)
         return res.status(409).json({
           success: false,
-          message: "Username already exists",
+          message: "name already exists",
           data: null,
         });
     }
@@ -948,8 +928,8 @@ async function editUser(req, res) {
     if (err?.name === "SequelizeUniqueConstraintError") {
       const field = err.errors?.[0]?.path;
       const msg =
-        field === "username"
-          ? "Username already exists"
+        field === "full_name"
+          ? "name already exists"
           : field === "email"
             ? "Email already exists"
             : field === "phone"
@@ -1052,7 +1032,7 @@ async function deleteUser(req, res) {
         entityType: "user",
         entityId: userId,
         metadata: {
-          username: existing.username,
+          full_name: existing.full_name,
           type: existing.type,
         },
       });
@@ -1170,7 +1150,7 @@ async function restoreUser(req, res) {
         action: "admin restored user",
         entityType: "user",
         entityId: userId,
-        metadata: { username: existing.username, type: existing.type },
+        metadata: { full_name: existing.full_name, type: existing.type },
       });
     } catch (_) {}
 
@@ -1252,7 +1232,7 @@ async function getUserMedia(req, res) {
     // 3) Ensure user exists (same style as uploadUserMedia)
     const user = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "username", "type", "is_deleted", "is_active"],
+      attributes: ["id", "full_name", "type", "is_deleted", "is_active"],
       raw: true,
     });
 
@@ -1373,7 +1353,7 @@ async function uploadUserMedia(req, res) {
     // 3) Ensure target user exists and is real (as you want)
     const targetUser = await User.findOne({
       where: { id: targetUserId },
-      attributes: ["id", "username", "type", "is_deleted"],
+      attributes: ["id", "full_name", "type", "is_deleted"],
       raw: true,
     });
 
@@ -1529,7 +1509,7 @@ async function uploadUserMedia(req, res) {
         entityId: targetUserId,
         metadata: {
           userId: targetUserId,
-          username: targetUser.username,
+          full_name: targetUser.full_name,
           files_count: dbRows?.length || 0,
         },
       });
@@ -1626,7 +1606,7 @@ async function deleteUserMedia(req, res) {
     // 3) Ensure target user exists (real user like your uploadUserMedia)
     const targetUser = await User.findOne({
       where: { id: userId },
-      attributes: ["id", "username", "type", "is_deleted", "is_active"],
+      attributes: ["id", "full_name", "type", "is_deleted", "is_active"],
       raw: true,
     });
 
@@ -1671,7 +1651,7 @@ async function deleteUserMedia(req, res) {
         entityId: userId,
         metadata: {
           userId,
-          username: targetUser.username,
+          full_name: targetUser.full_name,
           mediaId: media.id,
           name: media.name,
         },

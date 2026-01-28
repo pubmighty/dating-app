@@ -70,7 +70,6 @@ async function getBots(req, res) {
         .allow(null)
         .default(null),
 
-      username: Joi.string().trim().max(50).empty("").default(null),
       email: Joi.string().trim().max(300).empty("").default(null),
       phone: Joi.string().trim().max(50).empty("").default(null),
       full_name: Joi.string().trim().max(300).empty("").default(null),
@@ -96,7 +95,7 @@ async function getBots(req, res) {
         .valid(
           "created_at",
           "updated_at",
-          "username",
+          "full_name",
           "email",
           "status",
           "last_active",
@@ -150,9 +149,9 @@ async function getBots(req, res) {
     if (value.is_verified !== null) where.is_verified = value.is_verified;
     if (value.register_type) where.register_type = value.register_type;
 
-    if (value.username) {
-      const s = escapeLike(value.username);
-      where.username = { [Op.like]: `${s}%` };
+    if (value.full_name) {
+      const s = escapeLike(value.full_name);
+      where.full_name = { [Op.like]: `${s}%` };
     }
     if (value.email) {
       const s = escapeLike(value.email);
@@ -318,7 +317,7 @@ async function addBot(req, res) {
 
     // 2) Joi validation (match addUser style)
     const schema = Joi.object({
-      username: Joi.string()
+      full_name: Joi.string()
         .trim()
         .min(3)
         .max(50)
@@ -410,7 +409,7 @@ async function addBot(req, res) {
     }
 
     // Normalize username/email/phone
-    const username = value.username.trim().toLowerCase();
+    const full_name = value.full_name.trim().toLowerCase();
     const email = value.email?.trim() ? value.email.trim().toLowerCase() : null;
     const phone = value.phone?.trim() ? value.phone.trim() : null;
 
@@ -447,7 +446,10 @@ async function addBot(req, res) {
 
     // 5) Uniqueness checks
     const [u1, u2, u3] = await Promise.all([
-      User.findOne({ where: { username, is_deleted: 0 }, attributes: ["id"] }),
+      User.findOne({
+        where: { full_name, is_deleted: 0 },
+        attributes: ["id"],
+      }),
       email
         ? User.findOne({ where: { email, is_deleted: 0 }, attributes: ["id"] })
         : null,
@@ -477,7 +479,7 @@ async function addBot(req, res) {
 
       const user = await User.create(
         {
-          username,
+          full_name,
           email,
           phone,
           password: hashed,
@@ -524,7 +526,7 @@ async function addBot(req, res) {
         action: "admin created bot user",
         entityType: "user",
         entityId: createdUser.id,
-        metadata: { type: "bot", username: createdUser.username },
+        metadata: { type: "bot", full_name: createdUser.full_name },
       });
     } catch (_) {}
 
@@ -544,7 +546,7 @@ async function addBot(req, res) {
     if (err?.name === "SequelizeUniqueConstraintError") {
       const field = err.errors?.[0]?.path;
       const msg =
-        field === "username"
+        field === "full_name"
           ? "Username already exists"
           : field === "email"
             ? "Email already exists"
@@ -609,7 +611,7 @@ async function editBot(req, res) {
 
     // 3) body validation
     const bodySchema = Joi.object({
-      username: Joi.string()
+      full_name: Joi.string()
         .trim()
         .min(3)
         .max(50)
@@ -729,12 +731,12 @@ async function editBot(req, res) {
     };
 
     // normalize username/email/phone
-    if ("username" in value) {
+    if ("full_name" in value) {
       const u =
-        value.username && String(value.username).trim()
-          ? String(value.username).trim().toLowerCase()
+        value.full_name && String(value.full_name).trim()
+          ? String(value.full_name).trim().toLowerCase()
           : null;
-      setIfProvided("username", u);
+      setIfProvided("full_name", u);
     }
     if ("email" in value) {
       const e =
@@ -812,13 +814,13 @@ async function editBot(req, res) {
 
     // 7) uniqueness checks (only if changed)
     if (
-      "username" in update &&
-      update.username &&
-      update.username !== existing.username
+      "full_name" in update &&
+      update.full_name &&
+      update.full_name !== existing.full_name
     ) {
       const dupe = await User.findOne({
         where: {
-          username: update.username,
+          full_name: update.full_name,
           id: { [Op.ne]: userId },
           is_deleted: 0,
         },
@@ -896,7 +898,7 @@ async function editBot(req, res) {
     if (err?.name === "SequelizeUniqueConstraintError") {
       const field = err.errors?.[0]?.path;
       const msg =
-        field === "username"
+        field === "full_name"
           ? "Username already exists"
           : field === "email"
             ? "Email already exists"
@@ -992,7 +994,7 @@ async function deleteBot(req, res) {
         action: "admin deleted bot user",
         entityType: "user",
         entityId: userId,
-        metadata: { username: existing.username, type: "bot" },
+        metadata: { full_name: existing.full_name, type: "bot" },
       });
     } catch (_) {}
 
@@ -1117,7 +1119,7 @@ async function restoreBot(req, res) {
         action: "admin restored bot user",
         entityType: "user",
         entityId: userId,
-        metadata: { username: existing.username, type: "bot" },
+        metadata: { full_name: existing.full_name, type: "bot" },
       });
     } catch (_) {}
 
@@ -1203,7 +1205,7 @@ async function uploadBotMedia(req, res) {
     // 3) Ensure target user exists AND is bot
     const targetUser = await User.findOne({
       where: { id: targetUserId, type: "bot" },
-      attributes: ["id", "username", "type", "is_deleted"],
+      attributes: ["id", "full_name", "type", "is_deleted"],
       raw: true,
     });
 
@@ -1365,7 +1367,7 @@ async function uploadBotMedia(req, res) {
         entityId: targetUserId,
         metadata: {
           userId: targetUserId,
-          username: targetUser.username,
+          full_name: targetUser.full_name,
           type: "bot",
           files_count: dbRows?.length || 0,
         },
@@ -1451,7 +1453,7 @@ async function getBotMedia(req, res) {
     // 3) Ensure bot exists
     const bot = await User.findOne({
       where: { id: botId, type: "bot" },
-      attributes: ["id", "username", "is_active"],
+      attributes: ["id", "full_name", "is_active"],
       raw: true,
     });
 
@@ -1567,7 +1569,7 @@ async function deleteBotMedia(req, res) {
     // 3) Ensure bot exists
     const bot = await User.findOne({
       where: { id: botId, type: "bot" },
-      attributes: ["id", "username", "is_active"],
+      attributes: ["id", "full_name", "is_active"],
       raw: true,
     });
 
@@ -1694,7 +1696,7 @@ async function uploadBotVideo(req, res) {
     // 3) ensure bot exists
     const bot = await User.findOne({
       where: { id: botId, type: "bot" },
-      attributes: ["id", "username", "type", "is_deleted"],
+      attributes: ["id", "full_name", "type", "is_deleted"],
       raw: true,
     });
 
@@ -1867,7 +1869,7 @@ async function getBotVideos(req, res) {
     // 3) Ensure bot exists
     const bot = await User.findOne({
       where: { id: botId, type: "bot" },
-      attributes: ["id", "username", "is_active"],
+      attributes: ["id", "full_name", "is_active"],
       raw: true,
     });
 
@@ -1983,7 +1985,7 @@ async function deleteBotVideo(req, res) {
     // 3) Ensure bot exists
     const bot = await User.findOne({
       where: { id: botId, type: "bot" },
-      attributes: ["id", "username", "is_active"],
+      attributes: ["id", "full_name", "is_active"],
       raw: true,
     });
 
@@ -2174,7 +2176,7 @@ async function updateBotReport(req, res) {
     //  Ensure bot exists
     const bot = await User.findOne({
       where: { id: botId, type: "bot" },
-      attributes: ["id", "username", "type", "is_deleted", "is_active"],
+      attributes: ["id", "full_name", "type", "is_deleted", "is_active"],
       raw: true,
     });
 
@@ -2462,7 +2464,7 @@ async function getBotReports(req, res) {
     // Ensure user exists (same “ensure exists” style like bot check)
     const user = await User.findOne({
       where: { id: botId },
-      attributes: ["id", "username", "type", "is_deleted", "is_active"],
+      attributes: ["id", "full_name", "type", "is_deleted", "is_active"],
       raw: true,
     });
 
