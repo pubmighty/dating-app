@@ -316,6 +316,14 @@ async function sendMessage(req, res) {
 
       receiverId = isUserP1 ? chat.participant_2_id : chat.participant_1_id;
 
+      if (isUserP1) {
+      if (chat.chat_status_p1 === "deleted") chat.chat_status_p1 = "active";
+      if (chat.chat_status_p2 === "deleted") chat.chat_status_p2 = "active";
+      } else {
+      if (chat.chat_status_p2 === "deleted") chat.chat_status_p2 = "active";
+      if (chat.chat_status_p1 === "deleted") chat.chat_status_p1 = "active";
+      }
+
       // Mark incoming messages as read for this user
       await Message.update(
         { is_read: true, read_at: new Date(), status: "read" },
@@ -463,7 +471,9 @@ async function sendMessage(req, res) {
       const chatUpdate = {
         last_message_id: createdMessage.id,
         last_message_time: new Date(),
-      };
+        chat_status_p1: chat.chat_status_p1,
+        chat_status_p2: chat.chat_status_p2,
+        };
 
       if (receiverId === chat.participant_1_id) {
         chatUpdate.unread_count_p1 = (chat.unread_count_p1 || 0) + 1;
@@ -1210,8 +1220,10 @@ async function getUserChats(req, res) {
 
     const { count, rows } = await Chat.findAndCountAll({
       where: {
-        participant_2_id: userId,
-        chat_status_p2: "active",
+      [Op.or]: [
+      { participant_1_id: userId, chat_status_p1: "active" },
+      { participant_2_id: userId, chat_status_p2: "active" },
+      ],
       },
       attributes: [
         "id",
@@ -1228,7 +1240,7 @@ async function getUserChats(req, res) {
           as: "participant1", // bot user
           attributes: [
             "id",
-            "username",
+            "full_name",
             "avatar",
             "is_active",
             "last_active",

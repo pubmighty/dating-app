@@ -486,7 +486,7 @@ async function getUserMatches(req, res) {
           where: { is_active: true, status: 1 },
           attributes: [
             "id",
-            "username",
+            "full_name",
             "full_name",
             "avatar",
             "gender",
@@ -783,7 +783,7 @@ async function getBlockedUsers(req, res) {
           as: "blockedUser",
           attributes: [
             "id",
-            "username",
+            "full_name",
             "avatar",
             "is_active",
             "status",

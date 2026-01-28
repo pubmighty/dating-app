@@ -104,7 +104,7 @@ async function initiateVideoCallByBot(req, res) {
           {
             model: User,
             as: "participant1", // bot
-            attributes: ["id", "type", "username", "full_name", "country", "avatar"],
+            attributes: ["id", "type", "full_name", "country", "avatar"],
             where: { type: "bot" },
             required: true,
           },
@@ -547,7 +547,6 @@ async function getVideoCallHistory(req, res) {
           attributes: [
             "id",
             "type",
-            "username",
             "full_name",
             "country",
             "avatar",
@@ -559,7 +558,6 @@ async function getVideoCallHistory(req, res) {
           attributes: [
             "id",
             "type",
-            "username",
             "full_name",
             "country",
             "avatar",
