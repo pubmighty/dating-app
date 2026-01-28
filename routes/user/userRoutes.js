@@ -41,38 +41,54 @@ const notificationController = require("../../controllers/user/notificationContr
 router.get("/setting", utilController.getSiteSettings);
 
 /**
- * AUTHENTICATION & ACCOUNT LIFECYCLE ROUTES
- *
- * These endpoints handle the complete user authentication flow,
- * including registration, verification, login, and password recovery.
- *
- * Design Principles:
- * - All inputs must be strictly validated and sanitized with joi.
- * TODO - Rate limiting must be enforced to prevent brute-force and abuse.
- * - Responses should be consist to avoid user enumeration.
- * - Tokens, OTPs, and verification codes must have strict expiry.
- *
- *  Security Notes:
- *  TODO - Apply IP rate limiting on all auth endpoints.
- * - Never log passwords, OTPs, or raw tokens.
- * - Enforce strong password policies at registration and reset.
- */
-
-/**
- * 1. /register/google
- *    - Handles registration using Google OAuth data.
- *    - Validates provider token and maps external identity to internal user record.
- *    - Must prevent duplicate accounts and handle provider-linked users safely.
- */
-// EMAIL: one API for both signup + login (based on existence)
+* - Accepts: { email }
+* - Checks if user exists in pb_users.
+* - ALWAYS sends OTP to the provided email:
+* - If user exists → creates OTP with action = "login_email"
+* - If user does not exist → creates/reuses TempUser and creates OTP with action = "signup_email"
+* - Returns:
+* - { is_exist: true } when user exists
+* - { is_exist: false } when user does not exist (TempUser id)
+*/
 router.post("/auth/email/exist", authController.emailExist);
 
 
-// EMAIL: one verify API for both signup + login (based on existence)
-router.post("/auth/email/verify", authController.verifyEmail);
+/**
+* - Accepts: { email, tempUserId, otp, password }
+* - Used ONLY when /auth/email/exist returned is_exist = false.
+* - Verifies OTP (action = "signup_email") against TempUser.
+* - Hashes and stores password into TempUser (or directly into User).
+* - Creates a real user in pb_users from pb_temp_users.
+* - Marks OTP as used and cleans up TempUser + pending OTPs.
+* - Creates session token and returns user + token.
+*/
+router.post("/auth/email/signup/verify", authController.signupVerifyEmail);
 
+/**
+* - Accepts: { email, otp, password }
+* - Used ONLY when /auth/email/exist returned is_exist = true.
+* - Verifies OTP (action = "login_email") against existing User.
+* - Verifies password matches the stored hash.
+* - Marks OTP as used and invalidates other pending login OTPs.
+* - Creates session token and returns user + token.
+*/
+router.post("/auth/email/login/verify", authController.loginVerifyEmail);
 
-// PHONE: one API for both signup + login (based on existence)
+/**
+* - Accepts: { phone_number, password }
+* - Checks if phone exists in pb_users
+* - If phone does not exist:
+* → Creates new user with phone + hashed password
+* → Issues session token
+*
+* Returns:
+* - user object + session token on both login & signup
+*
+* Security:
+* - Enforce strong password rules.
+* - Apply rate-limiting to prevent brute-force attacks.
+* - Normalize and validate phone numbers strictly.
+*/
 router.post("/auth/phone/exist", authController.phoneExist);
 
 /**

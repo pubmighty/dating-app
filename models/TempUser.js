@@ -19,7 +19,7 @@ const TempUser = sequelize.define(
     },
     password: {
       type: DataTypes.STRING(300),
-      allowNull: false,
+      allowNull: true,
     },
   },
   {

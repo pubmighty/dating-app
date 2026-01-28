@@ -170,8 +170,11 @@ async function registerWithGoogle(req, res) {
 async function emailExist(req, res) {
   try {
     const schema = Joi.object({
-      email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required(),
-      password: Joi.string().min(8).max(128).optional(),
+      email: Joi.string()
+        .trim()
+        .lowercase()
+        .email({ tlds: { allow: false } })
+        .required(),
     });
 
     const { error, value } = schema.validate(req.body || {}, {
@@ -189,114 +192,54 @@ async function emailExist(req, res) {
     }
 
     const email = String(value.email).toLowerCase().trim();
-    let password = value.password ? String(value.password) : null;
 
+    // Check real user
     const user = await User.findOne({ where: { email } });
-
-    // ✅ Existing user -> login OTP
     if (user) {
-      if (user.is_active === false || Number(user.status) !== 1) {
-        return res.status(403).json({
-          success: false,
-          message: "Your account is not active.",
-          data: null,
-        });
-      }
+      const otp = generateOtp();
+      const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
+      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
 
-      // If already valid OTP exists, do not resend (cooldown)
-      const now = new Date();
-      const existingValidOtp = await UserOtp.findOne({
-        where: {
-          user_id: user.id,
-          action: "login_email",
-          status: false,
-          expiry: { [Op.gt]: now },
-        },
-        order: [["createdAt", "DESC"]],
+      // Invalidate old OTPs
+      await UserOtp.update(
+        { status: true },
+        { where: { user_id: user.id, action: "login_email", status: false } }
+      );
+
+      const myOtp = await UserOtp.create({
+        user_id: user.id,
+        otp,
+        expiry: otpExpiresAt,
+        action: "login_email",
+        status: false,
       });
 
-      if (!existingValidOtp) {
-        const otp = generateOtp();
-        const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
-        const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
-
-        // Invalidate old pending login OTPs
-        await UserOtp.update(
-          { status: true },
-          { where: { user_id: user.id, action: "login_email", status: false } }
-        );
-
-        const myOtp = await UserOtp.create({
-          user_id: user.id,
-          otp,
-          expiry: otpExpiresAt,
-          action: "login_email",
-          status: false,
-        });
-
-        await sendOtpMail(user, myOtp, "Login OTP", "login_email");
-      }
+      await sendOtpMail(user, myOtp, "Login OTP", "login_email");
 
       return res.status(200).json({
         success: true,
-        message: "OTP sent to your email for login.",
-        need_verification: true,
+        message: "OTP sent to email",
         data: {
-          mode: "login",
-          email,
+          is_exist: true,
+          tempUserId: null,
         },
       });
     }
+    let tempUser = await TempUser.findOne({ where: { email } });
 
-    // ✅ New user -> signup flow (admin toggle)
-    const verifySignupEmail = String(await getOption("verify_signup_email", "true")) === "true";
-
-    // password optional -> generate if not provided
-    if (!password) password = generateRandomPassword(10);
-    const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
-
-    // If verification disabled -> create real user now
-    if (!verifySignupEmail) {
-      const newUser = await User.create({
+    if (!tempUser) {
+      tempUser = await TempUser.create({
         email,
         phone: null,
-        password: hashedPass,
-        register_type: "manual",
-        ip_address: getRealIp(req),
-        is_verified: true,
-        is_active: true,
-      });
-
-      const { token, expires_at } = await handleUserSessionCreation(req, newUser);
-
-      await newUser.reload({ attributes: publicUserAttributes });
-      const files = await FileUpload.findAll({ where: { user_id: newUser.id } });
-
-      return res.status(201).json({
-        success: true,
-        message: "Registration successful",
-        data: {
-          mode: "signup",
-          user: newUser,
-          token,
-          token_expires_at: expires_at,
-          files,
-        },
+        password: null,
       });
     }
-
-    // Else verification enabled -> create TempUser + send signup OTP
-    const tempUser = await TempUser.create({
-      email,
-      phone: null,
-      password: hashedPass,
-    });
 
     const otp = generateOtp();
     const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
     const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
 
-    // Invalidate any old pending signup otps for this temp user
+    // Invalidate old OTPs
     await UserOtp.update(
       { status: true },
       { where: { user_id: tempUser.id, action: "signup_email", status: false } }
@@ -314,11 +257,9 @@ async function emailExist(req, res) {
 
     return res.status(200).json({
       success: true,
-      message: "OTP sent to your email for signup.",
-      need_verification: true,
+      message: "OTP sent to email",
       data: {
-        mode: "signup",
-        email,
+        is_exist: false,
         tempUserId: tempUser.id,
       },
     });
@@ -331,22 +272,18 @@ async function emailExist(req, res) {
     });
   }
 }
-
 /**
- * ✅ verifyEmail
- * POST /v1/user/auth/email/verify
- * Body: { email, otp, tempUserId? }
- *
  * If User exists (by email) => verify login OTP (action=login_email) and login
  * If User NOT exists => verify signup OTP (action=signup_email) using tempUserId, create User from TempUser, login
  */
-async function verifyEmail(req, res) {
+async function signupVerifyEmail(req, res) {
   const t = await sequelize.transaction();
   try {
     const schema = Joi.object({
       email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required(),
+      tempUserId: Joi.number().integer().positive().required(),
       otp: Joi.string().trim().pattern(/^[0-9]{6}$/).required(),
-      tempUserId: Joi.number().integer().positive().optional(),
+      password: Joi.string().min(8).max(128).required(),
     });
 
     const { error, value } = schema.validate(req.body || {}, {
@@ -365,103 +302,17 @@ async function verifyEmail(req, res) {
     }
 
     const email = String(value.email).toLowerCase().trim();
+    const tempUserId = Number(value.tempUserId);
     const otp = String(value.otp).trim();
-    const tempUserId = value.tempUserId ? Number(value.tempUserId) : null;
+    const password = String(value.password);
 
-    const now = new Date();
-
-    // ✅ Check if real user exists
-    const user = await User.findOne({
-      where: { email },
-      transaction: t,
-      lock: t.LOCK.UPDATE,
-    });
-
-    // -------------------------
-    // ✅ LOGIN VERIFY (existing user)
-    // -------------------------
-    if (user) {
-      if (user.is_active === false || Number(user.status) !== 1) {
-        await t.rollback();
-        return res.status(403).json({
-          success: false,
-          message: "Your account is not active.",
-          data: null,
-        });
-      }
-
-      const otpRecord = await UserOtp.findOne({
-        where: {
-          user_id: user.id,
-          action: "login_email",
-          status: false,
-        },
-        order: [["createdAt", "DESC"]],
-        transaction: t,
-        lock: t.LOCK.UPDATE,
-      });
-
-      if (!otpRecord) {
-        await t.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Invalid or expired OTP.",
-          data: null,
-        });
-      }
-
-      if (otpRecord.expiry && now > otpRecord.expiry) {
-        await t.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Invalid or expired OTP.",
-          data: null,
-        });
-      }
-
-      if (String(otpRecord.otp) !== otp) {
-        await t.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Invalid or expired OTP.",
-          data: null,
-        });
-      }
-
-      // Mark this OTP used + invalidate any other pending login otps
-      await UserOtp.update(
-        { status: true },
-        { where: { user_id: user.id, action: "login_email", status: false }, transaction: t }
-      );
-
-      await t.commit();
-
-      const { token, expires_at } = await handleUserSessionCreation(req, user);
-
-      await user.reload({ attributes: publicUserAttributes });
-      const files = await FileUpload.findAll({ where: { user_id: user.id } });
-
-      return res.status(200).json({
-        success: true,
-        message: "Login successful",
-        data: {
-          mode: "login",
-          user,
-          token,
-          token_expires_at: expires_at,
-          files,
-        },
-      });
-    }
-
-    // -------------------------
-    // ✅ SIGNUP VERIFY (new user)
-    // -------------------------
-    if (!tempUserId) {
+    // Must not already exist
+    const already = await User.findOne({ where: { email }, transaction: t, lock: t.LOCK.UPDATE });
+    if (already) {
       await t.rollback();
-      return res.status(400).json({
+      return res.status(409).json({
         success: false,
-        message: "tempUserId is required for signup verification.",
+        message: "This email is already registered.",
         data: null,
       });
     }
@@ -490,72 +341,83 @@ async function verifyEmail(req, res) {
       });
     }
 
-    // Prevent race condition (email registered between exist & verify)
-    const existingUser = await User.findOne({ where: { email }, transaction: t });
-    if (existingUser) {
-      // cleanup temp user + pending otps
-      await TempUser.destroy({ where: { id: tempUser.id }, transaction: t });
+    const verifySignupEmail = String(await getOption("verify_signup_email", "true")) === "true";
+
+    // If admin enabled OTP, we ensure OTP record exists (send if not exists / expired)
+    if (verifySignupEmail) {
+      const now = new Date();
+
+      // If there is no valid OTP, generate and send (but still require otp in request as per your flow)
+      const validOtp = await UserOtp.findOne({
+        where: {
+          user_id: tempUser.id,
+          action: "signup_email",
+          status: false,
+          expiry: { [Op.gt]: now },
+        },
+        order: [["createdAt", "DESC"]],
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (!validOtp) {
+        const newOtp = generateOtp();
+        const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
+        const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
+
+        await UserOtp.update(
+          { status: true },
+          { where: { user_id: tempUser.id, action: "signup_email", status: false }, transaction: t }
+        );
+
+        const myOtp = await UserOtp.create(
+          {
+            user_id: tempUser.id,
+            otp: newOtp,
+            expiry: otpExpiresAt,
+            action: "signup_email",
+            status: false,
+          },
+          { transaction: t }
+        );
+
+        await sendOtpMail(tempUser, myOtp, "Verify Your Email", "signup_email");
+      }
+
+      // verify OTP
+      const otpRecord = await UserOtp.findOne({
+        where: { user_id: tempUser.id, action: "signup_email", status: false },
+        order: [["createdAt", "DESC"]],
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (!otpRecord || (otpRecord.expiry && now > otpRecord.expiry) || String(otpRecord.otp) !== otp) {
+        await t.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Invalid or expired OTP.",
+          data: null,
+        });
+      }
+
+      // mark used
       await UserOtp.update(
         { status: true },
         { where: { user_id: tempUser.id, action: "signup_email", status: false }, transaction: t }
       );
-      await t.commit();
-
-      return res.status(409).json({
-        success: false,
-        message: "This email is already registered.",
-        data: null,
-      });
     }
 
-    const otpRecord = await UserOtp.findOne({
-      where: {
-        user_id: tempUser.id,
-        action: "signup_email",
-        status: false,
-      },
-      order: [["createdAt", "DESC"]],
-      transaction: t,
-      lock: t.LOCK.UPDATE,
-    });
+    // set password into temp user (hashed)
+    const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    await TempUser.update({ password: hashedPass }, { where: { id: tempUser.id }, transaction: t });
 
-    if (!otpRecord) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired OTP.",
-        data: null,
-      });
-    }
-
-    if (otpRecord.expiry && now > otpRecord.expiry) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired OTP.",
-        data: null,
-      });
-    }
-
-    if (String(otpRecord.otp) !== otp) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired OTP.",
-        data: null,
-      });
-    }
-
-    // Mark OTP used
-    otpRecord.status = true;
-    await otpRecord.save({ transaction: t });
-
-    // Create real user from temp user (NO username)
+    // Create actual user from TempUser (NO username)
     const newUser = await User.create(
       {
         email: tempUser.email,
-        phone: tempUser.phone || null,
-        password: tempUser.password, // already hashed
+        phone: null,
+        password: hashedPass,
         register_type: "manual",
         ip_address: getRealIp(req),
         is_verified: true,
@@ -564,12 +426,8 @@ async function verifyEmail(req, res) {
       { transaction: t }
     );
 
-    // Cleanup temp user + any pending signup otp
+    // cleanup temp
     await TempUser.destroy({ where: { id: tempUser.id }, transaction: t });
-    await UserOtp.update(
-      { status: true },
-      { where: { user_id: tempUser.id, action: "signup_email", status: false }, transaction: t }
-    );
 
     await t.commit();
 
@@ -582,7 +440,6 @@ async function verifyEmail(req, res) {
       success: true,
       message: "Registration successful",
       data: {
-        mode: "signup",
         user: newUser,
         token,
         token_expires_at: expires_at,
@@ -591,7 +448,154 @@ async function verifyEmail(req, res) {
     });
   } catch (err) {
     await t.rollback();
-    console.error("Error during [verifyEmail]:", err);
+    console.error("Error during [signupVerifyEmail]:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      data: null,
+    });
+  }
+}
+
+async function loginVerifyEmail(req, res) {
+  const t = await sequelize.transaction();
+  try {
+    const schema = Joi.object({
+      email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required(),
+      password: Joi.string().min(8).max(128).required(),
+      otp: Joi.string().trim().pattern(/^[0-9]{6}$/).required(),
+    });
+
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid request",
+        data: null,
+      });
+    }
+
+    const email = String(value.email).toLowerCase().trim();
+    const password = String(value.password);
+    const otp = String(value.otp).trim();
+
+    const user = await User.findOne({
+      where: { email },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (!user) {
+      await t.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Account not found.",
+        data: null,
+      });
+    }
+
+    if (user.is_active === false || Number(user.status) !== 1) {
+      await t.rollback();
+      return res.status(403).json({
+        success: false,
+        message: "Your account is not active.",
+        data: null,
+      });
+    }
+
+    const isCorrect = await bcrypt.compare(password, user.password || "");
+    if (!isCorrect) {
+      await t.rollback();
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials.",
+        data: null,
+      });
+    }
+
+    const now = new Date();
+
+    // ensure OTP exists (send if not)
+    const validOtp = await UserOtp.findOne({
+      where: {
+        user_id: user.id,
+        action: "login_email",
+        status: false,
+        expiry: { [Op.gt]: now },
+      },
+      order: [["createdAt", "DESC"]],
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (!validOtp) {
+      const newOtp = generateOtp();
+      const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
+      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
+
+      await UserOtp.update(
+        { status: true },
+        { where: { user_id: user.id, action: "login_email", status: false }, transaction: t }
+      );
+
+      const myOtp = await UserOtp.create(
+        {
+          user_id: user.id,
+          otp: newOtp,
+          expiry: otpExpiresAt,
+          action: "login_email",
+          status: false,
+        },
+        { transaction: t }
+      );
+
+      await sendOtpMail(user, myOtp, "Login OTP", "login_email");
+    }
+
+    // verify OTP
+    const otpRecord = await UserOtp.findOne({
+      where: { user_id: user.id, action: "login_email", status: false },
+      order: [["createdAt", "DESC"]],
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (!otpRecord || (otpRecord.expiry && now > otpRecord.expiry) || String(otpRecord.otp) !== otp) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired OTP.",
+        data: null,
+      });
+    }
+
+    // mark used
+    await UserOtp.update(
+      { status: true },
+      { where: { user_id: user.id, action: "login_email", status: false }, transaction: t }
+    );
+
+    await t.commit();
+
+    const { token, expires_at } = await handleUserSessionCreation(req, user);
+
+    await user.reload({ attributes: publicUserAttributes });
+    const files = await FileUpload.findAll({ where: { user_id: user.id } });
+
+    return res.status(200).json({
+      success: true,
+      message: "Login successful",
+      data: { user, token, token_expires_at: expires_at, files },
+    });
+  } catch (err) {
+    await t.rollback();
+    console.error("Error during [loginVerifyEmail]:", err);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -601,13 +605,9 @@ async function verifyEmail(req, res) {
 }
 
 /**
- * ✅ phoneExist
- * POST /v1/user/auth/phone/exist
- * Body: { phone_number, password }
- *
+ * phoneExist
  * If phone exists => LOGIN with password
  * If phone not exists => SIGNUP with password
- *
  * No OTP for phone (as per your instruction)
  */
 async function phoneExist(req, res) {
@@ -636,7 +636,7 @@ async function phoneExist(req, res) {
 
     const user = await User.findOne({ where: { phone } });
 
-    // ✅ Login
+    // Login
     if (user) {
       if (user.is_active === false || Number(user.status) !== 1) {
         return res.status(403).json({
@@ -673,7 +673,7 @@ async function phoneExist(req, res) {
       });
     }
 
-    // ✅ Signup
+    // Signup
     const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     const newUser = await User.create({
@@ -1013,7 +1013,8 @@ async function logoutUser(req, res) {
 module.exports = {
   registerWithGoogle,
   emailExist,
-  verifyEmail,
+  signupVerifyEmail,
+  loginVerifyEmail,
   phoneExist,
   forgotPassword,
   forgotPasswordVerify,
