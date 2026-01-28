@@ -1431,7 +1431,7 @@ router.post(
  * - Does not retry failed push deliveries automatically.
  */
 router.post(
-  "/notifications/send-user",
+  "/notifications/send/user",
   adminNotificationController.adminSendToUser,
 );
 
@@ -1464,7 +1464,7 @@ router.post(
  * - Should be used sparingly to avoid notification fatigue.
  */
 router.post(
-  "/notifications/send-global",
+  "/notifications/send/global",
   adminNotificationController.adminSendGlobal,
 );
 /**
@@ -1528,7 +1528,7 @@ router.post(
  * - Recommended to use preview-filter before execution.
  */
 router.post(
-  "/notifications/send-filtered-user",
+  "/notifications/send/filter",
   adminNotificationController.adminSendFiltered,
 );
 

@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
-const sequelize = require("../config/db");
+const sequelize = require("../../config/db");
 
-const Notification = sequelize.define(
-  "Notification",
+const NotificationGlobal = sequelize.define(
+  "NotificationGlobal",
   {
     id: {
       type: DataTypes.BIGINT.UNSIGNED,
@@ -12,12 +12,13 @@ const Notification = sequelize.define(
 
     sender_id: {
       type: DataTypes.BIGINT.UNSIGNED,
-      allowNull: true,
+      allowNull: false,
     },
 
     receiver_id: {
       type: DataTypes.BIGINT.UNSIGNED,
-      allowNull: false,
+      allowNull: true,
+      defaultValue: null,
     },
 
     type: {
@@ -31,24 +32,20 @@ const Notification = sequelize.define(
     },
 
     content: {
-      type: DataTypes.STRING(200),
+      type: DataTypes.STRING(500),
       allowNull: false,
     },
 
     landing_url: {
       type: DataTypes.STRING(200),
       allowNull: true,
+      comment: "web URL",
     },
 
     image_url: {
       type: DataTypes.STRING(500),
       allowNull: true,
-    },
-
-    is_read: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: false,
+      comment: "Notification image",
     },
 
     status: {
@@ -65,6 +62,11 @@ const Notification = sequelize.define(
       defaultValue: "draft",
     },
 
+    scheduled_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+
     sent_at: {
       type: DataTypes.DATE,
       allowNull: true,
@@ -75,23 +77,55 @@ const Notification = sequelize.define(
       allowNull: false,
       defaultValue: "normal",
     },
+
+    total_targeted: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
+
+    total_sent: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
+
+    total_delivered: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
+
+    total_clicked: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
+
+    total_failed: {
+      type: DataTypes.INTEGER.UNSIGNED,
+      allowNull: false,
+      defaultValue: 0,
+    },
   },
   {
-    tableName: "pb_notifications",
+    tableName: "pb_notifications_global",
     timestamps: true,
     underscored: true,
     indexes: [
       {
-        name: "idx_receiver_is_read_created",
-        fields: ["receiver_id", "is_read", "created_at"],
-      },
-      {
-        name: "idx_sender_created",
+        name: "idx_sender_created_at",
         fields: ["sender_id", "created_at"],
       },
+      
       {
-        name: "idx_status_created",
-        fields: ["status", "created_at"],
+        name: "idx_receiver_created_at",
+        fields: ["receiver_id", "created_at"],
+      },
+
+      {
+        name: "idx_status_scheduled_at",
+        fields: ["status", "scheduled_at"],
       },
       {
         name: "idx_sent_at",
@@ -101,4 +135,4 @@ const Notification = sequelize.define(
   }
 );
 
-module.exports = Notification;
+module.exports = NotificationGlobal;
