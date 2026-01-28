@@ -123,11 +123,15 @@ async function adminGetChatMessages(req, res) {
         "reply_to_message_id",
       ],
       include: [
-        { model: User, as: "sender", attributes: ["id", "username", "avatar"] },
+        {
+          model: User,
+          as: "sender",
+          attributes: ["id", "full_name", "avatar"],
+        },
         {
           model: User,
           as: "receiver",
-          attributes: ["id", "username", "avatar"],
+          attributes: ["id", "full_name", "avatar"],
         },
         {
           model: Message,
@@ -1225,7 +1229,7 @@ async function getAllUsers(req, res) {
         .allow(null)
         .default(null),
       type: Joi.string().valid("real", "bot").empty("").default(null),
-      username: Joi.string().trim().max(50).empty("").default(null),
+
       email: Joi.string().trim().max(300).empty("").default(null),
       phone: Joi.string().trim().max(50).empty("").default(null),
       full_name: Joi.string().trim().max(300).empty("").default(null),
@@ -1251,7 +1255,7 @@ async function getAllUsers(req, res) {
         .valid(
           "created_at",
           "updated_at",
-          "username",
+          "full_name",
           "email",
           "status",
           "last_active",
@@ -1307,10 +1311,7 @@ async function getAllUsers(req, res) {
     if (value.is_verified !== null) where.is_verified = value.is_verified;
     if (value.register_type) where.register_type = value.register_type;
 
-    if (value.username) {
-      const s = escapeLike(value.username);
-      where.username = { [Op.like]: `${s}%` };
-    }
+
     if (value.email) {
       const s = escapeLike(value.email);
       where.email = { [Op.like]: `${s}%` };

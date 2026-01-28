@@ -1087,7 +1087,7 @@ async function getCoinPurchaseTransactions(req, res) {
         required: false,
         attributes: [
           "id",
-          "username",
+          "full_name",
           "email",
           "phone",
           "avatar",
@@ -1302,7 +1302,7 @@ async function getCoinSpentTransactions(req, res) {
         required: false,
         attributes: [
           "id",
-          "username",
+          "full_name",
           "email",
           "phone",
           "avatar",

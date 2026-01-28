@@ -567,7 +567,7 @@ async function getSentNotifications(req, res) {
         {
           model: User,
           as: "receiver",
-          attributes: ["id", "username", "email", "avatar"],
+          attributes: ["id", "full_name", "email", "avatar"],
           required: false,
         },
         {
