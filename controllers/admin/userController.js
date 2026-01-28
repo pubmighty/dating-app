@@ -69,7 +69,7 @@ async function getUsers(req, res) {
         .falsy("false")
         .allow(null)
         .default(null),
-
+      id: Joi.number().integer().positive().allow(null).default(null),
       username: Joi.string().trim().max(50).empty("").default(null),
       email: Joi.string().trim().max(300).empty("").default(null),
       phone: Joi.string().trim().max(50).empty("").default(null),
@@ -101,7 +101,7 @@ async function getUsers(req, res) {
           "status",
           "last_active",
           "coins",
-          "total_spent"
+          "total_spent",
         )
         .default("created_at"),
 
@@ -148,7 +148,7 @@ async function getUsers(req, res) {
     if (!value.include_deleted) where.is_deleted = 0;
 
     if (value.status !== null) where.status = value.status;
-
+    if (value.id) where.id = value.id;
     if (value.is_verified !== null) where.is_verified = value.is_verified;
     if (value.register_type) where.register_type = value.register_type;
 
@@ -384,7 +384,7 @@ async function addUser(req, res) {
           "Short Term, Open To Long",
           "Short Term Fun",
           "New Friends",
-          "Still Figuring Out"
+          "Still Figuring Out",
         )
         .optional()
         .allow(null, ""),
@@ -395,7 +395,7 @@ async function addUser(req, res) {
       interests: Joi.alternatives()
         .try(
           Joi.array().items(Joi.string().trim().max(50)).max(6),
-          Joi.string().trim().max(400)
+          Joi.string().trim().max(400),
         )
         .optional()
         .allow(null, ""),
@@ -522,7 +522,7 @@ async function addUser(req, res) {
           education: value.education || null,
           interests: interestsCsv,
         },
-        { transaction: tx }
+        { transaction: tx },
       );
 
       await UserSetting.findOrCreate({
@@ -552,10 +552,10 @@ async function addUser(req, res) {
         field === "username"
           ? "Username already exists"
           : field === "email"
-          ? "Email already exists"
-          : field === "phone"
-          ? "Phone already exists"
-          : "Duplicate value";
+            ? "Email already exists"
+            : field === "phone"
+              ? "Phone already exists"
+              : "Duplicate value";
 
       return res.status(409).json({ success: false, message: msg, data: null });
     }
@@ -681,7 +681,7 @@ async function editUser(req, res) {
           "Short Term, Open To Long",
           "Short Term Fun",
           "New Friends",
-          "Still Figuring Out"
+          "Still Figuring Out",
         )
         .optional()
         .allow(null, ""),
@@ -710,7 +710,7 @@ async function editUser(req, res) {
       interests: Joi.alternatives()
         .try(
           Joi.array().items(Joi.string().trim().max(50)).max(6),
-          Joi.string().trim().max(400)
+          Joi.string().trim().max(400),
         )
         .optional()
         .allow(null, ""),
@@ -951,10 +951,10 @@ async function editUser(req, res) {
         field === "username"
           ? "Username already exists"
           : field === "email"
-          ? "Email already exists"
-          : field === "phone"
-          ? "Phone already exists"
-          : "Duplicate value";
+            ? "Email already exists"
+            : field === "phone"
+              ? "Phone already exists"
+              : "Duplicate value";
 
       return res.status(409).json({ success: false, message: msg, data: null });
     }
@@ -1040,7 +1040,7 @@ async function deleteUser(req, res) {
           is_active: false,
           status: 3,
         },
-        { where: { id: userId }, transaction: tx }
+        { where: { id: userId }, transaction: tx },
       );
     });
 
@@ -1153,7 +1153,7 @@ async function restoreUser(req, res) {
           is_active: true,
           status: 1, // active
         },
-        { where: { id: userId }, transaction: tx }
+        { where: { id: userId }, transaction: tx },
       );
 
       await UserSetting.findOrCreate({
@@ -1273,31 +1273,31 @@ async function getUserMedia(req, res) {
     }
 
     const media = await FileUpload.findAll({
-  where: {
-    user_id: userId,
-    [Op.or]: [
-      { mime_type: { [Op.like]: "image/%" } },
-      { mime_type: { [Op.like]: "video/%" } },
-    ],
-  },
+      where: {
+        user_id: userId,
+        [Op.or]: [
+          { mime_type: { [Op.like]: "image/%" } },
+          { mime_type: { [Op.like]: "video/%" } },
+        ],
+      },
       order: [["created_at", "DESC"]],
       raw: true,
     });
-   const formatted = media.map((m) => ({
-          id: m.id,
-          user_id: m.user_id,
-          name: m.name,
-          file_type: m.file_type,
-          mime_type: m.mime_type,
-          size: m.size,
-          created_at: m.created_at,
-          media_path: `/${m.folders}/${m.name}`,
-          media_type: m.mime_type?.startsWith("video/")
-            ? "video"
-            : m.mime_type?.startsWith("image/")
-            ? "image"
-            : "other",
-        }));
+    const formatted = media.map((m) => ({
+      id: m.id,
+      user_id: m.user_id,
+      name: m.name,
+      file_type: m.file_type,
+      mime_type: m.mime_type,
+      size: m.size,
+      created_at: m.created_at,
+      media_path: `/${m.folders}/${m.name}`,
+      media_type: m.mime_type?.startsWith("video/")
+        ? "video"
+        : m.mime_type?.startsWith("image/")
+          ? "image"
+          : "other",
+    }));
 
     return res.status(200).json({
       success: true,
@@ -1397,7 +1397,7 @@ async function uploadUserMedia(req, res) {
 
     const MAX_FILES = Number.parseInt(
       await getOption("max_files_per_user", 5),
-      10
+      10,
     );
     if (!Number.isFinite(MAX_FILES) || MAX_FILES <= 0) {
       // sane fallback
@@ -1487,7 +1487,7 @@ async function uploadUserMedia(req, res) {
           uploader_ip,
           user_agent,
           targetUserId,
-          "user"
+          "user",
         );
 
         uploadedRows.push(uploadRes);
@@ -1651,7 +1651,7 @@ async function deleteUserMedia(req, res) {
         data: null,
       });
     }
-      //To delete the file we are using the function deleteFile 
+    //To delete the file we are using the function deleteFile
     const ok = await deleteFile(media.name, media.folders, media.id, "normal");
 
     if (!ok) {
@@ -1697,8 +1697,6 @@ async function deleteUserMedia(req, res) {
     });
   }
 }
-
-
 
 module.exports = {
   getUsers,

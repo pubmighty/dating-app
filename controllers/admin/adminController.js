@@ -22,7 +22,7 @@ async function getAdmins(req, res) {
 
       username: Joi.string().trim().max(80).allow("", null),
       email: Joi.string().trim().max(120).allow("", null),
-
+      id: Joi.number().integer().positive().allow("", null),
       role: Joi.string()
         .valid("superAdmin", "staff", "paymentManager", "support")
         .allow("", null),
@@ -35,6 +35,7 @@ async function getAdmins(req, res) {
           "id",
           "username",
           "email",
+
           "role",
           "status",
           "createdAt",
@@ -88,6 +89,7 @@ async function getAdmins(req, res) {
       sortDir,
       username,
       email,
+      id,
       role,
       status,
       twoFactorEnabled,
@@ -117,7 +119,7 @@ async function getAdmins(req, res) {
 
     addPrefixLike("username", username);
     addPrefixLike("email", email);
-
+    if (typeof id === "number") where.id = id;
     if (role) where.role = role;
     if (typeof status === "number") where.status = status;
     if (typeof twoFactorEnabled === "number") where.two_fa = twoFactorEnabled;
@@ -644,17 +646,17 @@ async function editAdmin(req, res) {
 
       // Delete old avatar AFTER DB update succeeds (still inside tx)
       // NOTE: file deletion is not transactional; still better than deleting first.
-      if (newAvatarFilename) {
-        const oldAvatar = targetAdmin.previous("avatar"); // Sequelize keeps previous values
-        if (oldAvatar) {
-          // best effort cleanup; don't fail request if cleanup fails
-          try {
-            await deleteFile(oldAvatar, "uploads/avatar/admin");
-          } catch (e) {
-            console.error("Avatar cleanup failed:", e?.message || e);
-          }
-        }
-      }
+      // if (newAvatarFilename) {
+      //   const oldAvatar = targetAdmin.previous("avatar"); // Sequelize keeps previous values
+      //   if (oldAvatar) {
+      //     // best effort cleanup; don't fail request if cleanup fails
+      //     try {
+      //       await deleteFile(oldAvatar, "uploads/avatar/admin");
+      //     } catch (e) {
+      //       console.error("Avatar cleanup failed:", e?.message || e);
+      //     }
+      //   }
+      // }
 
       const fresh = await Admin.findByPk(targetAdminId, {
         attributes: {
@@ -706,6 +708,7 @@ async function editAdmin(req, res) {
       .json({ success: false, msg: "Internal server error" });
   }
 }
+
 async function updateAdminProfile(req, res) {
   try {
     //  Validate body

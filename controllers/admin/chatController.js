@@ -515,19 +515,21 @@ async function adminGetChats(req, res) {
     const where = {};
     if (value.chatId) where.id = Number(value.chatId);
 
-    if (value.userId) {
-      const uid = Number(value.userId);
-      where[Op.or] = [{ participant_1_id: uid }, { participant_2_id: uid }];
-    }
+    const uid = value.userId ? Number(value.userId) : null;
+    const status = value.status || null;
 
-    if (value.status) {
-      // if already has Op.or, extend; else create
-      const existingOr = Array.isArray(where[Op.or]) ? where[Op.or] : [];
+    if (uid && status) {
+      // status must match the "side" of the given userId
       where[Op.or] = [
-        ...existingOr,
-        { chat_status_p1: value.status },
-        { chat_status_p2: value.status },
+        { participant_1_id: uid, chat_status_p1: status },
+        { participant_2_id: uid, chat_status_p2: status },
       ];
+    } else if (uid) {
+      // just user filter (any status)
+      where[Op.or] = [{ participant_1_id: uid }, { participant_2_id: uid }];
+    } else if (status) {
+      // no userId, filter by status for any side (global)
+      where[Op.or] = [{ chat_status_p1: status }, { chat_status_p2: status }];
     }
 
     const { count, rows } = await Chat.findAndCountAll({
@@ -1222,7 +1224,7 @@ async function getAllUsers(req, res) {
         .falsy("false")
         .allow(null)
         .default(null),
-
+      type: Joi.string().valid("real", "bot").empty("").default(null),
       username: Joi.string().trim().max(50).empty("").default(null),
       email: Joi.string().trim().max(300).empty("").default(null),
       phone: Joi.string().trim().max(50).empty("").default(null),
@@ -1294,7 +1296,7 @@ async function getAllUsers(req, res) {
     const where = {};
 
     if (value.is_active !== null) where.is_active = value.is_active;
-
+    if (value.type !== null) where.type = value.type;
     if (value.gender !== null) where.gender = value.gender;
 
     // Hide deleted unless explicitly included

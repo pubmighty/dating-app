@@ -23,7 +23,7 @@ const {
 } = require("../../utils/helpers/authHelper");
 const Admin = require("../../models/Admin/Admin");
 const { Op } = require("sequelize");
-const Report = require("../../models/UserReport")
+const Report = require("../../models/UserReport");
 
 async function getBots(req, res) {
   try {
@@ -63,7 +63,7 @@ async function getBots(req, res) {
         .falsy("false")
         .allow(null)
         .default(null),
-
+      id: Joi.number().integer().positive().allow(null).default(null),
       is_verified: Joi.boolean()
         .truthy("true")
         .falsy("false")
@@ -101,7 +101,7 @@ async function getBots(req, res) {
           "status",
           "last_active",
           "coins",
-          "total_spent"
+          "total_spent",
         )
         .default("created_at"),
 
@@ -141,6 +141,7 @@ async function getBots(req, res) {
     const where = { type: "bot" };
 
     if (value.is_active !== null) where.is_active = value.is_active;
+    if (value.id !== null) where.id = value.id;
     if (value.gender !== null) where.gender = value.gender;
 
     if (!value.include_deleted) where.is_deleted = 0;
@@ -365,7 +366,7 @@ async function addBot(req, res) {
           "Short Term, Open To Long",
           "Short Term Fun",
           "New Friends",
-          "Still Figuring Out"
+          "Still Figuring Out",
         )
         .optional()
         .allow(null, ""),
@@ -376,7 +377,7 @@ async function addBot(req, res) {
       interests: Joi.alternatives()
         .try(
           Joi.array().items(Joi.string().trim().max(50)).max(6),
-          Joi.string().trim().max(400)
+          Joi.string().trim().max(400),
         )
         .optional()
         .allow(null, ""),
@@ -504,7 +505,7 @@ async function addBot(req, res) {
           education: value.education || null,
           interests: interestsCsv,
         },
-        { transaction: tx }
+        { transaction: tx },
       );
 
       await UserSetting.findOrCreate({
@@ -546,10 +547,10 @@ async function addBot(req, res) {
         field === "username"
           ? "Username already exists"
           : field === "email"
-          ? "Email already exists"
-          : field === "phone"
-          ? "Phone already exists"
-          : "Duplicate value";
+            ? "Email already exists"
+            : field === "phone"
+              ? "Phone already exists"
+              : "Duplicate value";
       return res.status(409).json({ success: false, message: msg, data: null });
     }
 
@@ -656,7 +657,7 @@ async function editBot(req, res) {
           "Short Term, Open To Long",
           "Short Term Fun",
           "New Friends",
-          "Still Figuring Out"
+          "Still Figuring Out",
         )
         .optional()
         .allow(null, ""),
@@ -667,17 +668,14 @@ async function editBot(req, res) {
       interests: Joi.alternatives()
         .try(
           Joi.array().items(Joi.string().trim().max(50)).max(6),
-          Joi.string().trim().max(400)
+          Joi.string().trim().max(400),
         )
         .optional()
         .allow(null, ""),
 
       is_active: Joi.boolean().optional(),
       is_verified: Joi.boolean().optional(),
-    })
-      .min(1)
-      .required()
-      .messages({ "object.min": "At least one field is required to update." });
+    }).required();
 
     const { error: bErr, value } = bodySchema.validate(req.body || {}, {
       abortEarly: true,
@@ -901,10 +899,10 @@ async function editBot(req, res) {
         field === "username"
           ? "Username already exists"
           : field === "email"
-          ? "Email already exists"
-          : field === "phone"
-          ? "Phone already exists"
-          : "Duplicate value";
+            ? "Email already exists"
+            : field === "phone"
+              ? "Phone already exists"
+              : "Duplicate value";
       return res.status(409).json({ success: false, message: msg, data: null });
     }
 
@@ -983,7 +981,7 @@ async function deleteBot(req, res) {
     await sequelize.transaction(async (tx) => {
       await User.update(
         { is_deleted: 1, is_active: false, status: 3 },
-        { where: { id: userId }, transaction: tx }
+        { where: { id: userId }, transaction: tx },
       );
     });
 
@@ -1102,7 +1100,7 @@ async function restoreBot(req, res) {
           is_active: true,
           status: 1, // active
         },
-        { where: { id: userId }, transaction: tx }
+        { where: { id: userId }, transaction: tx },
       );
 
       await UserSetting.findOrCreate({
@@ -1239,7 +1237,7 @@ async function uploadBotMedia(req, res) {
 
     const MAX_FILES = Number.parseInt(
       await getOption("max_files_per_user", 5),
-      10
+      10,
     );
     if (!Number.isFinite(MAX_FILES) || MAX_FILES <= 0) {
       return res.status(500).json({
@@ -1325,7 +1323,7 @@ async function uploadBotMedia(req, res) {
           uploader_ip,
           user_agent,
           targetUserId,
-          "user"
+          "user",
         );
 
         uploadedRows.push(uploadRes);
@@ -1746,7 +1744,7 @@ async function uploadBotVideo(req, res) {
           uploader_ip,
           user_agent,
           botId,
-          "normal"
+          "normal",
         );
 
         // up = { filename, folder, id } (id is FileUpload row id)
@@ -2040,7 +2038,7 @@ async function deleteBotVideo(req, res) {
       video.name,
       video.folders,
       null,
-      "video"
+      "video",
     );
 
     // 6) Delete DB row from CallFile
@@ -2152,9 +2150,12 @@ async function updateBotReport(req, res) {
           "any.required": "status is required.",
         }),
 
-      moderator_note: Joi.string().trim().max(1000).allow("", null).default(null),
-
-      }).unknown(false);
+      moderator_note: Joi.string()
+        .trim()
+        .max(1000)
+        .allow("", null)
+        .default(null),
+    }).unknown(false);
 
     const { error: bErr, value: botVal } = bodySchema.validate(req.body, {
       abortEarly: true,
@@ -2216,7 +2217,7 @@ async function updateBotReport(req, res) {
         moderator_note: botVal.moderator_note,
         moderated_at: new Date(),
       },
-      { where: { id: reportId } }
+      { where: { id: reportId } },
     );
 
     //  Return updated report (fresh)
@@ -2252,7 +2253,6 @@ async function updateBotReport(req, res) {
   }
 }
 
-
 async function getReports(req, res) {
   try {
     // Admin session
@@ -2287,14 +2287,21 @@ async function getReports(req, res) {
 
     // Validate query (filters + pagination)
     const querySchema = Joi.object({
-      status: Joi.string().trim().valid("pending", "spam", "rejected", "completed").allow("", null),
+      status: Joi.string()
+        .trim()
+        .valid("pending", "spam", "rejected", "completed")
+        .allow("", null),
       reported_user: Joi.number().integer().positive(),
+      id: Joi.number().integer().positive(),
       reported_by: Joi.number().integer().positive(),
-      moderated_by:Joi.number().integer().positive(),
+      moderated_by: Joi.number().integer().positive(),
       page: Joi.number().integer().min(1).default(1),
       perPage: Joi.number().integer().min(1).max(100).default(20),
 
-      orderBy: Joi.string().trim().valid("created_at", "moderated_at", "id").default("created_at"),
+      orderBy: Joi.string()
+        .trim()
+        .valid("created_at", "moderated_at", "id")
+        .default("created_at"),
       order: Joi.string().trim().valid("ASC", "DESC").default("DESC"),
     }).unknown(false);
 
@@ -2314,6 +2321,7 @@ async function getReports(req, res) {
 
     const where = {};
     if (qVal.status) where.status = qVal.status;
+    if (qVal.id) where.id = qVal.id;
     if (qVal.reported_user) where.reported_user = Number(qVal.reported_user);
     if (qVal.reported_by) where.reported_by = Number(qVal.reported_by);
     if (qVal.moderated_by) where.moderated_by = Number(qVal.moderated_by);
@@ -2422,12 +2430,18 @@ async function getBotReports(req, res) {
 
     // Optional: validate query (status + pagination)
     const querySchema = Joi.object({
-      status: Joi.string().trim().valid("pending", "spam", "rejected", "completed").allow("", null),
+      status: Joi.string()
+        .trim()
+        .valid("pending", "spam", "rejected", "completed")
+        .allow("", null),
 
       page: Joi.number().integer().min(1).default(1),
       perPage: Joi.number().integer().min(1).max(100).default(20),
 
-      orderBy: Joi.string().trim().valid("created_at", "moderated_at", "id").default("created_at"),
+      orderBy: Joi.string()
+        .trim()
+        .valid("created_at", "moderated_at", "id")
+        .default("created_at"),
       order: Joi.string().trim().valid("ASC", "DESC").default("DESC"),
     }).unknown(false);
 
@@ -2503,7 +2517,8 @@ async function getBotReports(req, res) {
     console.error("adminGetUserReports error:", err);
     return res.status(500).json({
       success: false,
-      message: err?.message || "Something went wrong while fetching user reports.",
+      message:
+        err?.message || "Something went wrong while fetching user reports.",
       data: null,
     });
   }
@@ -2524,5 +2539,5 @@ module.exports = {
   deleteBotVideo,
   updateBotReport,
   getReports,
-  getBotReports
+  getBotReports,
 };

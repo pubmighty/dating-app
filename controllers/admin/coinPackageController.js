@@ -1070,6 +1070,7 @@ async function getCoinPurchaseTransactions(req, res) {
           "is_popular",
           "is_ads_free",
           "display_order",
+          "cover",
         ],
       });
     }
