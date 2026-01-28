@@ -4,7 +4,6 @@ const { Op } = require("sequelize");
 const Admin = require("../../models/Admin/Admin");
 const User = require("../../models/User");
 const Notification = require("../../models/Notification");
-
 const {
   isAdminSessionValid,
   verifyAdminRole,
@@ -15,22 +14,10 @@ const {
   createAndSendGlobal,
   previewFilteredUsers,
   createAndSendFiltered,
+  pickImage,
+  pickNotifOpts
 } = require("../../utils/helpers/notificationHelper");
 
-function pickNotifOpts(value) {
-  return {
-    landing_url: value?.landing_url || null,
-    image_url: value?.image_url || null,
-    priority: value?.priority || "normal",
-    scheduled_at: value?.scheduled_at || null,
-    status: value?.status || null,
-  };
-}
-
-function pickImage(value) {
-  // allow either "image" or "image_url" from UI
-  return value?.image || value?.image_url || null;
-}
 
 async function adminSendToUser(req, res) {
   try {
@@ -69,7 +56,6 @@ async function adminSendToUser(req, res) {
       status: Joi.string()
         .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
         .allow(null),
-
       data: Joi.object().unknown(true).default({}),
     });
 
@@ -247,18 +233,14 @@ async function adminPreviewFiltered(req, res) {
     const schema = Joi.object({
       age_min: Joi.number().integer().min(13).max(100).allow(null),
       age_max: Joi.number().integer().min(13).max(100).allow(null),
-
       gender: Joi.string()
         .valid("male", "female", "other", "prefer_not_to_say")
         .allow(null, ""),
-
       country: Joi.string().max(100).allow(null, ""),
       state: Joi.string().max(100).allow(null, ""),
       city: Joi.string().max(100).allow(null, ""),
       region: Joi.string().max(100).allow(null, ""),
-
       type: Joi.string().valid("real", "bot").allow(null, ""),
-
       is_active: Joi.boolean().allow(null),
       status: Joi.number().integer().valid(0, 1, 2, 3).allow(null),
       last_active_days: Joi.number().integer().min(1).max(3650).allow(null),
@@ -463,15 +445,13 @@ async function getSentNotifications(req, res) {
     const schema = Joi.object({
       page: Joi.number().integer().min(1).max(100000).default(1),
       limit: Joi.number().integer().min(1).max(200).default(50),
-
       receiver_id: Joi.number().integer().positive().allow(null),
       sender_id: Joi.number().integer().positive().allow(null),
       type: Joi.string().trim().max(50).allow("", null),
       status: Joi.string()
         .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
         .allow("", null),
-
-      q: Joi.string().trim().max(200).allow("", null),
+      query: Joi.string().trim().max(200).allow("", null),
     });
 
     const { error, value } = schema.validate(req.query, {
@@ -499,10 +479,10 @@ async function getSentNotifications(req, res) {
     if (value.type) where.type = value.type;
     if (value.status) where.status = value.status;
 
-    if (value.q) {
+    if (value.query) {
       where[Op.or] = [
-        { title: { [Op.like]: `%${value.q}%` } },
-        { content: { [Op.like]: `%${value.q}%` } },
+        { title: { [Op.like]: `%${value.query}%` } },
+        { content: { [Op.like]: `%${value.query}%` } },
       ];
     }
 
@@ -534,7 +514,6 @@ async function getSentNotifications(req, res) {
       order: [["id", "DESC"]],
       limit,
       offset,
-      raw: true,
     });
 
     return res.json({

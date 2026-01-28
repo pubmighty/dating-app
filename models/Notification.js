@@ -37,12 +37,12 @@ const Notification = sequelize.define(
     },
 
     content: {
-      type: DataTypes.STRING(300),
+      type: DataTypes.STRING(200),
       allowNull: false,
     },
 
      landing_url: {
-      type: DataTypes.STRING(800),
+      type: DataTypes.STRING(200),
       allowNull: true,
       comment: "Deep link or web URL",
     },
@@ -121,7 +121,7 @@ const Notification = sequelize.define(
     },
 
       last_error: {
-      type: DataTypes.STRING(500),
+      type: DataTypes.STRING(100),
       allowNull: true,
     },
 
@@ -142,7 +142,7 @@ const Notification = sequelize.define(
        {
         name: "idx_status_scheduled_at",
         fields: ["status", "scheduled_at"],
-      },
+      }, 
        {
         name: "idx_sent_at",
         fields: ["sent_at"],

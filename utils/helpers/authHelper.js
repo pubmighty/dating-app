@@ -162,7 +162,7 @@ function generateRandomPassword(length = 10) {
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$!&";
 
   const randomValues = new Uint32Array(length);
-  window.crypto.getRandomValues(randomValues);
+  crypto.getRandomValues(randomValues);
 
   let password = "";
   for (let i = 0; i < length; i++) {

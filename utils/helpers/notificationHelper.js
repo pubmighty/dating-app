@@ -38,6 +38,20 @@ function buildMulticastPayload(tokens, title, content, image, data, opts = {}) {
 }
 
 
+function pickNotifOpts(value) {
+  return {
+    landing_url: value?.landing_url || null,
+    image_url: value?.image_url || null,
+    priority: value?.priority || "normal",
+    scheduled_at: value?.scheduled_at || null,
+    status: value?.status || null,
+  };
+}
+
+function pickImage(value) {
+  // allow either "image" or "image_url" from UI
+  return value?.image || value?.image_url || null;
+}
 
 function normalizeFilters(filters = {}) {
   const out = { ...(filters || {}) };
@@ -227,17 +241,13 @@ async function savePushInline(
         type,
         title,
         content,
-
         landing_url: nopts.landing_url,
         image_url: nopts.image_url,
         priority: nopts.priority,
-
         status: nopts.status,
         scheduled_at: nopts.scheduled_at,
         sent_at: nopts.status === "sent" ? new Date() : null,
-
         is_read: false,
-
         total_targeted: 0,
         total_sent: 0,
         total_delivered: 0,
@@ -368,17 +378,13 @@ async function createAndSend(
     type,
     title,
     content,
-
     landing_url: nopts.landing_url,
     image_url: nopts.image_url,
     priority: nopts.priority,
-
     status: nopts.status,
     scheduled_at: nopts.scheduled_at,
     sent_at: nopts.status === "sent" ? new Date() : null,
-
     is_read: false,
-
     total_targeted: 0,
     total_sent: 0,
     total_delivered: 0,
@@ -510,17 +516,13 @@ async function createAndSendGlobal(
       type,
       title,
       content,
-
       landing_url: nopts.landing_url,
       image_url: nopts.image_url,
       priority: nopts.priority,
-
       status: nopts.status,
       scheduled_at: nopts.scheduled_at,
       sent_at: nopts.status === "sent" ? new Date() : null,
-
       is_read: false,
-
       total_targeted: 0,
       total_sent: 0,
       total_delivered: 0,
@@ -1121,4 +1123,6 @@ module.exports = {
   sendChatNotification,
   sendLikeNotificationToUser,
   sendRejectNotificationToUser,
+  pickNotifOpts,
+  pickImage
 };

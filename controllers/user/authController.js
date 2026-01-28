@@ -15,13 +15,8 @@ const {
   isUserSessionValid,
   clearUserSessionByToken
 } = require("../../utils/helpers/authHelper");
-const {
-  downloadAndUploadGoogleAvatar,
-} = require("../../utils/helpers/fileUpload");
-const {
-  publicUserAttributes,
-  BCRYPT_ROUNDS,
-} = require("../../utils/staticValues");
+const { downloadAndUploadGoogleAvatar } = require("../../utils/helpers/fileUpload");
+const { publicUserAttributes, BCRYPT_ROUNDS } = require("../../utils/staticValues");
 const { sendOtpMail } = require("../../utils/helpers/mailHelper");
 const sequelize = require("../../config/db");
 const UserSession = require("../../models/UserSession");
@@ -81,7 +76,6 @@ async function registerWithGoogle(req, res) {
       });
     }
 
-    // Require verified email from Google
     if (emailVerified !== true) {
       return res.status(403).json({
         success: false,
@@ -130,16 +124,6 @@ async function registerWithGoogle(req, res) {
       });
     }
 
-    const username = generateUniqueUsername().toLowerCase();
-
-    const existingUsername = await User.findOne({ where: { username } });
-    if (existingUsername) {
-      return res.status(409).json({
-        success: false,
-        message: "This username is already registered.",
-      });
-    }
-
     const rawPassword = generateRandomPassword();
     const hashedPassword = await bcrypt.hash(rawPassword, BCRYPT_ROUNDS);
 
@@ -149,16 +133,16 @@ async function registerWithGoogle(req, res) {
     );
 
     const user = await User.create({
-      username: username.toLowerCase(),
-      email: email,
+      email,
       password: hashedPassword,
       avatar: avatarName,
       registeredIp: getRealIp(req),
       register_type: "google",
       full_name: name,
-      googleId,
+      google_id: googleId,
       is_active: true,
       is_verified: true,
+      status: 1,
     });
 
     const { token, expires_at } = await handleUserSessionCreation(req, user);
@@ -180,265 +164,159 @@ async function registerWithGoogle(req, res) {
   }
 }
 
-async function registerUser(req, res) {
+// signupWithEmail:
+// email exists => send OTP for login (action=login_email) => verifyLoginEmail
+// email not exists => TempUser + OTP for signup (action=signup_email) => verifySignupEmail
+async function emailExist(req, res) {
   try {
     const schema = Joi.object({
-      username: Joi.string()
-        .trim()
-        .min(3)
-        .max(40)
-        .pattern(/^[a-zA-Z0-9._-]+$/)
-        .optional()
-        .messages({
-          "string.base": "Username must be a text value",
-          "string.empty": "Username cannot be empty",
-          "string.min": "Username must be at least 3 characters long",
-          "string.max": "Username must not exceed 40 characters",
-          "string.pattern.base":
-            "Username can only contain letters, numbers, dots, underscores, and hyphens",
-        }),
-
       email: Joi.string()
         .trim()
         .lowercase()
         .email({ tlds: { allow: false } })
-        .optional()
-        .messages({
-          "string.base": "Email must be a text value",
-          "string.email": "Please enter a valid email address",
-        }),
+        .required(),
+    });
 
-      phone_number: Joi.string()
-        .trim()
-        .pattern(/^\+?[0-9]{7,15}$/)
-        .optional()
-        .messages({
-          "string.base": "Phone number must be a text value",
-          "string.pattern.base": "Please enter a valid phone number",
-        }),
-
-      password: Joi.string()
-        .min(8)
-        .max(128)
-        .pattern(/[A-Z]/)
-        .pattern(/[a-z]/)
-        .pattern(/[0-9]/)
-        .required()
-        .messages({
-          "string.base": "Password must be a text value",
-          "string.empty": "Password is required",
-          "string.min": "Password must be at least 8 characters long",
-          "string.max": "Password must not exceed 128 characters",
-          "string.pattern.base":
-            "Password must include uppercase, lowercase, and a number",
-          "any.required": "Password is required",
-        }),
-    })
-      // must have at least one: email or phone
-      .or("email", "phone_number")
-      .messages({
-        "object.missing": "Please provide either email or phone number",
-      });
-
-    const { error, value } = schema.validate(req.body, { abortEarly: true });
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
 
     if (error) {
       return res.status(400).json({
         success: false,
         message: error.details?.[0]?.message || "Invalid request",
+        data: null,
       });
     }
 
-    let { username, email, phone_number, password } = value;
+    const email = String(value.email).toLowerCase().trim();
 
-    // Normalize
-    const hasEmail = Boolean(email && String(email).trim());
-    const hasPhone = Boolean(phone_number && String(phone_number).trim());
+    // Check real user
+    const user = await User.findOne({ where: { email } });
+    if (user) {
+      const otp = generateOtp();
+      const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
+      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
 
-    // If both provided -> treat as EMAIL signup (but keep phone on record)
-    const signupMode = hasEmail ? "email" : "phone";
-
-    // Generate username if not provided
-    if (!username) {
-      username = generateUniqueUsername("user").toLowerCase();
-    } else {
-      username = username.toLowerCase();
-    }
-
-    const existingUsername = await User.findOne({ where: { username } });
-    if (existingUsername) {
-      return res.status(409).json({
-        success: false,
-        message: "This username is already registered.",
-      });
-    }
-
-    // Uniqueness checks
-    if (hasEmail) {
-      const existingEmail = await User.findOne({
-        where: { email: email.toLowerCase() },
-      });
-      if (existingEmail) {
-        return res.status(409).json({
-          success: false,
-          message: "This email is already registered.",
-        });
-      }
-    }
-
-    if (hasPhone) {
-      const existingPhone = await User.findOne({
-        where: { phone: phone_number },
-      });
-      if (existingPhone) {
-        return res.status(409).json({
-          success: false,
-          message: "This phone number is already registered.",
-        });
-      }
-    }
-
-    // Hash password
-    const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
-
-    // Email verification setting
-    const verifyEmailRegister = Boolean(
-      (await getOption("verify_register_email", "true")) === "true"
-    );
-
-    // EMAIL SIGNUP FLOW
-    if (signupMode === "email") {
-      // verification enabled -> TempUser + OTP
-      if (verifyEmailRegister) {
-        const otp = generateOtp();
-
-        const otpMinutes = parseInt(
-          await getOption("register_otp_time_min", 5),
-          10
-        );
-
-        const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
-
-        const tempUser = await TempUser.create({
-          username,
-          email,
-          phone: hasPhone ? phone_number : null,
-          password: hashedPass,
-        });
-
-        const myOtp = await UserOtp.create({
-          user_id: tempUser.id,
-          otp,
-          expiry: otpExpiresAt,
-          action: "register",
-          status: false,
-        });
-
-        await sendOtpMail(tempUser, myOtp, "Verify Your Email", "register");
-
-        return res.status(200).json({
-          success: true,
-          message: "OTP sent to your email. Please verify.",
-          need_verification: true,
-          data: { tempUserId: tempUser.id },
-        });
-      }
-
-      // verification disabled -> direct create
-      const user = await User.create({
-        username,
-        email,
-        phone: hasPhone ? phone_number : null,
-        password: hashedPass,
-        register_type: "manual",
-        ip_address: getRealIp(req),
-        is_verified: false, // if you want: true when verify is disabled, change this
-      });
-
-      const { token, expires_at } = await handleUserSessionCreation(
-        req,
-        user.id
+      // Invalidate old OTPs
+      await UserOtp.update(
+        { status: true },
+        { where: { user_id: user.id, action: "login_email", status: false } }
       );
 
-      await user.reload({ attributes: publicUserAttributes });
-      return res.status(201).json({
+      const myOtp = await UserOtp.create({
+        user_id: user.id,
+        otp,
+        expiry: otpExpiresAt,
+        action: "login_email",
+        status: false,
+      });
+
+      await sendOtpMail(user, myOtp, "Login OTP", "login_email");
+
+      return res.status(200).json({
         success: true,
-        message: "Registration successful",
+        message: "OTP sent to email",
         data: {
-          user: user,
-          token,
-          tokenexpires_at: expires_at,
+          is_exist: true,
+          tempUserId: null,
         },
       });
     }
+    let tempUser = await TempUser.findOne({ where: { email } });
 
-    // PHONE SIGNUP FLOW
-    // Phone signup: direct create (no email involved)
-    const user = await User.create({
-      username,
-      email: null,
-      phone: phone_number,
-      password: hashedPass,
-      register_type: "manual",
-      ip_address: getRealIp(req),
-      is_verified: false, // phone OTP not implemented here
+    if (!tempUser) {
+      tempUser = await TempUser.create({
+        email,
+        phone: null,
+        password: null,
+      });
+    }
+
+    const otp = generateOtp();
+    const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
+    const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
+
+    // Invalidate old OTPs
+    await UserOtp.update(
+      { status: true },
+      { where: { user_id: tempUser.id, action: "signup_email", status: false } }
+    );
+
+    const myOtp = await UserOtp.create({
+      user_id: tempUser.id,
+      otp,
+      expiry: otpExpiresAt,
+      action: "signup_email",
+      status: false,
     });
 
-    const { token, expires_at } = await handleUserSessionCreation(req, user);
-    await user.reload({ attributes: publicUserAttributes });
+    await sendOtpMail(tempUser, myOtp, "Verify Your Email", "signup_email");
 
-    return res.status(201).json({
+    return res.status(200).json({
       success: true,
-      message: "Registration successful",
+      message: "OTP sent to email",
       data: {
-        user: user,
-        token,
-        tokenexpires_at: expires_at,
+        is_exist: false,
+        tempUserId: tempUser.id,
       },
     });
   } catch (err) {
-    console.error("Error during registerUser:", err);
+    console.error("Error during [emailExist]:", err);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+      data: null,
     });
   }
 }
-
-async function verifyRegister(req, res) {
+/**
+ * If User exists (by email) => verify login OTP (action=login_email) and login
+ * If User NOT exists => verify signup OTP (action=signup_email) using tempUserId, create User from TempUser, login
+ */
+async function signupVerifyEmail(req, res) {
   const t = await sequelize.transaction();
   try {
     const schema = Joi.object({
-      tempUserId: Joi.number().integer().positive().required().messages({
-        "number.base": "tempUserId must be a number",
-        "number.integer": "tempUserId must be an integer",
-        "number.positive": "tempUserId must be a positive number",
-        "any.required": "tempUserId is required",
-      }),
-
-      otp: Joi.string()
-        .trim()
-        .pattern(/^[0-9]{6}$/)
-        .required()
-        .messages({
-          "string.empty": "OTP cannot be empty.",
-          "string.pattern.base": "OTP must be a 6-digit number.",
-          "any.required": "OTP is required.",
-        }),
+      email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required(),
+      tempUserId: Joi.number().integer().positive().required(),
+      otp: Joi.string().trim().pattern(/^[0-9]{6}$/).required(),
+      password: Joi.string().min(8).max(128).required(),
     });
 
-    const { error, value } = schema.validate(req.body, { abortEarly: true });
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
     if (error) {
       await t.rollback();
       return res.status(400).json({
         success: false,
         message: error.details?.[0]?.message || "Invalid request",
+        data: null,
       });
     }
 
-    const { tempUserId, otp } = value;
+    const email = String(value.email).toLowerCase().trim();
+    const tempUserId = Number(value.tempUserId);
+    const otp = String(value.otp).trim();
+    const password = String(value.password);
 
-    // Load temp user by ID
+    // Must not already exist
+    const already = await User.findOne({ where: { email }, transaction: t, lock: t.LOCK.UPDATE });
+    if (already) {
+      await t.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "This email is already registered.",
+        data: null,
+      });
+    }
+
     const tempUser = await TempUser.findOne({
       where: { id: tempUserId },
       transaction: t,
@@ -449,169 +327,300 @@ async function verifyRegister(req, res) {
       await t.rollback();
       return res.status(404).json({
         success: false,
-        message: "Verification request not found. Please register again.",
+        message: "Signup request not found. Please try again.",
+        data: null,
       });
     }
 
-    // Prevent duplicate real user creation
-
-    // Email already registered
-    const existingUser = await User.findOne({
-      where: { email: tempUser.email },
-      transaction: t,
-    });
-
-    if (existingUser) {
-      // Cleanup temp user (optional, but avoids garbage)
-      await TempUser.destroy({ where: { id: tempUser.id }, transaction: t });
-      await UserOtp.update(
-        { status: true },
-        {
-          where: { user_id: tempUser.id, action: "register", status: false },
-          transaction: t,
-        }
-      );
-
-      await t.commit();
-      return res.status(409).json({
-        success: false,
-        message: "This email is already registered.",
-      });
-    }
-
-    // Username already registered
-    const existingUsername = await User.findOne({
-      where: { username: tempUser.username },
-      transaction: t,
-    });
-
-    if (existingUsername) {
-      // Cleanup temp user (optional, but avoids garbage)
-      await TempUser.destroy({ where: { id: tempUser.id }, transaction: t });
-      await UserOtp.update(
-        { status: true },
-        {
-          where: { user_id: tempUser.id, action: "register", status: false },
-          transaction: t,
-        }
-      );
-
-      await t.commit();
-      return res.status(409).json({
-        success: false,
-        message: "This username is already registered.",
-      });
-    }
-
-    // Latest unused OTP for this temp user
-    const otpRecord = await UserOtp.findOne({
-      where: {
-        user_id: tempUser.id,
-        action: "register",
-        status: false,
-      },
-      order: [["createdAt", "DESC"]],
-      transaction: t,
-    });
-
-    if (!otpRecord) {
+    if (String(tempUser.email || "").toLowerCase().trim() !== email) {
       await t.rollback();
       return res.status(400).json({
         success: false,
-        message: "OTP not found or already used. Please request a new OTP.",
+        message: "Email does not match signup request.",
+        data: null,
+      });
+    }
+
+    const verifySignupEmail = String(await getOption("verify_signup_email", "true")) === "true";
+
+    // If admin enabled OTP, we ensure OTP record exists (send if not exists / expired)
+    if (verifySignupEmail) {
+      const now = new Date();
+
+      // If there is no valid OTP, generate and send (but still require otp in request as per your flow)
+      const validOtp = await UserOtp.findOne({
+        where: {
+          user_id: tempUser.id,
+          action: "signup_email",
+          status: false,
+          expiry: { [Op.gt]: now },
+        },
+        order: [["createdAt", "DESC"]],
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (!validOtp) {
+        const newOtp = generateOtp();
+        const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
+        const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
+
+        await UserOtp.update(
+          { status: true },
+          { where: { user_id: tempUser.id, action: "signup_email", status: false }, transaction: t }
+        );
+
+        const myOtp = await UserOtp.create(
+          {
+            user_id: tempUser.id,
+            otp: newOtp,
+            expiry: otpExpiresAt,
+            action: "signup_email",
+            status: false,
+          },
+          { transaction: t }
+        );
+
+        await sendOtpMail(tempUser, myOtp, "Verify Your Email", "signup_email");
+      }
+
+      // verify OTP
+      const otpRecord = await UserOtp.findOne({
+        where: { user_id: tempUser.id, action: "signup_email", status: false },
+        order: [["createdAt", "DESC"]],
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (!otpRecord || (otpRecord.expiry && now > otpRecord.expiry) || String(otpRecord.otp) !== otp) {
+        await t.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Invalid or expired OTP.",
+          data: null,
+        });
+      }
+
+      // mark used
+      await UserOtp.update(
+        { status: true },
+        { where: { user_id: tempUser.id, action: "signup_email", status: false }, transaction: t }
+      );
+    }
+
+    // set password into temp user (hashed)
+    const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    await TempUser.update({ password: hashedPass }, { where: { id: tempUser.id }, transaction: t });
+
+    // Create actual user from TempUser (NO username)
+    const newUser = await User.create(
+      {
+        email: tempUser.email,
+        phone: null,
+        password: hashedPass,
+        register_type: "manual",
+        ip_address: getRealIp(req),
+        is_verified: true,
+        is_active: true,
+      },
+      { transaction: t }
+    );
+
+    // cleanup temp
+    await TempUser.destroy({ where: { id: tempUser.id }, transaction: t });
+
+    await t.commit();
+
+    const { token, expires_at } = await handleUserSessionCreation(req, newUser);
+
+    await newUser.reload({ attributes: publicUserAttributes });
+    const files = await FileUpload.findAll({ where: { user_id: newUser.id } });
+
+    return res.status(200).json({
+      success: true,
+      message: "Registration successful",
+      data: {
+        user: newUser,
+        token,
+        token_expires_at: expires_at,
+        files,
+      },
+    });
+  } catch (err) {
+    await t.rollback();
+    console.error("Error during [signupVerifyEmail]:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      data: null,
+    });
+  }
+}
+
+async function loginVerifyEmail(req, res) {
+  const t = await sequelize.transaction();
+  try {
+    const schema = Joi.object({
+      email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required(),
+      password: Joi.string().min(8).max(128).required(),
+      otp: Joi.string().trim().pattern(/^[0-9]{6}$/).required(),
+    });
+
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid request",
+        data: null,
+      });
+    }
+
+    const email = String(value.email).toLowerCase().trim();
+    const password = String(value.password);
+    const otp = String(value.otp).trim();
+
+    const user = await User.findOne({
+      where: { email },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (!user) {
+      await t.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Account not found.",
+        data: null,
+      });
+    }
+
+    if (user.is_active === false || Number(user.status) !== 1) {
+      await t.rollback();
+      return res.status(403).json({
+        success: false,
+        message: "Your account is not active.",
+        data: null,
+      });
+    }
+
+    const isCorrect = await bcrypt.compare(password, user.password || "");
+    if (!isCorrect) {
+      await t.rollback();
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials.",
+        data: null,
       });
     }
 
     const now = new Date();
 
-    if (otpRecord.expiry && now > otpRecord.expiry) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "OTP expired. Please request a new OTP.",
-      });
-    }
-
-    if (String(otpRecord.otp) !== String(otp)) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid OTP.",
-      });
-    }
-
-    // Mark OTP used
-    otpRecord.status = true;
-    await otpRecord.save({ transaction: t });
-
-    // Create user
-    const user = await User.create(
-      {
-        username: tempUser.username,
-        email: tempUser.email,
-        phone: tempUser.phone || null, // keep phone if you stored it
-        password: tempUser.password, // already hashed
-        register_type: "manual",
-        ip_address: getRealIp(req),
-        is_verified: true,
+    // ensure OTP exists (send if not)
+    const validOtp = await UserOtp.findOne({
+      where: {
+        user_id: user.id,
+        action: "login_email",
+        status: false,
+        expiry: { [Op.gt]: now },
       },
-      { transaction: t }
-    );
+      order: [["createdAt", "DESC"]],
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
 
-    // Cleanup temp user + any other pending OTPs
-    await TempUser.destroy({ where: { id: tempUser.id }, transaction: t });
+    if (!validOtp) {
+      const newOtp = generateOtp();
+      const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
+      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
+
+      await UserOtp.update(
+        { status: true },
+        { where: { user_id: user.id, action: "login_email", status: false }, transaction: t }
+      );
+
+      const myOtp = await UserOtp.create(
+        {
+          user_id: user.id,
+          otp: newOtp,
+          expiry: otpExpiresAt,
+          action: "login_email",
+          status: false,
+        },
+        { transaction: t }
+      );
+
+      await sendOtpMail(user, myOtp, "Login OTP", "login_email");
+    }
+
+    // verify OTP
+    const otpRecord = await UserOtp.findOne({
+      where: { user_id: user.id, action: "login_email", status: false },
+      order: [["createdAt", "DESC"]],
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (!otpRecord || (otpRecord.expiry && now > otpRecord.expiry) || String(otpRecord.otp) !== otp) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired OTP.",
+        data: null,
+      });
+    }
+
+    // mark used
     await UserOtp.update(
       { status: true },
-      {
-        where: { user_id: tempUser.id, action: "register", status: false },
-        transaction: t,
-      }
+      { where: { user_id: user.id, action: "login_email", status: false }, transaction: t }
     );
 
     await t.commit();
 
-    // Session outside the transaction
     const { token, expires_at } = await handleUserSessionCreation(req, user);
 
     await user.reload({ attributes: publicUserAttributes });
+    const files = await FileUpload.findAll({ where: { user_id: user.id } });
 
     return res.status(200).json({
       success: true,
-      message: "Email verified successfully.",
-      data: {
-        user: user,
-        token,
-        tokenexpires_at: expires_at,
-      },
+      message: "Login successful",
+      data: { user, token, token_expires_at: expires_at, files },
     });
   } catch (err) {
     await t.rollback();
-    console.error("Error during VerifyRegisterOTP:", err);
+    console.error("Error during [loginVerifyEmail]:", err);
     return res.status(500).json({
       success: false,
-      message: "Error verifying OTP",
+      message: "Internal server error",
+      data: null,
     });
   }
 }
 
-async function loginUser(req, res) {
+/**
+ * phoneExist
+ * If phone exists => LOGIN with password
+ * If phone not exists => SIGNUP with password
+ * No OTP for phone (as per your instruction)
+ */
+async function phoneExist(req, res) {
   try {
     const schema = Joi.object({
-      login: Joi.string().trim().min(3).max(200).required().messages({
-        "string.empty": "Login input is required.",
-        "string.min": "Login input is too short.",
-        "any.required": "Login input is required.",
-      }),
-      password: Joi.string().min(8).max(128).required().messages({
-        "string.empty": "Password is required.",
-        "string.min": "Password must be at least 8 characters long.",
-        "any.required": "Password is required.",
-      }),
+      phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
+      password: Joi.string().min(8).max(128).required(),
     });
 
-    const { error, value } = schema.validate(req.body, {
+    const { error, value } = schema.validate(req.body || {}, {
       abortEarly: true,
       stripUnknown: true,
+      convert: true,
     });
 
     if (error) {
@@ -622,82 +631,87 @@ async function loginUser(req, res) {
       });
     }
 
-    let { login, password } = value;
+    const phone = String(value.phone_number).replace(/[^\d+]/g, "");
+    const password = String(value.password);
 
-    // Normalize login input
-    login = String(login || "").trim();
+    const user = await User.findOne({ where: { phone } });
 
-    // Determine lookup mode + normalize
-    let where = null;
-
-    if (isValidEmail(login)) {
-      where = { email: login.toLowerCase() };
-    } else if (isValidPhone(login)) {
-      // normalize phone (basic): keep leading +, remove spaces/dashes
-      const normalizedPhone = login.replace(/[^\d+]/g, "");
-      where = { phone: normalizedPhone };
-      login = normalizedPhone;
-    } else {
-      // usernames are usually case-insensitive; pick ONE rule and stick to it
-      where = { username: login };
-    }
-
-    const user = await User.findOne({ where });
-
-    // Same response for not-found / wrong password
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid credentials.",
-        data: null,
-      });
-    }
-
-    // Active status check
-    if (Number(user.status) !== 1) {
-      return res.status(403).json({
-        success: false,
-        message: "Your account is not active.",
-        data: null,
-      });
-    }
-
-    const isCorrect = await bcrypt.compare(password, user.password || "");
-    if (!isCorrect) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid credentials.",
-        data: null,
-      });
-    }
-
-    const { token, expires_at } = await handleUserSessionCreation(req, user);
-
-    await user.reload({ attributes: publicUserAttributes });
-    const files = await FileUpload.findAll({
-      where: {
-        user_id: user.id
+    // Login
+    if (user) {
+      if (user.is_active === false || Number(user.status) !== 1) {
+        return res.status(403).json({
+          success: false,
+          message: "Your account is not active.",
+          data: null,
+        });
       }
+
+      const isCorrect = await bcrypt.compare(password, user.password || "");
+      if (!isCorrect) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid credentials.",
+          data: null,
+        });
+      }
+
+      const { token, expires_at } = await handleUserSessionCreation(req, user);
+
+      await user.reload({ attributes: publicUserAttributes });
+      const files = await FileUpload.findAll({ where: { user_id: user.id } });
+
+      return res.status(200).json({
+        success: true,
+        message: "Login successful",
+        data: {
+          mode: "login",
+          user,
+          token,
+          token_expires_at: expires_at,
+          files,
+        },
+      });
+    }
+
+    // Signup
+    const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+    const newUser = await User.create({
+      email: null,
+      phone,
+      password: hashedPass,
+      register_type: "manual",
+      ip_address: getRealIp(req),
+      is_verified: false, // no OTP for phone
+      is_active: true,
     });
-    return res.status(200).json({
+
+    const { token, expires_at } = await handleUserSessionCreation(req, newUser);
+
+    await newUser.reload({ attributes: publicUserAttributes });
+    const files = await FileUpload.findAll({ where: { user_id: newUser.id } });
+
+    return res.status(201).json({
       success: true,
-      message: "Login successful",
+      message: "Registration successful",
       data: {
-        user: user,
+        mode: "signup",
+        user: newUser,
         token,
-        tokenexpires_at: expires_at,
-        files
+        token_expires_at: expires_at,
+        files,
       },
     });
   } catch (err) {
-    console.error("Error during [loginUser]:", err);
+    console.error("Error during [phoneExist]:", err);
     return res.status(500).json({
       success: false,
-      message: "Login failed",
+      message: "Internal server error",
       data: null,
     });
   }
 }
+
 
 async function forgotPassword(req, res) {
   try {
@@ -751,19 +765,17 @@ async function forgotPassword(req, res) {
       });
     }
 
-    // Cooldown / anti-spam: if there is a recent OTP still valid, don’t send a new one
     const now = new Date();
     const recentOtp = await UserOtp.findOne({
       where: {
         user_id: user.id,
         action: "forgot_password",
         status: false,
-        expiry: { [Op.gt]: now }, // still valid
+        expiry: { [Op.gt]: now },
       },
       order: [["createdAt", "DESC"]],
     });
 
-    // If a valid OTP already exists, don’t generate another
     if (recentOtp) {
       return res.status(200).json({
         success: true,
@@ -772,15 +784,11 @@ async function forgotPassword(req, res) {
       });
     }
 
-    const otp = generateOtp();
+    const otp = require("../../utils/helpers/authHelper").generateOtp();
 
-    const otpValidMinutes = parseInt(
-      await getOption("forgot_otp_time_min", 10),
-      10
-    );
+    const otpValidMinutes = parseInt(await getOption("forgot_otp_time_min", 10), 10);
     const otpExpiresAt = new Date(Date.now() + otpValidMinutes * 60 * 1000);
 
-    // Invalidate any older pending OTPs (clean state)
     await UserOtp.update(
       { status: true },
       {
@@ -824,38 +832,15 @@ async function forgotPasswordVerify(req, res) {
         .trim()
         .lowercase()
         .email({ tlds: { allow: false } })
-        .required()
-        .messages({
-          "string.email": "Please enter a valid email address.",
-          "string.empty": "Email is required.",
-          "any.required": "Email is required.",
-        }),
-
+        .required(),
       password: Joi.string()
         .min(8)
         .max(128)
         .pattern(/[A-Z]/)
         .pattern(/[a-z]/)
         .pattern(/[0-9]/)
-        .required()
-        .messages({
-          "string.empty": "Password is required.",
-          "string.min": "Password must be at least 8 characters long.",
-          "string.max": "Password must not exceed 128 characters.",
-          "string.pattern.base":
-            "Password must include uppercase, lowercase, and a number.",
-          "any.required": "Password is required.",
-        }),
-
-      otp: Joi.string()
-        .trim()
-        .pattern(/^[0-9]{6}$/)
-        .required()
-        .messages({
-          "string.empty": "OTP is required.",
-          "string.pattern.base": "OTP must be a 6-digit number.",
-          "any.required": "OTP is required.",
-        }),
+        .required(),
+      otp: Joi.string().trim().pattern(/^[0-9]{6}$/).required(),
     });
 
     const { error, value } = schema.validate(req.body, {
@@ -880,8 +865,7 @@ async function forgotPasswordVerify(req, res) {
       lock: t.LOCK.UPDATE,
     });
 
-    // Do NOT reveal whether user exists
-    if (!user) {
+    if (!user || Number(user.status) !== 1) {
       await t.rollback();
       return res.status(400).json({
         success: false,
@@ -890,23 +874,8 @@ async function forgotPasswordVerify(req, res) {
       });
     }
 
-    // Block inactive accounts
-    if (Number(user.status) !== 1) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired OTP.",
-        data: null,
-      });
-    }
-
-    // Latest unused OTP for forgot_password
     const otpRecord = await UserOtp.findOne({
-      where: {
-        user_id: user.id,
-        action: "forgot_password",
-        status: false,
-      },
+      where: { user_id: user.id, action: "forgot_password", status: false },
       order: [["createdAt", "DESC"]],
       transaction: t,
       lock: t.LOCK.UPDATE,
@@ -940,46 +909,25 @@ async function forgotPasswordVerify(req, res) {
       });
     }
 
-    // Hash & update password
     const hashed = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-    await User.update(
-      { password: hashed },
-      { where: { id: user.id }, transaction: t }
-    );
+    await User.update({ password: hashed }, { where: { id: user.id }, transaction: t });
 
-    // Mark this OTP used
+    await UserOtp.update({ status: true }, { where: { id: otpRecord.id }, transaction: t });
+
     await UserOtp.update(
       { status: true },
       {
-        where: { id: otpRecord.id },
-        transaction: t,
-      }
-    );
-
-    // Invalidate any other pending forgot_password OTPs
-    await UserOtp.update(
-      { status: true },
-      {
-        where: {
-          user_id: user.id,
-          action: "forgot_password",
-          status: false,
-        },
+        where: { user_id: user.id, action: "forgot_password", status: false },
         transaction: t,
       }
     );
 
     await t.commit();
 
-    // Revoke existing sessions/tokens for this user
     await UserSession.update(
-      {
-        status: 2,
-      },
-      {
-        where: { user_id: user.id, status: 1 },
-      }
+      { status: 2 },
+      { where: { user_id: user.id, status: 1 } }
     );
 
     return res.status(200).json({
@@ -995,10 +943,10 @@ async function forgotPasswordVerify(req, res) {
     });
   }
 }
+
 async function logoutUser(req, res) {
   try {
-    
-     const session = await isUserSessionValid(req);
+    const session = await isUserSessionValid(req);
     if (!session?.success) return res.status(401).json(session);
 
     const userId = Number(session.data);
@@ -1010,7 +958,6 @@ async function logoutUser(req, res) {
       });
     }
 
-    //  Extract session_token
     const authHeader = String(req.headers.authorization || "");
     if (!authHeader.startsWith("Bearer ")) {
       return res.status(400).json({
@@ -1029,12 +976,8 @@ async function logoutUser(req, res) {
       });
     }
 
-    // Mark session expired (status=2)
     const [updated] = await UserSession.update(
-      {
-        status: 2,
-        last_activity_at: new Date(),
-      },
+      { status: 2, last_activity_at: new Date() },
       {
         where: {
           user_id: userId,
@@ -1069,9 +1012,10 @@ async function logoutUser(req, res) {
 
 module.exports = {
   registerWithGoogle,
-  verifyRegister,
-  registerUser,
-  loginUser,
+  emailExist,
+  signupVerifyEmail,
+  loginVerifyEmail,
+  phoneExist,
   forgotPassword,
   forgotPasswordVerify,
   logoutUser,

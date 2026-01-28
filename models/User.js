@@ -10,12 +10,6 @@ const User = sequelize.define(
       autoIncrement: true,
     },
 
-    username: {
-      type: DataTypes.STRING(50),
-      allowNull: false,
-      unique: true,
-    },
-
     email: {
       type: DataTypes.STRING(300),
       allowNull: true,
@@ -178,7 +172,6 @@ const User = sequelize.define(
     underscored: true,
     indexes: [
       { name: "idx_unique_email", fields: ["email"], unique: true },
-      { name: "idx_unique_username", fields: ["username"], unique: true },
       {
         name: "idx_type_is_active_gender_created_at",
         fields: ["type", "is_active", "gender", "created_at"],

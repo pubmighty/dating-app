@@ -26,7 +26,7 @@ async function getFeed(req, res) {
       name: Joi.string().trim().max(50).allow("", null).default(null),
 
       sortBy: Joi.string()
-        .valid("username", "created_at", "last_active")
+        .valid("created_at", "last_active")
         .default("last_active"),
 
       sortOrder: Joi.string().valid("ASC", "DESC").default("DESC"),
@@ -51,10 +51,7 @@ async function getFeed(req, res) {
     const userId = isLoggedIn ? Number(sessionResult.data) : null;
 
     // 3) Pagination config
-    const maxPages = parseInt(
-      await getOption("max_pages_user", 1000),
-      10
-    );
+    const maxPages = parseInt(await getOption("max_pages_user", 1000), 10);
     const perPage = parseInt(await getOption("default_per_page_feed", 10), 10);
 
     const page = Math.min(Math.max(1, value.page), maxPages);
@@ -66,10 +63,6 @@ async function getFeed(req, res) {
       is_active: true,
     };
 
-    // name filter (prefix match)
-    if (value.name) {
-      where.username = { [Op.like]: `${value.name}%` };
-    }
 
     // gender filter
     if (value.gender !== "all") {
@@ -132,10 +125,14 @@ async function getFeed(req, res) {
             ],
           };
 
-    // 6) Query
+    // 6) Query (+ media)
     const result = await User.findAndCountAll({
       where,
       attributes: [...publicFeedUserAttributes, ...interactionAttributes.include],
+      include: {
+        model: FileUpload,
+        as: "media",
+      },
       order: [[value.sortBy, value.sortOrder]],
       limit: perPage,
       offset,
@@ -193,7 +190,6 @@ async function getRandomFeed(req, res) {
     const schema = Joi.object({
       page: Joi.number().integer().min(1).default(1),
 
-      // your existing gender filter
       gender: Joi.string()
         .valid("all", "male", "female", "other", "prefer_not_to_say")
         .default("all"),
@@ -218,10 +214,7 @@ async function getRandomFeed(req, res) {
     const userId = isLoggedIn ? Number(sessionResult.data) : null;
 
     // 3) Pagination config
-    const maxPages = parseInt(
-      await getOption("max_pages_user", 1000),
-      10
-    );
+    const maxPages = parseInt(await getOption("max_pages_user", 1000), 10);
     const perPage = parseInt(await getOption("default_per_page_feed", 10), 10);
 
     const page = Math.min(Math.max(1, value.page), maxPages);
@@ -233,12 +226,11 @@ async function getRandomFeed(req, res) {
       is_active: true,
     };
 
-    // gender filter (optional)
     if (value.gender !== "all") {
       where.gender = value.gender;
     }
 
-    // Logged-in: add interaction flags using correlated EXISTS subqueries
+    // 5) Interaction flags
     const interactionAttributes =
       isLoggedIn && userId
         ? {
@@ -282,7 +274,6 @@ async function getRandomFeed(req, res) {
             ],
           }
         : {
-            // Guests: keep response shape consistent
             include: [
               [literal("0"), "isLiked"],
               [literal("0"), "isRejected"],
@@ -290,10 +281,10 @@ async function getRandomFeed(req, res) {
               [literal("1"), "canLike"],
             ],
           };
-          
-const chatTableRaw = Chat.getTableName ? Chat.getTableName() : "pb_chats";
-const CHAT_TABLE =
-typeof chatTableRaw === "string" ? chatTableRaw : chatTableRaw.tableName;
+
+    const chatTableRaw = Chat.getTableName ? Chat.getTableName() : "pb_chats";
+    const CHAT_TABLE =
+      typeof chatTableRaw === "string" ? chatTableRaw : chatTableRaw.tableName;
 
     const chatIdAttribute =
       isLoggedIn && userId
@@ -303,13 +294,9 @@ typeof chatTableRaw === "string" ? chatTableRaw : chatTableRaw.tableName;
               FROM \`${CHAT_TABLE}\` c
               WHERE
                 (
-                  (c.participant_1_id = ${sequelize.escape(
-                    userId
-                  )} AND c.participant_2_id = \`User\`.\`id\`)
+                  (c.participant_1_id = ${sequelize.escape(userId)} AND c.participant_2_id = \`User\`.\`id\`)
                   OR
-                  (c.participant_2_id = ${sequelize.escape(
-                    userId
-                  )} AND c.participant_1_id = \`User\`.\`id\`)
+                  (c.participant_2_id = ${sequelize.escape(userId)} AND c.participant_1_id = \`User\`.\`id\`)
                 )
               LIMIT 1
             )`),
@@ -317,6 +304,7 @@ typeof chatTableRaw === "string" ? chatTableRaw : chatTableRaw.tableName;
           ]
         : [literal("NULL"), "chat_id"];
 
+    // 6) Query (+ media)
     const result = await User.findAndCountAll({
       where,
       attributes: [
@@ -324,6 +312,10 @@ typeof chatTableRaw === "string" ? chatTableRaw : chatTableRaw.tableName;
         ...interactionAttributes.include,
         chatIdAttribute,
       ],
+      include: {
+        model: FileUpload,
+        as: "media",
+      },
       order: sequelize.random(),
       limit: perPage,
       offset,
@@ -516,10 +508,14 @@ async function getRecommendedFeed(req, res) {
       ],
     };
 
-    // 7) Query
+    // 7) Query (+ media)
     const result = await User.findAndCountAll({
       where,
       attributes: [...publicFeedUserAttributes, ...interactionAttributes.include],
+      include: {
+        model: FileUpload,
+        as: "media",
+      },
       order: [
         ["last_active", "DESC"],
         ["id", "DESC"],
