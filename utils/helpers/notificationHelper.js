@@ -1,4 +1,5 @@
 const Notification = require("../../models/Notification");
+const NotificationGlobal=require("../../models/Admin/GlobalNotification")
 const NotificationToken = require("../../models/NotificationToken");
 const { getAdmin } = require("../../config/firebaseAdmin");
 const User = require("../../models/User");
@@ -464,6 +465,125 @@ async function createAndSend(
   return { notification, push };
 }
 
+async function createAndSendAdminToUser(
+  adminId,
+  receiverId,
+  type,
+  title,
+  content,
+  image = null,
+  data = {},
+  opts = {}
+) {
+  if (!adminId) throw new Error("adminId is required");
+  if (!receiverId) throw new Error("receiverId is required");
+  if (!type) throw new Error("type is required");
+  if (!title) throw new Error("title is required");
+  if (!content) throw new Error("content is required");
+
+  // force admin behavior
+  const nopts = normalizeNotifOpts({ ...opts, is_admin: true }, image);
+
+  // create per-user notification row
+  const notification = await Notification.create({
+    sender_id: adminId,
+    receiver_id: receiverId,
+    is_admin: 1,
+    type,
+    title,
+    content,
+    landing_url: nopts.landing_url,
+    image_url: nopts.image_url,
+    priority: nopts.priority,
+    status: nopts.status,
+    scheduled_at: nopts.scheduled_at,
+    sent_at: nopts.status === "sent" ? new Date() : null,
+    is_read: false,
+
+    total_targeted: 0,
+    total_sent: 0,
+    total_delivered: 0,
+    total_clicked: 0,
+    total_failed: 0,
+    last_error: null,
+  });
+
+  // scheduled => no push now
+  if (nopts.status === "scheduled") {
+    return {
+      notification,
+      push: { attempted: 0, success: 0, failed: 0, scheduled: true },
+    };
+  }
+
+  let push = { attempted: 0, success: 0, failed: 0 };
+
+  try {
+    const userId = Number(receiverId);
+    if (!Number.isInteger(userId) || userId <= 0) return { notification, push };
+
+    const rows = await NotificationToken.findAll({
+      where: { user_id: userId, is_active: true },
+      attributes: ["token"],
+      order: [["id", "DESC"]],
+      raw: true,
+    });
+
+    const tokens = [...new Set(rows.map((r) => r.token).filter(Boolean))];
+    if (!tokens.length) return { notification, push };
+
+    const admin = getAdmin();
+
+    const payload = buildMulticastPayload(
+      tokens,
+      title,
+      content,
+      nopts.image_url,
+      {
+        event: "ADMIN_SINGLE",
+        sender_admin_id: String(adminId),
+
+        notificationId: String(notification.id),
+        type: String(type),
+        landing_url: nopts.landing_url ? String(nopts.landing_url) : "",
+        ...toStringData(data),
+      },
+      { priority: nopts.priority }
+    );
+
+    const fcmRes = await admin.messaging().sendEachForMulticast(payload);
+
+    push = {
+      attempted: tokens.length,
+      success: fcmRes.successCount || 0,
+      failed: fcmRes.failureCount || 0,
+    };
+  } catch (err) {
+    push = {
+      attempted: 0,
+      success: 0,
+      failed: 0,
+      error: err.message || String(err),
+    };
+  }
+
+  // update analytics on the same row
+  await Notification.update(
+    {
+      total_targeted: push.attempted || 0,
+      total_sent: push.attempted || 0,
+      total_delivered: push.success || 0,
+      total_failed: push.failed || 0,
+      last_error: push.error || null,
+      sent_at: new Date(),
+      status: push.error ? "failed" : "sent",
+    },
+    { where: { id: notification.id } }
+  );
+
+  return { notification, push };
+}
+
 /**
  * Create DB notification + send push to ALL Global tokens
  */
@@ -482,66 +602,72 @@ async function createAndSendGlobal(
   const isAdmin =
     typeof opts.is_admin === "boolean" ? opts.is_admin : await _isAdminSender(senderId);
 
-  const nopts = normalizeNotifOpts(opts, null); // INSIDE function
+  const nopts = normalizeNotifOpts(opts, null);
 
-  const rows = await NotificationToken.findAll({
-    where: { is_active: true },
-    attributes: ["user_id", "token"],
-    order: [["id", "DESC"]],
+  // Create SINGLE campaign row
+  const campaign = await NotificationGlobal.create({
+    sender_id: senderId,
+    type,
+    title,
+    content,
+    landing_url: nopts.landing_url,
+    image_url: nopts.image_url,
+    priority: nopts.priority,
+    status: nopts.status || (nopts.scheduled_at ? "scheduled" : "queued"),
+    scheduled_at: nopts.scheduled_at,
+    sent_at: null,
+
+    total_targeted: 0,
+    total_sent: 0,
+    total_delivered: 0,
+    total_clicked: 0,
+    total_failed: 0,
   });
 
-  if (!rows.length) {
-    return { saved: 0, push: { attempted: 0, success: 0, failed: 0 } };
+  //If scheduled, don't push now
+  if (campaign.status === "scheduled") {
+    return {
+      campaign,
+      push: { attempted: 0, success: 0, failed: 0, scheduled: true },
+    };
   }
 
-  const userIds = new Set();
-  const tokensSet = new Set();
+  // Collect ALL active tokens
+  const rows = await NotificationToken.findAll({
+    where: { is_active: true },
+    attributes: ["token"],
+    order: [["id", "DESC"]],
+    raw: true,
+  });
 
-  for (const r of rows) {
-    if (r.user_id) userIds.add(Number(r.user_id));
-    if (r.token) tokensSet.add(r.token);
+  const tokens = [...new Set(rows.map((r) => r.token).filter(Boolean))];
+
+  if (!tokens.length) {
+    await NotificationGlobal.update(
+      {
+        total_targeted: 0,
+        total_sent: 0,
+        total_delivered: 0,
+        total_failed: 0,
+        sent_at: new Date(),
+        status: "failed",
+      },
+      { where: { id: campaign.id } }
+    );
+
+    return {
+      campaign,
+      push: { attempted: 0, success: 0, failed: 0, error: "No active tokens" },
+    };
   }
 
-  const receiverIds = Array.from(userIds).filter((x) => Number.isInteger(x) && x > 0);
-  const tokens = Array.from(tokensSet);
+  // Mark sending
+  await NotificationGlobal.update(
+    { status: "sending" },
+    { where: { id: campaign.id } }
+  );
 
-  let saved = 0;
-  let createdIds = [];
-
-  if (receiverIds.length) {
-    const bulk = receiverIds.map((uid) => ({
-      sender_id: senderId,
-      receiver_id: uid,
-      is_admin: isAdmin ? 1 : 0,
-      type,
-      title,
-      content,
-      landing_url: nopts.landing_url,
-      image_url: nopts.image_url,
-      priority: nopts.priority,
-      status: nopts.status,
-      scheduled_at: nopts.scheduled_at,
-      sent_at: nopts.status === "sent" ? new Date() : null,
-      is_read: false,
-      total_targeted: 0,
-      total_sent: 0,
-      total_delivered: 0,
-      total_clicked: 0,
-      total_failed: 0,
-      last_error: null,
-    }));
-
-    const created = await Notification.bulkCreate(bulk);
-    createdIds = created.map((x) => Number(x.id)).filter(Boolean);
-    saved = createdIds.length || 0;
-  }
-
-  // Scheduled: don't push now
-  if (nopts.status === "scheduled") {
-    return { saved, push: { attempted: 0, success: 0, failed: 0, scheduled: true } };
-  }
-
-  let push = { attempted: 0, success: 0, failed: 0, errors: [] };
+  let push = { attempted: 0, success: 0, failed: 0 };
 
   try {
     const admin = getAdmin();
@@ -555,6 +681,8 @@ async function createAndSendGlobal(
         content,
         nopts.image_url,
         {
+          event: "ADMIN_GLOBAL",
+          campaign_id: String(campaign.id), // IMPORTANT (click tracking)
           type: String(type),
           landing_url: nopts.landing_url ? String(nopts.landing_url) : "",
           ...toStringData(data),
@@ -567,35 +695,27 @@ async function createAndSendGlobal(
       push.attempted += chunk.length;
       push.success += res.successCount || 0;
       push.failed += res.failureCount || 0;
-
-      (res.responses || []).forEach((r, idx) => {
-        if (!r.success) {
-          push.errors.push({
-            token: chunk[idx],
-            code: r.error?.code || null,
-            message: r.error?.message || null,
-          });
-        }
-      });
     }
   } catch (err) {
     push.error = err.message || String(err);
   }
 
-  // Optional: update analytics on created notifications
-  if (createdIds.length) {
-    await updateNotifAnalytics(createdIds, {
+  // Update SAME campaign row totals
+  await NotificationGlobal.update(
+    {
       total_targeted: tokens.length,
       total_sent: push.attempted || 0,
       total_delivered: push.success || 0,
       total_failed: push.failed || 0,
-      last_error: push.error || null,
       sent_at: new Date(),
-      status: push.err ? "failed" : "sent",
-    });
-  }
+      status: push.error ? "failed" : "sent",
+    },
+    { where: { id: campaign.id } }
+  );
 
-  return { saved, push };
+  const updatedCampaign = await NotificationGlobal.findByPk(campaign.id);
+
+  return { campaign: updatedCampaign, push };
 }
 
 async function sendBotMatchNotificationToUser(userId, botId, chatId = null) {
@@ -877,7 +997,7 @@ async function createAndSendFiltered(
   data = {},
   filters = {},
   max_users = 100000,
-  opts = {} 
+  opts = {}
 ) {
   if (!type) throw new Error("type is required");
   if (!title) throw new Error("title is required");
@@ -897,107 +1017,76 @@ async function createAndSendFiltered(
   const balanceRaw = safeFilters.require_balance_gte ?? safeFilters.require_balance_gt ?? 0;
   const requireBalanceGte = Number.parseInt(balanceRaw, 10) || 0;
 
-  if (!Number.isInteger(days) || days <= 0) {
-    const users = await User.findAll({
-      where: baseWhere,
-      attributes: ["id"],
-      order: [["id", "DESC"]],
-      limit: maxUsers,
-      raw: true,
-    });
+  const nopts = normalizeNotifOpts(opts, image);
 
-    const userIds = users.map((u) => Number(u.id)).filter(Boolean);
-
-    if (!userIds.length) {
-      return {
-        matched_users: 0,
-        saved: 0,
-        push: { attempted: 0, success: 0, failed: 0 },
-        filters: normalizedFilters,
-      };
-    }
-
-    return await savePushInline(
-  senderId,
-  userIds,
-  type,
-  title,
-  content,
-  image,
-  data,
-  {
-    ...normalizedFilters,
-    days,
-    require_recent_purchase: requireRecentPurchase,
-    require_balance_gte: requireBalanceGte,
-    window_from: from,
-    window_to: to,
-  },
-  { ...opts, is_admin: isAdmin }
-);
+  // Compute window only when needed
+  let from = null;
+  let to = null;
+  if (Number.isInteger(days) && days > 0) {
+    const w = getDaysWindow(days);
+    from = w.from;
+    to = w.to;
   }
 
-  const { from, to } = getDaysWindow(days);
-
-  // 1) users who spent coins in window
-  const spentRows = await CoinSpentTransaction.findAll({
-    attributes: ["user_id"],
-    where: {
-      status: "completed",
-      date: { [Op.between]: [from, to] },
-    },
-    group: ["user_id"],
-    raw: true,
-  });
-
-  const spentUserIds = spentRows.map((r) => Number(r.user_id));
   const finalWhere = { ...baseWhere };
 
-  // COINS >= threshold
   if (requireBalanceGte > 0) {
     finalWhere.coins = { [Op.gte]: requireBalanceGte };
   }
 
-  if (requireRecentPurchase) {
-    const purchaseRows = await CoinPurchaseTransaction.findAll({
+  if (Number.isInteger(days) && days > 0) {
+    // users who spent in window
+    const spentRows = await CoinSpentTransaction.findAll({
       attributes: ["user_id"],
       where: {
-        payment_status: "completed",
-        created_at: { [Op.between]: [from, to] },
+        status: "completed",
+        date: { [Op.between]: [from, to] },
       },
       group: ["user_id"],
       raw: true,
     });
 
-    const purchasedUserIds = purchaseRows.map((r) => Number(r.user_id));
-    const spentSet = new Set(spentUserIds);
+    const spentUserIds = spentRows.map((r) => Number(r.user_id));
 
-    const allowedUserIds = purchasedUserIds.filter((id) => !spentSet.has(id));
-
-    if (!allowedUserIds.length) {
-      return {
-        matched_users: 0,
-        saved: 0,
-        push: { attempted: 0, success: 0, failed: 0 },
-        filters: {
-          ...normalizedFilters,
-          days,
-          require_recent_purchase: true,
-          require_balance_gte: requireBalanceGte,
-          window_from: from,
-          window_to: to,
+    if (requireRecentPurchase) {
+      const purchaseRows = await CoinPurchaseTransaction.findAll({
+        attributes: ["user_id"],
+        where: {
+          payment_status: "completed",
+          created_at: { [Op.between]: [from, to] },
         },
-      };
-    }
+        group: ["user_id"],
+        raw: true,
+      });
 
-    finalWhere.id = { [Op.in]: allowedUserIds };
-  } else {
-    if (spentUserIds.length) {
-      finalWhere.id = { [Op.notIn]: spentUserIds };
+      const purchasedUserIds = purchaseRows.map((r) => Number(r.user_id));
+      const spentSet = new Set(spentUserIds);
+      const allowedUserIds = purchasedUserIds.filter((id) => !spentSet.has(id));
+
+      if (!allowedUserIds.length) {
+        return {
+          matched_users: 0,
+          push: { attempted: 0, success: 0, failed: 0 },
+          filters: {
+            ...normalizedFilters,
+            days,
+            require_recent_purchase: true,
+            require_balance_gte: requireBalanceGte,
+            window_from: from,
+            window_to: to,
+          },
+        };
+      }
+
+      finalWhere.id = { [Op.in]: allowedUserIds };
+    } else {
+      // not-spent only
+      if (spentUserIds.length) {
+        finalWhere.id = { [Op.notIn]: spentUserIds };
+      }
     }
   }
 
-  // 2) FINAL TARGET USERS
   const users = await User.findAll({
     where: finalWhere,
     attributes: ["id"],
@@ -1008,11 +1097,36 @@ async function createAndSendFiltered(
 
   const userIds = users.map((u) => Number(u.id)).filter(Boolean);
 
+  // Create SINGLE campaign row in pb_notifications_global
+  const campaign = await NotificationGlobal.create({
+    sender_id: senderId,
+    type,
+    title,
+    content,
+    landing_url: nopts.landing_url,
+    image_url: nopts.image_url,
+    priority: nopts.priority,
+    status: nopts.status || (nopts.scheduled_at ? "scheduled" : "queued"),
+    scheduled_at: nopts.scheduled_at,
+    sent_at: null,
+
+    total_targeted: userIds.length, // users targeted
+    total_sent: 0,
+    total_delivered: 0,
+    total_clicked: 0,
+    total_failed: 0,
+  });
+
   if (!userIds.length) {
+    await NotificationGlobal.update(
+      { status: "failed", sent_at: new Date() },
+      { where: { id: campaign.id } }
+    );
+
     return {
+      campaign,
       matched_users: 0,
-      saved: 0,
-      push: { attempted: 0, success: 0, failed: 0 },
+      push: { attempted: 0, success: 0, failed: 0, error: "No users matched" },
       filters: {
         ...normalizedFilters,
         days,
@@ -1024,36 +1138,24 @@ async function createAndSendFiltered(
     };
   }
 
-  let saved = 0;
-  const t = await sequelize.transaction();
-
-  try {
-    const chunkSize = 5000;
-
-    for (let i = 0; i < userIds.length; i += chunkSize) {
-      const chunk = userIds.slice(i, i + chunkSize);
-
-      const bulk = chunk.map((uid) => ({
-        sender_id: senderId,
-        receiver_id: uid,
-        is_admin: isAdmin ? 1 : 0, 
-        type,
-        title,
-        content,
-        is_read: false,
-      }));
-
-      const created = await Notification.bulkCreate(bulk, { transaction: t });
-      saved += created.length;
-    }
-
-    await t.commit();
-  } catch (e) {
-    await t.rollback();
-    throw e;
+  // Scheduled: don't push now
+  if (campaign.status === "scheduled") {
+    return {
+      campaign,
+      matched_users: userIds.length,
+      push: { attempted: 0, success: 0, failed: 0, scheduled: true },
+      filters: {
+        ...normalizedFilters,
+        days,
+        require_recent_purchase: requireRecentPurchase,
+        require_balance_gte: requireBalanceGte,
+        window_from: from,
+        window_to: to,
+      },
+    };
   }
 
-  // collect tokens
+  // collect tokens for ONLY matched users
   const tokensSet = new Set();
 
   for (let i = 0; i < userIds.length; i += 10000) {
@@ -1072,6 +1174,11 @@ async function createAndSendFiltered(
 
   const tokens = Array.from(tokensSet);
 
+  await NotificationGlobal.update(
+    { status: "sending" },
+    { where: { id: campaign.id } }
+  );
+
   let push = { attempted: 0, success: 0, failed: 0 };
 
   try {
@@ -1081,10 +1188,20 @@ async function createAndSendFiltered(
       for (let i = 0; i < tokens.length; i += 500) {
         const chunk = tokens.slice(i, i + 500);
 
-        const payload = buildMulticastPayload(chunk, title, content, image, {
-          type: String(type),
-          ...toStringData(data),
-        });
+        const payload = buildMulticastPayload(
+          chunk,
+          title,
+          content,
+          nopts.image_url,
+          {
+            event: "ADMIN_FILTERED",
+            campaign_id: String(campaign.id), // IMPORTANT
+            type: String(type),
+            landing_url: nopts.landing_url ? String(nopts.landing_url) : "",
+            ...toStringData(data),
+          },
+          { priority: nopts.priority }
+        );
 
         const res = await admin.messaging().sendEachForMulticast(payload);
 
@@ -1097,9 +1214,23 @@ async function createAndSendFiltered(
     push.error = err.message || String(err);
   }
 
+  // Update SAME campaign row totals
+  await NotificationGlobal.update(
+    {
+      total_sent: push.attempted || 0,
+      total_delivered: push.success || 0,
+      total_failed: push.failed || 0,
+      sent_at: new Date(),
+      status: push.error ? "failed" : "sent",
+    },
+    { where: { id: campaign.id } }
+  );
+
+  const updatedCampaign = await NotificationGlobal.findByPk(campaign.id);
+
   return {
+    campaign: updatedCampaign,
     matched_users: userIds.length,
-    saved,
     push,
     filters: {
       ...normalizedFilters,
@@ -1116,6 +1247,7 @@ async function createAndSendFiltered(
 
 module.exports = {
   createAndSend,
+  createAndSendAdminToUser,
   createAndSendGlobal,
   createAndSendFiltered,
   previewFilteredUsers,
