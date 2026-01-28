@@ -1,7 +1,7 @@
 const publicFeedUserAttributes = [
   "id",
-  "username",
   "email",
+  "full_name",
   "phone",
   "gender",
   "city",
@@ -19,12 +19,13 @@ const publicFeedUserAttributes = [
   "height",
   "education",
   "is_verified",
+  "last_active",
 ];
 
 const publicUserAttributes = [
   "id",
-  "username",
   "email",
+  "full_name",
   "phone",
   "gender",
   "city",
