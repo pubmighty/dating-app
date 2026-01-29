@@ -75,6 +75,20 @@ router.post("/auth/email/signup/verify", authController.signupVerifyEmail);
 router.post("/auth/email/login/verify", authController.loginVerifyEmail);
 
 /**
+ * - Accepts:
+ *    { type: "login" | "signup", email, tempUserId? }
+ * - If type="login":
+ *    - Finds User by email and resends OTP (action="login_email")
+ * - If type="signup":
+ *    - Finds TempUser by tempUserId (and matches email) and resends OTP (action="signup_email")
+ *
+ * Security:
+ * - Rate limit heavily (OTP abuse).
+ * - Do not reveal whether account exists beyond what your flow already reveals.
+ */
+router.post("/auth/email/otp/resend", authController.resendOtpEmail);
+
+/**
 * - Accepts: { phone_number, password }
 * - Checks if phone exists in pb_users
 * - If phone does not exist:
@@ -90,6 +104,25 @@ router.post("/auth/email/login/verify", authController.loginVerifyEmail);
 * - Normalize and validate phone numbers strictly.
 */
 router.post("/auth/phone/exist", authController.phoneExist);
+
+
+/**
+ * - Accepts: { phone_number,  password }
+ * - Used ONLY when /auth/phone/exist returned is_exist=false.
+ * - Hashes and stores password.
+ * - Creates session token and returns user + token.
+ */
+router.post("/auth/phone/signup", authController.signupPhone);
+
+/**
+ * - Accepts: { phone_number, password }
+ * - Used ONLY when /auth/phone/exist returned is_exist=true.
+ * - Verifiesisexist against existing User.
+ * - Verifies password matches the stored hash.
+ * - Marks as used and invalidates other pending login.
+ * - Creates session token and returns user + token.
+ */
+router.post("/auth/phone/login", authController.loginPhone);
 
 /**
  *  /logout

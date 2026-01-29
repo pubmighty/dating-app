@@ -604,13 +604,252 @@ async function loginVerifyEmail(req, res) {
   }
 }
 
+async function resendOtpEmail(req, res) {
+  try {
+    const schema = Joi.object({
+      type: Joi.string().valid("login", "signup").required(), 
+      email: Joi.string()
+        .trim()
+        .lowercase()
+        .email({ tlds: { allow: false } })
+        .required(),
+      tempUserId: Joi.number().integer().positive().when("type", {
+        is: "signup",
+        then: Joi.required(),
+        otherwise: Joi.optional().allow(null),
+      }),
+    });
+
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid request",
+        data: null,
+      });
+    }
+
+    const email = String(value.email).toLowerCase().trim();
+    const type = String(value.type);
+
+    // LOGIN: real user
+    if (type === "login") {
+      const user = await User.findOne({ where: { email } });
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "Account not found.",
+          data: null,
+        });
+      }
+
+      const otp = generateOtp();
+      const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
+      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
+
+      await UserOtp.update(
+        { status: true },
+        { where: { user_id: user.id, action: "login_email", status: false } }
+      );
+
+      const myOtp = await UserOtp.create({
+        user_id: user.id,
+        otp,
+        expiry: otpExpiresAt,
+        action: "login_email",
+        status: false,
+      });
+
+      await sendOtpMail(user, myOtp, "Login OTP", "login_email");
+
+      return res.status(200).json({
+        success: true,
+        message: "OTP resent to email",
+        data: { mode: "login", is_exist: true, tempUserId: null },
+      });
+    }
+    
+    const tempUserId = Number(value.tempUserId);
+
+    const tempUser = await TempUser.findOne({ where: { id: tempUserId } });
+    if (!tempUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Signup request not found. Please try again.",
+        data: null,
+      });
+    }
+
+    if (String(tempUser.email || "").toLowerCase().trim() !== email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email does not match signup request.",
+        data: null,
+      });
+    }
+
+    const otp = generateOtp();
+    const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
+    const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
+
+    await UserOtp.update(
+      { status: true },
+      { where: { user_id: tempUser.id, action: "signup_email", status: false } }
+    );
+
+    const myOtp = await UserOtp.create({
+      user_id: tempUser.id,
+      otp,
+      expiry: otpExpiresAt,
+      action: "signup_email",
+      status: false,
+    });
+
+    await sendOtpMail(tempUser, myOtp, "Verify Your Email", "signup_email");
+
+    return res.status(200).json({
+      success: true,
+      message: "OTP resent to email",
+      data: { mode: "signup", is_exist: false, tempUserId: tempUser.id },
+    });
+  } catch (err) {
+    console.error("Error during [resendOtpEmail]:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      data: null,
+    });
+  }
+}
+
 /**
- * phoneExist
- * If phone exists => LOGIN with password
- * If phone not exists => SIGNUP with password
- * No OTP for phone (as per your instruction)
+ * PHONE EXIST (Step-1)
+ * - Accepts: { phone_number }
+ * - Only checks existence in pb_users
+ * - Returns: { is_exist: true/false }
+ * - DOES NOT create user, DOES NOT login, DOES NOT require password
  */
 async function phoneExist(req, res) {
+  try {
+    const schema = Joi.object({
+      phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
+    });
+
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid request",
+        data: null,
+      });
+    }
+
+    const phone = String(value.phone_number).replace(/[^\d+]/g, "");
+
+    const user = await User.findOne({
+      where: { phone },
+      attributes: ["id"], // keep it light
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Phone checked",
+      data: {
+        is_exist: !!user,
+      },
+    });
+  } catch (err) {
+    console.error("Error during [phoneExist]:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      data: null,
+    });
+  }
+}
+
+async function signupPhone(req, res) {
+  try {
+    const schema = Joi.object({
+      phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
+      password: Joi.string().min(8).max(128).required(),
+    });
+
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid request",
+        data: null,
+      });
+    }
+
+    const phone = String(value.phone_number).replace(/[^\d+]/g, "");
+    const password = String(value.password);
+
+    // must not exist
+    const already = await User.findOne({ where: { phone }, attributes: ["id"] });
+    if (already) {
+      return res.status(409).json({
+        success: false,
+        message: "This phone is already registered.",
+        data: null,
+      });
+    }
+
+    const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+    const newUser = await User.create({
+      email: null,
+      phone,
+      password: hashedPass,
+      register_type: "manual",
+      ip_address: getRealIp(req),
+      is_verified: false, // no OTP for phone (as you want)
+      is_active: true,
+    });
+
+    const { token, expires_at } = await handleUserSessionCreation(req, newUser);
+
+    await newUser.reload({ attributes: publicUserAttributes });
+    const files = await FileUpload.findAll({ where: { user_id: newUser.id } });
+
+    return res.status(201).json({
+      success: true,
+      message: "Registration successful",
+      data: {
+        user: newUser,
+        token,
+        token_expires_at: expires_at,
+        files,
+      },
+    });
+  } catch (err) {
+    console.error("Error during [signupPhone]:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      data: null,
+    });
+  }
+}
+
+async function loginPhone(req, res) {
   try {
     const schema = Joi.object({
       phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
@@ -636,74 +875,48 @@ async function phoneExist(req, res) {
 
     const user = await User.findOne({ where: { phone } });
 
-    // Login
-    if (user) {
-      if (user.is_active === false || Number(user.status) !== 1) {
-        return res.status(403).json({
-          success: false,
-          message: "Your account is not active.",
-          data: null,
-        });
-      }
-
-      const isCorrect = await bcrypt.compare(password, user.password || "");
-      if (!isCorrect) {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid credentials.",
-          data: null,
-        });
-      }
-
-      const { token, expires_at } = await handleUserSessionCreation(req, user);
-
-      await user.reload({ attributes: publicUserAttributes });
-      const files = await FileUpload.findAll({ where: { user_id: user.id } });
-
-      return res.status(200).json({
-        success: true,
-        message: "Login successful",
-        data: {
-          mode: "login",
-          user,
-          token,
-          token_expires_at: expires_at,
-          files,
-        },
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Account not found.",
+        data: null,
       });
     }
 
-    // Signup
-    const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    if (user.is_active === false || Number(user.status) !== 1) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is not active.",
+        data: null,
+      });
+    }
 
-    const newUser = await User.create({
-      email: null,
-      phone,
-      password: hashedPass,
-      register_type: "manual",
-      ip_address: getRealIp(req),
-      is_verified: false, // no OTP for phone
-      is_active: true,
-    });
+    const isCorrect = await bcrypt.compare(password, user.password || "");
+    if (!isCorrect) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid credentials.",
+        data: null,
+      });
+    }
 
-    const { token, expires_at } = await handleUserSessionCreation(req, newUser);
+    const { token, expires_at } = await handleUserSessionCreation(req, user);
 
-    await newUser.reload({ attributes: publicUserAttributes });
-    const files = await FileUpload.findAll({ where: { user_id: newUser.id } });
+    await user.reload({ attributes: publicUserAttributes });
+    const files = await FileUpload.findAll({ where: { user_id: user.id } });
 
-    return res.status(201).json({
+    return res.status(200).json({
       success: true,
-      message: "Registration successful",
+      message: "Login successful",
       data: {
-        mode: "signup",
-        user: newUser,
+        user,
         token,
         token_expires_at: expires_at,
         files,
       },
     });
   } catch (err) {
-    console.error("Error during [phoneExist]:", err);
+    console.error("Error during [loginPhone]:", err);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -1015,7 +1228,10 @@ module.exports = {
   emailExist,
   signupVerifyEmail,
   loginVerifyEmail,
+  resendOtpEmail,
   phoneExist,
+  signupPhone,
+  loginPhone,
   forgotPassword,
   forgotPasswordVerify,
   logoutUser,

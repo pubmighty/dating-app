@@ -94,7 +94,7 @@ async function adminSendToUser(req, res) {
       is_admin: true,
     };
 
-    // ✅ 1) per-user notification row + push (admin-only helper)
+    //  1) per-user notification row + push (admin-only helper)
     const result = await createAndSendAdminToUser(
       adminId,
       value.receiverId,
@@ -110,7 +110,7 @@ async function adminSendToUser(req, res) {
       opts,
     );
 
-    // ✅ 2) single-row admin campaign log (pb_notifications_global)
+    //  2) single-row admin campaign log (pb_notifications_global)
     // receiver_id filled for single-user sends
     try {
       const push = result?.push || { attempted: 0, success: 0, failed: 0 };
@@ -118,7 +118,7 @@ async function adminSendToUser(req, res) {
 
       await NotificationGlobal.create({
         sender_id: adminId,
-        receiver_id: Number(value.receiverId), // ✅ store receiver id (single user)
+        receiver_id: Number(value.receiverId), //  store receiver id (single user)
 
         type: value.type,
         title: value.title,
@@ -324,7 +324,7 @@ async function adminPreviewFiltered(req, res) {
 
 async function adminSendFiltered(req, res) {
   try {
-    const session = await isAdminSessionValid(req);
+   const session = await isAdminSessionValid(req, res);
     if (!session?.success || !session?.data) {
       return res.status(401).json({
         success: false,
@@ -496,7 +496,6 @@ async function getSentNotifications(req, res) {
     const schema = Joi.object({
       page: Joi.number().integer().min(1).max(100).default(1),
       limit: Joi.number().integer().min(1).max(200).default(50),
-
       id: Joi.number().integer().positive().allow("", null),
       sender_id: Joi.number().integer().positive().allow("", null),
       receiver_id: Joi.number().integer().positive().allow("", null),
@@ -594,6 +593,7 @@ async function getSentNotifications(req, res) {
         "content",
         "landing_url",
         "image_url",
+        "meta_filters", 
         "status",
         "scheduled_at",
         "sent_at",
