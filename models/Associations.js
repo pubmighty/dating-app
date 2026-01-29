@@ -11,6 +11,7 @@ const ActivityLog = require("./ActivityLog");
 const MessageFile = require("./MessageFile");
 const VideoCall = require("./VideoCall");
 const NotificationGlobal = require("./Admin/GlobalNotification");
+const NotificationCategory = require("./Admin/NotificationCategory");
 const UserBlock = require("./UserBlock");
 const FileUpload = require("./FileUpload");
 
@@ -159,6 +160,17 @@ function setupAssociations() {
     foreignKey: "receiver_id",
     as: "receiver",
   });
+
+  NotificationCategory.hasMany(NotificationGlobal, {
+  foreignKey: "category_id",
+  as: "notifications",
+});
+
+  NotificationGlobal.belongsTo(NotificationCategory, {
+    foreignKey: "category_id",
+    as: "category",
+  });
+
   UserBlock.belongsTo(User, {
     foreignKey: "user_id",
     as: "blockedUser",

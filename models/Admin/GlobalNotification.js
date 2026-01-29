@@ -25,6 +25,11 @@ const NotificationGlobal = sequelize.define(
       type: DataTypes.STRING(50),
       allowNull: false,
     },
+    
+    category_id: {
+      type: DataTypes.BIGINT.UNSIGNED,
+      allowNull: true,
+    },
 
     title: {
       type: DataTypes.STRING(150),
