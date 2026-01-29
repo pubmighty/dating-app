@@ -841,8 +841,6 @@ router.post("/users/:userId/restore", userController.restoreUser);
  */
 router.get("/bots", botController.getBots);
 
-
-
 /**
  * GET /bots/:userId
  * ------------------------------------------------------------
@@ -1495,7 +1493,7 @@ router.post(
  * - No push notifications are sent.
  */
 
-router.post(
+router.get(
   "/notifications/filter",
   adminNotificationController.adminPreviewFiltered,
 );

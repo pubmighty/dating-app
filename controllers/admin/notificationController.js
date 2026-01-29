@@ -9,9 +9,9 @@ const {
 } = require("../../utils/helpers/authHelper");
 const {
   createAndSendAdminToUser,
-  createAndSendGlobal, 
+  createAndSendGlobal,
   previewFilteredUsers,
-  createAndSendFiltered, 
+  createAndSendFiltered,
   pickImage,
   pickNotifOpts,
 } = require("../../utils/helpers/notificationHelper");
@@ -51,7 +51,15 @@ async function adminSendToUser(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .valid(
+          "draft",
+          "scheduled",
+          "queued",
+          "sending",
+          "sent",
+          "failed",
+          "canceled",
+        )
         .allow(null),
       data: Joi.object().unknown(true).default({}),
     });
@@ -99,7 +107,7 @@ async function adminSendToUser(req, res) {
         event: "ADMIN_SINGLE",
         sender_admin_id: String(adminId),
       },
-      opts
+      opts,
     );
 
     // ✅ 2) single-row admin campaign log (pb_notifications_global)
@@ -183,7 +191,15 @@ async function adminSendGlobal(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .valid(
+          "draft",
+          "scheduled",
+          "queued",
+          "sending",
+          "sent",
+          "failed",
+          "canceled",
+        )
         .allow(null),
       data: Joi.object().unknown(true).default({}),
     });
@@ -217,7 +233,7 @@ async function adminSendGlobal(req, res) {
         event: "ADMIN_GLOBAL",
         sender_admin_id: String(adminId),
       },
-      opts
+      opts,
     );
 
     return res.json({
@@ -342,7 +358,15 @@ async function adminSendFiltered(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .valid(
+          "draft",
+          "scheduled",
+          "queued",
+          "sending",
+          "sent",
+          "failed",
+          "canceled",
+        )
         .allow(null),
       data: Joi.object().unknown(true).default({}),
       max_users: Joi.number().integer().min(1).max(500000).default(100000),
@@ -427,7 +451,7 @@ async function adminSendFiltered(req, res) {
       },
       filters,
       payload.max_users,
-      opts
+      opts,
     );
 
     return res.json({
@@ -475,16 +499,35 @@ async function getSentNotifications(req, res) {
 
       id: Joi.number().integer().positive().allow("", null),
       sender_id: Joi.number().integer().positive().allow("", null),
+      receiver_id: Joi.number().integer().positive().allow("", null),
       type: Joi.string().trim().max(50).allow("", null),
       status: Joi.string()
-        .valid("", "draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .valid(
+          "",
+          "draft",
+          "scheduled",
+          "queued",
+          "sending",
+          "sent",
+          "failed",
+          "canceled",
+        )
         .allow("", null),
       title: Joi.string().trim().max(200).allow("", null),
       content: Joi.string().trim().max(500).allow("", null),
       created_from: Joi.string().trim().allow("", null), // YYYY-MM-DD
       created_to: Joi.string().trim().allow("", null), // YYYY-MM-DD
       sortBy: Joi.string()
-        .valid("id", "sender_id", "title", "status", "scheduled_at", "sent_at", "created_at", "updated_at")
+        .valid(
+          "id",
+          "sender_id",
+          "title",
+          "status",
+          "scheduled_at",
+          "sent_at",
+          "created_at",
+          "updated_at",
+        )
         .default("created_at"),
 
       order: Joi.string().valid("ASC", "DESC").default("DESC"),
@@ -512,6 +555,7 @@ async function getSentNotifications(req, res) {
 
     if (value.id) where.id = Number(value.id);
     if (value.sender_id) where.sender_id = Number(value.sender_id);
+    if (value.receiver_id) where.receiver_id = Number(value.receiver_id);
     if (value.type) where.type = value.type;
     if (value.status) where.status = value.status;
     if (value.title) where.title = { [Op.like]: `%${value.title}%` };
@@ -527,6 +571,7 @@ async function getSentNotifications(req, res) {
     const sortMap = {
       id: "id",
       sender_id: "sender_id",
+      receiver_id: "receiver_id",
       title: "title",
       status: "status",
       scheduled_at: "scheduled_at",
@@ -543,6 +588,7 @@ async function getSentNotifications(req, res) {
       attributes: [
         "id",
         "sender_id",
+        "receiver_id",
         "type",
         "title",
         "content",

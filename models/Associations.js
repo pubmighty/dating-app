@@ -10,7 +10,7 @@ const UserMedia = require("./UserMedia");
 const ActivityLog = require("./ActivityLog");
 const MessageFile = require("./MessageFile");
 const VideoCall = require("./VideoCall");
-const Notification = require("./Notification");
+const NotificationGlobal = require("./Admin/GlobalNotification");
 const UserBlock = require("./UserBlock");
 const FileUpload = require("./FileUpload");
 
@@ -151,15 +151,14 @@ function setupAssociations() {
     as: "chat",
   });
 
-
-Notification.belongsTo(Admin, {
-  foreignKey: "sender_id",
-  as: "senderAdmin",
-});
-Notification.belongsTo(User, {
-  foreignKey: "receiver_id",
-  as: "receiver",
-});
+  NotificationGlobal.belongsTo(Admin, {
+    foreignKey: "sender_id",
+    as: "senderAdmin",
+  });
+  NotificationGlobal.belongsTo(User, {
+    foreignKey: "receiver_id",
+    as: "receiver",
+  });
   UserBlock.belongsTo(User, {
     foreignKey: "user_id",
     as: "blockedUser",
