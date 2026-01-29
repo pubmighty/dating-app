@@ -75,6 +75,20 @@ router.post("/auth/email/signup/verify", authController.signupVerifyEmail);
 router.post("/auth/email/login/verify", authController.loginVerifyEmail);
 
 /**
+ * - Accepts:
+ *    { type: "login" | "signup", email, tempUserId? }
+ * - If type="login":
+ *    - Finds User by email and resends OTP (action="login_email")
+ * - If type="signup":
+ *    - Finds TempUser by tempUserId (and matches email) and resends OTP (action="signup_email")
+ *
+ * Security:
+ * - Rate limit heavily (OTP abuse).
+ * - Do not reveal whether account exists beyond what your flow already reveals.
+ */
+router.post("/auth/email/otp/resend", authController.resendOtpEmail);
+
+/**
 * - Accepts: { phone_number, password }
 * - Checks if phone exists in pb_users
 * - If phone does not exist:
@@ -90,6 +104,42 @@ router.post("/auth/email/login/verify", authController.loginVerifyEmail);
 * - Normalize and validate phone numbers strictly.
 */
 router.post("/auth/phone/exist", authController.phoneExist);
+
+
+/**
+ * - Accepts: { phone_number, tempUserId, otp, password }
+ * - Used ONLY when /auth/phone/exist returned is_exist=false.
+ * - Verifies OTP (action="signup_phone") against TempUser.
+ * - Hashes and stores password.
+ * - Creates a real user in pb_users from pb_temp_users.
+ * - Marks OTP as used and cleans up TempUser + pending OTPs.
+ * - Creates session token and returns user + token.
+ */
+router.post("/auth/phone/signup/verify", authController.signupVerifyPhone);
+
+/**
+ * - Accepts: { phone_number, otp, password }
+ * - Used ONLY when /auth/phone/exist returned is_exist=true.
+ * - Verifies OTP (action="login_phone") against existing User.
+ * - Verifies password matches the stored hash.
+ * - Marks OTP as used and invalidates other pending login OTPs.
+ * - Creates session token and returns user + token.
+ */
+router.post("/auth/phone/login/verify", authController.loginVerifyPhone);
+
+/**
+ * - Accepts:
+ *    { type: "login" | "signup", phone_number, tempUserId? }
+ * - If type="login":
+ *    - Finds User by phone and resends OTP (action="login_phone")
+ * - If type="signup":
+ *    - Finds TempUser by tempUserId (and matches phone) and resends OTP (action="signup_phone")
+ *
+ * Security:
+ * - Rate limit heavily (OTP abuse).
+ * - Normalize phone numbers strictly.
+ */
+router.post("/auth/phone/otp/resend", authController.resendOtpPhone);
 
 /**
  *  /logout
