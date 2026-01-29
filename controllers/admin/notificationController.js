@@ -308,7 +308,7 @@ async function adminPreviewFiltered(req, res) {
 
 async function adminSendFiltered(req, res) {
   try {
-    const session = await isAdminSessionValid(req);
+   const session = await isAdminSessionValid(req, res);
     if (!session?.success || !session?.data) {
       return res.status(401).json({
         success: false,
@@ -472,7 +472,6 @@ async function getSentNotifications(req, res) {
     const schema = Joi.object({
       page: Joi.number().integer().min(1).max(100).default(1),
       limit: Joi.number().integer().min(1).max(200).default(50),
-
       id: Joi.number().integer().positive().allow("", null),
       sender_id: Joi.number().integer().positive().allow("", null),
       type: Joi.string().trim().max(50).allow("", null),
@@ -548,6 +547,7 @@ async function getSentNotifications(req, res) {
         "content",
         "landing_url",
         "image_url",
+        "meta_filters", 
         "status",
         "scheduled_at",
         "sent_at",

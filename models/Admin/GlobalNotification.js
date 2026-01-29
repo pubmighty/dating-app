@@ -78,6 +78,13 @@ const NotificationGlobal = sequelize.define(
       defaultValue: "normal",
     },
 
+    meta_filters: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: null,
+      comment: "Filters",
+    },
+
     total_targeted: {
       type: DataTypes.INTEGER.UNSIGNED,
       allowNull: false,
