@@ -727,7 +727,129 @@ async function resendOtpEmail(req, res) {
   }
 }
 
+/**
+ * PHONE EXIST (Step-1)
+ * - Accepts: { phone_number }
+ * - Only checks existence in pb_users
+ * - Returns: { is_exist: true/false }
+ * - DOES NOT create user, DOES NOT login, DOES NOT require password
+ */
 async function phoneExist(req, res) {
+  try {
+    const schema = Joi.object({
+      phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
+    });
+
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid request",
+        data: null,
+      });
+    }
+
+    const phone = String(value.phone_number).replace(/[^\d+]/g, "");
+
+    const user = await User.findOne({
+      where: { phone },
+      attributes: ["id"], // keep it light
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Phone checked",
+      data: {
+        is_exist: !!user,
+      },
+    });
+  } catch (err) {
+    console.error("Error during [phoneExist]:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      data: null,
+    });
+  }
+}
+
+async function signupPhone(req, res) {
+  try {
+    const schema = Joi.object({
+      phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
+      password: Joi.string().min(8).max(128).required(),
+    });
+
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid request",
+        data: null,
+      });
+    }
+
+    const phone = String(value.phone_number).replace(/[^\d+]/g, "");
+    const password = String(value.password);
+
+    // must not exist
+    const already = await User.findOne({ where: { phone }, attributes: ["id"] });
+    if (already) {
+      return res.status(409).json({
+        success: false,
+        message: "This phone is already registered.",
+        data: null,
+      });
+    }
+
+    const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+    const newUser = await User.create({
+      email: null,
+      phone,
+      password: hashedPass,
+      register_type: "manual",
+      ip_address: getRealIp(req),
+      is_verified: false, // no OTP for phone (as you want)
+      is_active: true,
+    });
+
+    const { token, expires_at } = await handleUserSessionCreation(req, newUser);
+
+    await newUser.reload({ attributes: publicUserAttributes });
+    const files = await FileUpload.findAll({ where: { user_id: newUser.id } });
+
+    return res.status(201).json({
+      success: true,
+      message: "Registration successful",
+      data: {
+        user: newUser,
+        token,
+        token_expires_at: expires_at,
+        files,
+      },
+    });
+  } catch (err) {
+    console.error("Error during [signupPhone]:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      data: null,
+    });
+  }
+}
+
+async function loginPhone(req, res) {
   try {
     const schema = Joi.object({
       phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
@@ -753,256 +875,7 @@ async function phoneExist(req, res) {
 
     const user = await User.findOne({ where: { phone } });
 
-    // Login
-    if (user) {
-      if (user.is_active === false || Number(user.status) !== 1) {
-        return res.status(403).json({
-          success: false,
-          message: "Your account is not active.",
-          data: null,
-        });
-      }
-
-      const isCorrect = await bcrypt.compare(password, user.password || "");
-      if (!isCorrect) {
-        return res.status(401).json({
-          success: false,
-          message: "Invalid credentials.",
-          data: null,
-        });
-      }
-
-      const { token, expires_at } = await handleUserSessionCreation(req, user);
-
-      await user.reload({ attributes: publicUserAttributes });
-      const files = await FileUpload.findAll({ where: { user_id: user.id } });
-
-      return res.status(200).json({
-        success: true,
-        message: "Login successful",
-        data: {
-          mode: "login",
-          user,
-          token,
-          token_expires_at: expires_at,
-          files,
-        },
-      });
-    }
-
-    // Signup
-    const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
-
-    const newUser = await User.create({
-      email: null,
-      phone,
-      password: hashedPass,
-      register_type: "manual",
-      ip_address: getRealIp(req),
-      is_verified: false, // no OTP for phone
-      is_active: true,
-    });
-
-    const { token, expires_at } = await handleUserSessionCreation(req, newUser);
-
-    await newUser.reload({ attributes: publicUserAttributes });
-    const files = await FileUpload.findAll({ where: { user_id: newUser.id } });
-
-    return res.status(201).json({
-      success: true,
-      message: "Registration successful",
-      data: {
-        mode: "signup",
-        user: newUser,
-        token,
-        token_expires_at: expires_at,
-        files,
-      },
-    });
-  } catch (err) {
-    console.error("Error during [phoneExist]:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      data: null,
-    });
-  }
-}
-
-async function signupVerifyPhone(req, res) {
-  const t = await sequelize.transaction();
-  try {
-    const schema = Joi.object({
-      phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
-      tempUserId: Joi.number().integer().positive().required(),
-      otp: Joi.string().trim().pattern(/^[0-9]{6}$/).required(),
-      password: Joi.string().min(8).max(128).required(),
-    });
-
-    const { error, value } = schema.validate(req.body || {}, {
-      abortEarly: true,
-      stripUnknown: true,
-      convert: true,
-    });
-
-    if (error) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: error.details?.[0]?.message || "Invalid request",
-        data: null,
-      });
-    }
-
-    const phone = String(value.phone_number).replace(/[^\d+]/g, "");
-    const tempUserId = Number(value.tempUserId);
-    const otp = String(value.otp).trim();
-    const password = String(value.password);
-
-    // Must not already exist
-    const already = await User.findOne({
-      where: { phone },
-      transaction: t,
-      lock: t.LOCK.UPDATE,
-    });
-
-    if (already) {
-      await t.rollback();
-      return res.status(409).json({
-        success: false,
-        message: "This phone is already registered.",
-        data: null,
-      });
-    }
-
-    const tempUser = await TempUser.findOne({
-      where: { id: tempUserId },
-      transaction: t,
-      lock: t.LOCK.UPDATE,
-    });
-
-    if (!tempUser) {
-      await t.rollback();
-      return res.status(404).json({
-        success: false,
-        message: "Signup request not found. Please try again.",
-        data: null,
-      });
-    }
-
-    if (String(tempUser.phone || "").replace(/[^\d+]/g, "") !== phone) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Phone does not match signup request.",
-        data: null,
-      });
-    }
-
-    const verifySignupPhone = String(await getOption("verify_signup_phone", "true")) === "true";
-
-    if (verifySignupPhone) {
-      const now = new Date();
-
-      const otpRecord = await UserOtp.findOne({
-        where: { user_id: tempUser.id, action: "signup_phone", status: false },
-        order: [["createdAt", "DESC"]],
-        transaction: t,
-        lock: t.LOCK.UPDATE,
-      });
-
-      if (!otpRecord || (otpRecord.expiry && now > otpRecord.expiry) || String(otpRecord.otp) !== otp) {
-        await t.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Invalid or expired OTP.",
-          data: null,
-        });
-      }
-
-      await UserOtp.update(
-        { status: true },
-        { where: { user_id: tempUser.id, action: "signup_phone", status: false }, transaction: t }
-      );
-    }
-
-    const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    await TempUser.update({ password: hashedPass }, { where: { id: tempUser.id }, transaction: t });
-
-    const newUser = await User.create(
-      {
-        email: null,
-        phone: tempUser.phone,
-        password: hashedPass,
-        register_type: "manual",
-        ip_address: getRealIp(req),
-        is_verified: true,
-        is_active: true,
-      },
-      { transaction: t }
-    );
-
-    await TempUser.destroy({ where: { id: tempUser.id }, transaction: t });
-
-    await t.commit();
-
-    const { token, expires_at } = await handleUserSessionCreation(req, newUser);
-
-    await newUser.reload({ attributes: publicUserAttributes });
-    const files = await FileUpload.findAll({ where: { user_id: newUser.id } });
-
-    return res.status(200).json({
-      success: true,
-      message: "Registration successful",
-      data: { user: newUser, token, token_expires_at: expires_at, files },
-    });
-  } catch (err) {
-    await t.rollback();
-    console.error("Error during [signupVerifyPhone]:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      data: null,
-    });
-  }
-}
-
-async function loginVerifyPhone(req, res) {
-  const t = await sequelize.transaction();
-  try {
-    const schema = Joi.object({
-      phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
-      password: Joi.string().min(8).max(128).required(),
-      otp: Joi.string().trim().pattern(/^[0-9]{6}$/).required(),
-    });
-
-    const { error, value } = schema.validate(req.body || {}, {
-      abortEarly: true,
-      stripUnknown: true,
-      convert: true,
-    });
-
-    if (error) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: error.details?.[0]?.message || "Invalid request",
-        data: null,
-      });
-    }
-
-    const phone = String(value.phone_number).replace(/[^\d+]/g, "");
-    const password = String(value.password);
-    const otp = String(value.otp).trim();
-
-    const user = await User.findOne({
-      where: { phone },
-      transaction: t,
-      lock: t.LOCK.UPDATE,
-    });
-
     if (!user) {
-      await t.rollback();
       return res.status(404).json({
         success: false,
         message: "Account not found.",
@@ -1011,7 +884,6 @@ async function loginVerifyPhone(req, res) {
     }
 
     if (user.is_active === false || Number(user.status) !== 1) {
-      await t.rollback();
       return res.status(403).json({
         success: false,
         message: "Your account is not active.",
@@ -1021,39 +893,12 @@ async function loginVerifyPhone(req, res) {
 
     const isCorrect = await bcrypt.compare(password, user.password || "");
     if (!isCorrect) {
-      await t.rollback();
       return res.status(401).json({
         success: false,
         message: "Invalid credentials.",
         data: null,
       });
     }
-
-    const now = new Date();
-
-    // verify OTP (we DO NOT auto-send here; you have resend endpoint for that)
-    const otpRecord = await UserOtp.findOne({
-      where: { user_id: user.id, action: "login_phone", status: false },
-      order: [["createdAt", "DESC"]],
-      transaction: t,
-      lock: t.LOCK.UPDATE,
-    });
-
-    if (!otpRecord || (otpRecord.expiry && now > otpRecord.expiry) || String(otpRecord.otp) !== otp) {
-      await t.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired OTP.",
-        data: null,
-      });
-    }
-
-    await UserOtp.update(
-      { status: true },
-      { where: { user_id: user.id, action: "login_phone", status: false }, transaction: t }
-    );
-
-    await t.commit();
 
     const { token, expires_at } = await handleUserSessionCreation(req, user);
 
@@ -1063,11 +908,15 @@ async function loginVerifyPhone(req, res) {
     return res.status(200).json({
       success: true,
       message: "Login successful",
-      data: { user, token, token_expires_at: expires_at, files },
+      data: {
+        user,
+        token,
+        token_expires_at: expires_at,
+        files,
+      },
     });
   } catch (err) {
-    await t.rollback();
-    console.error("Error during [loginVerifyPhone]:", err);
+    console.error("Error during [loginPhone]:", err);
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -1076,125 +925,6 @@ async function loginVerifyPhone(req, res) {
   }
 }
 
-async function resendOtpPhone(req, res) {
-  try {
-    const schema = Joi.object({
-      type: Joi.string().valid("login", "signup").required(),
-      phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
-      tempUserId: Joi.number().integer().positive().when("type", {
-        is: "signup",
-        then: Joi.required(),
-        otherwise: Joi.optional().allow(null),
-      }),
-    });
-
-    const { error, value } = schema.validate(req.body || {}, {
-      abortEarly: true,
-      stripUnknown: true,
-      convert: true,
-    });
-
-    if (error) {
-      return res.status(400).json({
-        success: false,
-        message: error.details?.[0]?.message || "Invalid request",
-        data: null,
-      });
-    }
-
-    const phone = String(value.phone_number).replace(/[^\d+]/g, "");
-    const type = String(value.type);
-
-    // LOGIN: real user
-    if (type === "login") {
-      const user = await User.findOne({ where: { phone } });
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: "Account not found.",
-          data: null,
-        });
-      }
-
-      const otp = generateOtp();
-      const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
-      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
-
-      await UserOtp.update(
-        { status: true },
-        { where: { user_id: user.id, action: "login_phone", status: false } }
-      );
-
-      await UserOtp.create({
-        user_id: user.id,
-        otp,
-        expiry: otpExpiresAt,
-        action: "login_phone",
-        status: false,
-      });
-
-      await sendOtpSms(phone, otp, "login_phone"); // implement this
-
-      return res.status(200).json({
-        success: true,
-        message: "OTP resent to phone",
-        data: { mode: "login", is_exist: true, tempUserId: null },
-      });
-    }
-
-    // SIGNUP: temp user
-    const tempUserId = Number(value.tempUserId);
-
-    const tempUser = await TempUser.findOne({ where: { id: tempUserId } });
-    if (!tempUser) {
-      return res.status(404).json({
-        success: false,
-        message: "Signup request not found. Please try again.",
-        data: null,
-      });
-    }
-
-    if (String(tempUser.phone || "").replace(/[^\d+]/g, "") !== phone) {
-      return res.status(400).json({
-        success: false,
-        message: "Phone does not match signup request.",
-        data: null,
-      });
-    }
-
-    const otp = generateOtp();
-    const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
-    const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
-
-    await UserOtp.update(
-      { status: true },
-      { where: { user_id: tempUser.id, action: "signup_phone", status: false } }
-    );
-
-    await UserOtp.create({
-      user_id: tempUser.id,
-      otp,
-      expiry: otpExpiresAt,
-      action: "signup_phone",
-      status: false,
-    });
-
-    await sendOtpSms(phone, otp, "signup_phone"); // implement this
-
-    return res.status(200).json({
-      success: true,
-      message: "OTP resent to phone",
-      data: { mode: "signup", is_exist: false, tempUserId: tempUser.id },
-    });
-  } catch (err) {
-    console.error("Error during [resendOtpPhone]:", err);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      data: null,
-    });
-  }
-}
 
 async function forgotPassword(req, res) {
   try {
@@ -1500,9 +1230,8 @@ module.exports = {
   loginVerifyEmail,
   resendOtpEmail,
   phoneExist,
-  signupVerifyPhone,
-  loginVerifyPhone,
-  resendOtpPhone,
+  signupPhone,
+  loginPhone,
   forgotPassword,
   forgotPasswordVerify,
   logoutUser,
