@@ -345,7 +345,6 @@ async function addBot(req, res) {
         .optional()
         .allow(null, ""),
 
-      full_name: Joi.string().trim().max(300).optional().allow(null, ""),
       gender: Joi.string()
         .valid("male", "female", "other", "prefer_not_to_say")
         .optional()
