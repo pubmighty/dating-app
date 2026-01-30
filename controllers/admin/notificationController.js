@@ -826,6 +826,7 @@ async function getNotificationCategories(req, res) {
     const schema = Joi.object({
       page: Joi.number().integer().min(1).default(1),
       limit: Joi.number().integer().min(1).max(200).default(50),
+      id: Joi.number().integer().min(1),
       status: Joi.string().valid("active", "inactive").allow(null, ""),
       q: Joi.string().trim().max(100).allow(null, ""),
     });
@@ -851,6 +852,7 @@ async function getNotificationCategories(req, res) {
     const where = {};
 
     if (value.status) where.status = value.status;
+    if (value.id) where.id = value.id;
 
     if (value.q) {
       where[Op.or] = [
