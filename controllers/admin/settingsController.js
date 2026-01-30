@@ -1,4 +1,3 @@
-// controllers/admin/settingsController.js
 const sequelize = require("../../config/db");
 const { isAdminSessionValid } = require("../../utils/helpers/authHelper");
 
@@ -8,22 +7,17 @@ const {
   buildGroupedResponse,
   prepareUpdatesFromBody,
   upsertOptions,
-} = require("../../script/optionInsert");
+} = require("../../script/optionInsert"); 
 
-/**
- * GET /admin/settings
- * Returns grouped settings with secrets masked.
- */
 async function getSettings(req, res) {
   try {
-    const session = await isValidAdminSession(req, res);
-    await ensureDefaultOptions();
-    if (!session?.isValid) {
-      return res.status(401).json({
-        success: false,
-        msg: session?.msg || "Unauthorized",
-      });
+    // same as MasterPrompt
+    const session = await isAdminSessionValid(req);
+    if (!session?.success || !session?.data) {
+      return res.status(401).json({ success: false, msg: "Unauthorized" });
     }
+
+    await ensureDefaultOptions();
 
     const rawMap = await getAllOptionsMap();
     const data = buildGroupedResponse(rawMap, { maskSecrets: true });
@@ -37,16 +31,15 @@ async function getSettings(req, res) {
 
 async function updateSettings(req, res) {
   const t = await sequelize.transaction();
-  await ensureDefaultOptions(t);
   try {
-    const session = await isValidAdminSession(req, res);
-    if (!session?.isValid) {
+    // same as MasterPrompt
+    const session = await isAdminSessionValid(req);
+    if (!session?.success || !session?.data) {
       await t.rollback();
-      return res.status(401).json({
-        success: false,
-        msg: session?.msg || "Unauthorized",
-      });
+      return res.status(401).json({ success: false, msg: "Unauthorized" });
     }
+
+    await ensureDefaultOptions(t);
 
     const prep = prepareUpdatesFromBody(req.body || {});
     if (!prep.ok) {
@@ -78,7 +71,4 @@ async function updateSettings(req, res) {
   }
 }
 
-module.exports = {
-  getSettings,
-  updateSettings,
-};
+module.exports = { getSettings, updateSettings };

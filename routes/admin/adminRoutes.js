@@ -1,5 +1,6 @@
 const router = require("express").Router();
 const adminController = require("../../controllers/admin/adminController");
+const { getSettings, updateSettings } = require("../../controllers/admin/settingsController");
 const { fileUploader } = require("../../utils/helpers/fileUpload");
 const authController = require("../../controllers/admin/authController");
 const userController = require("../../controllers/admin/userController");
@@ -369,6 +370,10 @@ router.post("/resend-send-otp", authController.sendOTPAgainForAdmin);
  * - Does not authenticate or identify the user.
  * - Used as an additional security layer only.
  */
+
+router.get("/settings", getSettings);
+router.patch("/settings", updateSettings);
+
 router.post("/altcha-captcha-challenge", authController.altchaCaptchaChallenge);
 
 /**
