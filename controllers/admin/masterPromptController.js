@@ -12,22 +12,23 @@ const {
 
 async function adminGetMasterPrompts(req, res) {
   try {
-        const schema = Joi.object({
-  search: Joi.string().allow("", null),
-  status: Joi.string().valid("active", "inactive").allow("", null),
-  user_type: Joi.string().valid("new", "existing", "all").allow("", null),
-  user_time: Joi.string()
-    .valid("morning", "afternoon", "evening", "night", "all")
-    .allow("", null),
-  bot_gender: Joi.string().valid("male", "female", "any").allow("", null),
-  personality_type: Joi.string().trim().max(50).allow("", null),
-  location_based: Joi.alternatives()
-    .try(Joi.boolean(), Joi.string().valid("true", "false"))
-    .optional(),
-  priority_min: Joi.number().integer().min(0).allow(null),
-  priority_max: Joi.number().integer().min(0).allow(null),
-  page: Joi.number().integer().min(1).default(1),
-  perPage: Joi.number().integer().min(5).max(100).default(25),
+    const schema = Joi.object({
+      search: Joi.string().allow("", null),
+      id: Joi.number().integer().positive().optional(),
+      status: Joi.string().valid("active", "inactive").allow("", null),
+      user_type: Joi.string().valid("new", "existing", "all").allow("", null),
+      user_time: Joi.string()
+        .valid("morning", "afternoon", "evening", "night", "all")
+        .allow("", null),
+      bot_gender: Joi.string().valid("male", "female", "any").allow("", null),
+      personality_type: Joi.string().trim().max(50).allow("", null),
+      location_based: Joi.alternatives()
+        .try(Joi.boolean(), Joi.string().valid("true", "false"))
+        .optional(),
+      priority_min: Joi.number().integer().min(0).allow(null),
+      priority_max: Joi.number().integer().min(0).allow(null),
+      page: Joi.number().integer().min(1).default(1),
+      perPage: Joi.number().integer().min(5).max(100).default(25),
     }).unknown(false);
 
     const { error, value } = schema.validate(req.query, {
@@ -63,8 +64,9 @@ async function adminGetMasterPrompts(req, res) {
     const perPage = clampInt(value.perPage, 5, 100, 25);
     const offset = (page - 1) * perPage;
 
-        const where = {};
+    const where = {};
     if (value.status) where.status = value.status;
+    if (value.id) where.id = value.id;
     if (value.user_type) where.user_type = value.user_type;
     if (value.user_time) where.user_time = value.user_time;
     if (value.bot_gender) where.bot_gender = value.bot_gender;
@@ -72,8 +74,10 @@ async function adminGetMasterPrompts(req, res) {
     if (typeof value.location_based === "boolean") {
       where.location_based = value.location_based;
     }
-    const hasMin = value.priority_min !== null && value.priority_min !== undefined;
-    const hasMax = value.priority_max !== null && value.priority_max !== undefined;
+    const hasMin =
+      value.priority_min !== null && value.priority_min !== undefined;
+    const hasMax =
+      value.priority_max !== null && value.priority_max !== undefined;
     if (hasMin || hasMax) {
       where.priority = {};
       if (hasMin) where.priority[Op.gte] = value.priority_min;
@@ -232,7 +236,7 @@ async function adminUpdateMasterPrompt(req, res) {
       user_time: Joi.string().valid(
         "morning",
         "afternoon",
-        "evening", 
+        "evening",
         "night",
         "all",
       ),

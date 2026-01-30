@@ -16,6 +16,7 @@ const {
   pickImage,
   pickNotifOpts,
 } = require("../../utils/helpers/notificationHelper");
+const { connect } = require("../../routes/admin/adminRoutes");
 
 async function adminSendToUser(req, res) {
   try {
@@ -856,8 +857,8 @@ async function getNotificationCategories(req, res) {
 
     if (value.q) {
       where[Op.or] = [
-        { type: { [Op.like]: `%${value.q}%` } },
-        { icon: { [Op.like]: `%${value.q}%` } },
+        { type: { [Op.like]: `${value.q}%` } },
+        { icon: { [Op.like]: `${value.q}%` } },
       ];
     }
 
@@ -866,9 +867,11 @@ async function getNotificationCategories(req, res) {
       limit,
       offset,
       order: [["id", "DESC"]],
+      raw: true,
     });
 
     const totalPages = Math.ceil(count / limit);
+    console.warn(rows);
 
     return res.json({
       success: true,

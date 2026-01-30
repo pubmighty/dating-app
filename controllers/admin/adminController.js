@@ -889,16 +889,16 @@ async function updateAdminProfile(req, res) {
       await admin.update(updatePayload, { transaction: t });
 
       // Cleanup old avatar after DB update succeeded (best effort)
-      if (newAvatarFilename) {
-        const oldAvatar = admin.previous("avatar");
-        if (oldAvatar) {
-          try {
-            await deleteFile(oldAvatar, "uploads/avatar/admin");
-          } catch (e) {
-            console.error("Avatar cleanup failed:", e?.message || e);
-          }
-        }
-      }
+      // if (newAvatarFilename) {
+      //   const oldAvatar = admin.previous("avatar");
+      //   if (oldAvatar) {
+      //     try {
+      //       await deleteFile(oldAvatar, "uploads/avatar/admin");
+      //     } catch (e) {
+      //       console.error("Avatar cleanup failed:", e?.message || e);
+      //     }
+      //   }
+      // }
 
       // Return safe admin
       const fresh = await Admin.findByPk(adminId, {
@@ -950,6 +950,7 @@ async function updateAdminProfile(req, res) {
       .json({ success: false, msg: "Internal server error" });
   }
 }
+
 module.exports = {
   getAdmins,
   getAdmin,

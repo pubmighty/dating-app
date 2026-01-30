@@ -24,6 +24,8 @@ const NotificationCategory = sequelize.define(
     tableName: "pb_notification_categories",
     timestamps: true,
     underscored: true,
+    createdAt: "created_at",
+    updatedAt: "updated_at",
     indexes: [
       { name: "uq_type", unique: true, fields: ["type"] },
       { name: "idx_status", fields: ["status"] },

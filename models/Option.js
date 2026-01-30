@@ -28,7 +28,7 @@ const Option = sequelize.define(
         fields: ["name"],
       },
     ],
-  }
+  },
 );
 
 module.exports = Option;
