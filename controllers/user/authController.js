@@ -644,7 +644,7 @@ async function loginVerifyEmail(req, res) {
 async function resendOtpEmail(req, res) {
   try {
     const schema = Joi.object({
-      type: Joi.string().valid("login", "signup").required(), 
+      type: Joi.string().valid("login", "signup").required(),
       email: Joi.string()
         .trim()
         .lowercase()
@@ -673,8 +673,8 @@ async function resendOtpEmail(req, res) {
 
     const email = String(value.email).toLowerCase().trim();
     const type = String(value.type);
+    const now = new Date();
 
-    // LOGIN: real user
     if (type === "login") {
       const user = await User.findOne({ where: { email } });
       if (!user) {
@@ -682,6 +682,25 @@ async function resendOtpEmail(req, res) {
           success: false,
           message: "Account not found.",
           data: null,
+        });
+      }
+
+      const existingOtp = await UserOtp.findOne({
+        where: {
+          user_id: user.id,
+          action: "login_email",
+          status: false, // active
+        },
+        order: [["createdAt", "DESC"]],
+      });
+
+      if (existingOtp && new Date(existingOtp.expiry) > now) {
+        await sendOtpMail(user, existingOtp, "Login OTP", "login_email");
+
+        return res.status(200).json({
+          success: true,
+          message: "OTP resent to email",
+          data: { mode: "login", is_exist: true, tempUserId: null },
         });
       }
 
@@ -710,7 +729,7 @@ async function resendOtpEmail(req, res) {
         data: { mode: "login", is_exist: true, tempUserId: null },
       });
     }
-    
+
     const tempUserId = Number(value.tempUserId);
 
     const tempUser = await TempUser.findOne({ where: { id: tempUserId } });
@@ -727,6 +746,25 @@ async function resendOtpEmail(req, res) {
         success: false,
         message: "Email does not match signup request.",
         data: null,
+      });
+    }
+
+    const existingOtp = await UserOtp.findOne({
+      where: {
+        user_id: tempUser.id,
+        action: "signup_email",
+        status: false, // active
+      },
+      order: [["createdAt", "DESC"]],
+    });
+
+    if (existingOtp && new Date(existingOtp.expiry) > now) {
+      await sendOtpMail(tempUser, existingOtp, "Verify Your Email", "signup_email");
+
+      return res.status(200).json({
+        success: true,
+        message: "OTP resent to email",
+        data: { mode: "signup", is_exist: false, tempUserId: tempUser.id },
       });
     }
 
