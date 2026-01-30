@@ -353,7 +353,7 @@ async function addUser(req, res) {
         .optional()
         .allow(null, ""),
 
-      full_name: Joi.string().trim().max(300).optional().allow(null, ""),
+      full_name: Joi.string().trim().max(300).required().allow(null, ""),
       gender: Joi.string()
         .valid("male", "female", "other", "prefer_not_to_say")
         .optional()
@@ -420,7 +420,7 @@ async function addUser(req, res) {
     }
 
     // Normalize
-    const full_name = value.full_name.trim().toLowerCase();
+    const full_name = value.full_name;
     const email = value.email?.trim() ? value.email.trim().toLowerCase() : null;
     const phone = value.phone?.trim() ? value.phone.trim() : null;
 
@@ -744,8 +744,8 @@ async function editUser(req, res) {
     // Normalize username/email/phone
     if ("full_name" in value) {
       const u =
-        value.full_name && String(value.full_name).trim()
-          ? String(value.full_name).trim().toLowerCase()
+        value.full_name && String(value.full_name)
+          ? String(value.full_name).toLowerCase()
           : null;
       setIfProvided("full_name", u);
     }
