@@ -1565,6 +1565,194 @@ router.post(
 router.get("/notifications", adminNotificationController.getSentNotifications);
 
 /**
+ * POST /notification-categories/add
+ * ------------------------------------------------------------
+ * Creates a new notification category that can be used when
+ * sending admin or system notifications.
+ *
+ * Purpose:
+ * - Allows admin panel to define new notification categories
+ *   such as GLOBAL_PROMO, MAINTENANCE, TARGETED_PROMO, etc.
+ * - Enables dynamic categorization of notifications instead of
+ *   hardcoding types in backend logic.
+ * - Stores UI-related metadata such as icon and active status.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to send notifications.
+ *
+ * Request Body:
+ * - type: string (required)
+ *     - Unique category identifier.
+ *     - Must be uppercase and use only A–Z, 0–9, and underscores.
+ *     - Example: GLOBAL_PROMO, MAINTENANCE, TARGETED_PROMO
+ *
+ * - icon: string (optional)
+ *     - Icon URL or icon name to represent the category in UI.
+ *
+ * - status: string (optional)
+ *     - One of: active, inactive
+ *     - Default: active
+ *
+ * Behavior:
+ * - Validates input using Joi.
+ * - Ensures category type uniqueness.
+ * - Creates a new row in `pb_notification_categories`.
+ * - Returns the newly created category record.
+ *
+ * Response:
+ * - success: boolean
+ * - message: string
+ * - data:
+ *     - id
+ *     - type
+ *     - icon
+ *     - status
+ *     - created_at
+ *     - updated_at
+ *
+ * Notes:
+ * - Categories marked as inactive should not be selectable
+ *   in the admin UI when creating new notifications.
+ * - Category renaming should be avoided once in production,
+ *   as existing notifications reference this category.
+ */
+router.post(
+  "/notifications/categories/add",
+  adminNotificationController.addNotificationCategory,
+);
+
+/**
+ * GET /notification-categories
+ * ------------------------------------------------------------
+ * Fetches a paginated list of notification categories for admin use.
+ *
+ * Purpose:
+ * - Allows admin panel to list and manage notification categories.
+ * - Used for category selection dropdowns while creating notifications.
+ * - Supports auditing and reviewing existing category configurations.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to send notifications.
+ *
+ * Query Params (optional):
+ * - page: number (default: 1)
+ * - limit: number (default: 50, max: 200)
+ * - status: string (active | inactive)
+ * - q: string (search in type or icon)
+ *
+ * Behavior:
+ * - Returns both active and inactive categories (based on filter).
+ * - Results are ordered by newest first (id DESC).
+ * - Returns pagination metadata.
+ *
+ * Response:
+ * - success: boolean
+ * - message: string
+ * - data:
+ *     - categories: array of category objects
+ *     - pagination:
+ *         - totalItems
+ *         - totalPages
+ *         - currentPage
+ *         - perPage
+ *
+ * Notes:
+ * - Categories marked as inactive should not be selectable
+ *   in notification creation flows.
+ */
+router.get(
+  "/notifications/categories",
+  adminNotificationController.getNotificationCategories,
+);
+
+/**
+ * POST /notification-categories/update
+ * ------------------------------------------------------------
+ * Updates an existing notification category.
+ *
+ * Purpose:
+ * - Allows admin to update category metadata such as:
+ *     - type
+ *     - icon
+ *     - status
+ * - Useful for correcting naming, UI icon changes, or disabling categories.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to send notifications.
+ *
+ * Request Body:
+ * - id: number (required)
+ * - type: string (optional)
+ *     - Must be uppercase, alphanumeric with underscores.
+ *     - Example: GLOBAL_PROMO
+ * - icon: string (optional)
+ *     - URL or icon name.
+ * - status: string (optional)
+ *     - active | inactive
+ *
+ * Behavior:
+ * - Performs validation using Joi.
+ * - Prevents duplicate category type creation.
+ * - Only modified fields are updated.
+ *
+ * Response:
+ * - success: boolean
+ * - message: string
+ * - data:
+ *     - updated category object
+ *
+ * Notes:
+ * - Renaming a category that is already used in historical
+ *   notifications should be done carefully to avoid confusion
+ *   in analytics and reports.
+ */
+router.post(
+  "/notifications/categories/update",
+  adminNotificationController.updateNotificationCategory,
+);
+
+/**
+ * POST /notification-categories/delete
+ * ------------------------------------------------------------
+ * Soft deletes a notification category by marking it inactive.
+ *
+ * Purpose:
+ * - Allows admin to safely disable a notification category.
+ * - Prevents accidental loss of historical data.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin must have permission to send notifications.
+ *
+ * Request Body:
+ * - id: number (required)
+ *
+ * Behavior:
+ * - Sets category status to `inactive`.
+ * - Does NOT permanently delete database records.
+ * - Idempotent: repeated calls on same id return success.
+ *
+ * Response:
+ * - success: boolean
+ * - message: string
+ * - data:
+ *     - id
+ *     - status
+ *
+ * Notes:
+ * - Categories marked as inactive:
+ *     - Should not appear in admin UI dropdowns.
+ *     - Will remain available for historical reference.
+ */
+router.post(
+  "/notifications/categories/delete",
+  adminNotificationController.deleteNotificationCategory,
+);
+
+/**
  * POST /bots/:botId/upload-video
  * ------------------------------------------------------------
  * Uploads one or more call/intro videos for a specific bot user.

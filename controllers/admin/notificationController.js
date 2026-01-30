@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const Admin = require("../../models/Admin/Admin");
 const User = require("../../models/User");
 const NotificationGlobal = require("../../models/Admin/GlobalNotification");
+const NotificationCategory=require("../../models/Admin/NotificationCategory")
 const {
   isAdminSessionValid,
   verifyAdminRole,
@@ -51,15 +52,7 @@ async function adminSendToUser(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid(
-          "draft",
-          "scheduled",
-          "queued",
-          "sending",
-          "sent",
-          "failed",
-          "canceled",
-        )
+        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
         .allow(null),
       data: Joi.object().unknown(true).default({}),
     });
@@ -74,6 +67,21 @@ async function adminSendToUser(req, res) {
       return res.status(400).json({
         success: false,
         message: error.details?.[0]?.message,
+        data: null,
+      });
+    }
+
+    value.type = String(value.type).toUpperCase().trim();
+
+    const cat = await NotificationCategory.findOne({
+      where: { type: value.type, status: "active" },
+      attributes: ["id", "type", "status"],
+    });
+
+    if (!cat) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid notification category type (inactive or not found).",
         data: null,
       });
     }
@@ -106,32 +114,27 @@ async function adminSendToUser(req, res) {
         ...value.data,
         event: "ADMIN_SINGLE",
         sender_admin_id: String(adminId),
+        notification_category_id: String(cat.id),
       },
-      opts,
+      opts
     );
 
-    //  2) single-row admin campaign log (pb_notifications_global)
-    // receiver_id filled for single-user sends
     try {
       const push = result?.push || { attempted: 0, success: 0, failed: 0 };
       const normalizedOpts = pickNotifOpts(value);
 
       await NotificationGlobal.create({
         sender_id: adminId,
-        receiver_id: Number(value.receiverId), //  store receiver id (single user)
-
+        receiver_id: Number(value.receiverId),
         type: value.type,
         title: value.title,
         content: value.content,
         landing_url: normalizedOpts.landing_url || null,
         image_url: normalizedOpts.image_url || null,
-
         priority: normalizedOpts.priority || "normal",
         status: normalizedOpts.status || "draft",
         scheduled_at: normalizedOpts.scheduled_at || null,
-        sent_at:
-          (normalizedOpts.status || "draft") === "sent" ? new Date() : null,
-
+        sent_at: (normalizedOpts.status || "draft") === "sent" ? new Date() : null,
         total_targeted: push.attempted || 0,
         total_sent: push.attempted || 0,
         total_delivered: push.success || 0,
@@ -191,15 +194,7 @@ async function adminSendGlobal(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid(
-          "draft",
-          "scheduled",
-          "queued",
-          "sending",
-          "sent",
-          "failed",
-          "canceled",
-        )
+        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
         .allow(null),
       data: Joi.object().unknown(true).default({}),
     });
@@ -218,6 +213,20 @@ async function adminSendGlobal(req, res) {
       });
     }
 
+    value.type = String(value.type).toUpperCase().trim();
+    const cat = await NotificationCategory.findOne({
+      where: { type: value.type, status: "active" },
+      attributes: ["id", "type", "status"],
+    });
+
+    if (!cat) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid notification category type (inactive or not found).",
+        data: null,
+      });
+    }
+
     const opts = {
       ...pickNotifOpts(value),
       is_admin: true,
@@ -232,8 +241,9 @@ async function adminSendGlobal(req, res) {
         ...value.data,
         event: "ADMIN_GLOBAL",
         sender_admin_id: String(adminId),
+        notification_category_id: String(cat.id),
       },
-      opts,
+      opts
     );
 
     return res.json({
@@ -324,7 +334,7 @@ async function adminPreviewFiltered(req, res) {
 
 async function adminSendFiltered(req, res) {
   try {
-   const session = await isAdminSessionValid(req, res);
+    const session = await isAdminSessionValid(req, res);
     if (!session?.success || !session?.data) {
       return res.status(401).json({
         success: false,
@@ -358,15 +368,7 @@ async function adminSendFiltered(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid(
-          "draft",
-          "scheduled",
-          "queued",
-          "sending",
-          "sent",
-          "failed",
-          "canceled",
-        )
+        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
         .allow(null),
       data: Joi.object().unknown(true).default({}),
       max_users: Joi.number().integer().min(1).max(500000).default(100000),
@@ -421,10 +423,23 @@ async function adminSendFiltered(req, res) {
 
     const payload = bodyCheck.value;
     const filters = queryCheck.value;
+    payload.type = String(payload.type).toUpperCase().trim();
+
+    const cat = await NotificationCategory.findOne({
+      where: { type: payload.type, status: "active" },
+      attributes: ["id", "type", "status"],
+    });
+
+    if (!cat) {
+      return res.status(400).json({
+        success: false,
+        msg: "Invalid notification category type (inactive or not found).",
+        data: null,
+      });
+    }
 
     filters.days = Number.parseInt(filters.days, 10) || 1;
-    filters.require_balance_gt =
-      Number.parseInt(filters.require_balance_gt, 10) || 0;
+    filters.require_balance_gt = Number.parseInt(filters.require_balance_gt, 10) || 0;
 
     if (!filters.type) filters.type = null;
     if (!filters.gender) filters.gender = null;
@@ -448,10 +463,11 @@ async function adminSendFiltered(req, res) {
         ...payload.data,
         event: "ADMIN_FILTERED",
         sender_admin_id: String(adminId),
+        notification_category_id: String(cat.id),
       },
       filters,
       payload.max_users,
-      opts,
+      opts
     );
 
     return res.json({
@@ -648,10 +664,419 @@ async function getSentNotifications(req, res) {
   }
 }
 
+async function addNotificationCategory(req, res) {
+  try {
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin session invalid", data: null });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin not found", data: null });
+    }
+
+    const canGo = await verifyAdminRole(admin, "sendNotifications");
+    if (!canGo) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Permission denied", data: null });
+    }
+
+    const schema = Joi.object({
+      type: Joi.string()
+        .trim()
+        .min(1)
+        .max(50)
+        .required()
+        .pattern(/^[A-Z0-9_]+$/),
+
+      icon: Joi.string().trim().max(255).allow("", null), 
+
+      status: Joi.string().valid("active", "inactive").default("active"),
+    });
+
+    const { error, value } = schema.validate(req.body, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message,
+        data: null,
+      });
+    }
+
+    const type = String(value.type).toUpperCase().trim();
+    const icon = value.icon ? String(value.icon).trim() : null;
+    const status = value.status || "active";
+
+    // check duplicate type
+    const exists = await NotificationCategory.findOne({
+      where: { type: { [Op.eq]: type } },
+      attributes: ["id"],
+    });
+
+    if (exists) {
+      return res.status(409).json({
+        success: false,
+        message: "Category already exists",
+        data: null,
+      });
+    }
+
+    const row = await NotificationCategory.create({
+      type,
+      icon: icon || null,
+      status,
+    });
+
+    return res.json({
+      success: true,
+      message: "Category created",
+      data: {
+        id: Number(row.id),
+        type: row.type,
+        icon: row.icon,
+        status: row.status,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      },
+    });
+  } catch (err) {
+    console.error("adminAddNotificationCategory error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to add category",
+      data: null,
+    });
+  }
+}
+
+async function getNotificationCategories(req, res) {
+  try {
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin session invalid", data: null });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin not found", data: null });
+    }
+
+    const canGo = await verifyAdminRole(admin, "sendNotifications");
+    if (!canGo) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Permission denied", data: null });
+    }
+
+    const schema = Joi.object({
+      page: Joi.number().integer().min(1).default(1),
+      limit: Joi.number().integer().min(1).max(200).default(50),
+      status: Joi.string().valid("active", "inactive").allow(null, ""),
+      q: Joi.string().trim().max(100).allow(null, ""),
+    });
+
+    const { error, value } = schema.validate(req.query || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message,
+        data: null,
+      });
+    }
+
+    const page = Number(value.page || 1);
+    const limit = Number(value.limit || 50);
+    const offset = (page - 1) * limit;
+
+    const where = {};
+
+    if (value.status) where.status = value.status;
+
+    if (value.q) {
+      where[Op.or] = [
+        { type: { [Op.like]: `%${value.q}%` } },
+        { icon: { [Op.like]: `%${value.q}%` } },
+      ];
+    }
+
+    const { rows, count } = await NotificationCategory.findAndCountAll({
+      where,
+      limit,
+      offset,
+      order: [["id", "DESC"]],
+    });
+
+    const totalPages = Math.ceil(count / limit);
+
+    return res.json({
+      success: true,
+      message: "Categories fetched",
+      data: {
+        categories: rows.map((r) => ({
+          id: Number(r.id),
+          type: r.type,
+          icon: r.icon,
+          status: r.status,
+          created_at: r.created_at,
+          updated_at: r.updated_at,
+        })),
+        pagination: {
+          totalItems: count,
+          totalPages,
+          currentPage: page,
+          perPage: limit,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("getNotificationCategories error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch categories",
+      data: null,
+    });
+  }
+}
+
+async function updateNotificationCategory(req, res) {
+  try {
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin session invalid", data: null });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin not found", data: null });
+    }
+
+    const canGo = await verifyAdminRole(admin, "sendNotifications");
+    if (!canGo) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Permission denied", data: null });
+    }
+
+    const schema = Joi.object({
+      id: Joi.number().integer().positive().required(),
+      type: Joi.string()
+        .trim()
+        .min(1)
+        .max(50)
+        .allow(null, ""),
+
+      icon: Joi.string().trim().max(255).allow("", null),
+
+      status: Joi.string().valid("active", "inactive").allow(null, ""),
+    });
+
+    const { error, value } = schema.validate(req.body, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message,
+        data: null,
+      });
+    }
+
+    const row = await NotificationCategory.findByPk(Number(value.id));
+    if (!row) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found",
+        data: null,
+      });
+    }
+
+    const nextType =
+      value.type && String(value.type).trim()
+        ? String(value.type).toUpperCase().trim()
+        : null;
+
+    // duplicate type check (only if type changed)
+    if (nextType && nextType !== row.type) {
+      const exists = await NotificationCategory.findOne({
+        where: {
+          type: { [Op.eq]: nextType },
+          id: { [Op.ne]: Number(row.id) },
+        },
+        attributes: ["id"],
+      });
+
+      if (exists) {
+        return res.status(409).json({
+          success: false,
+          message: "Category type already exists",
+          data: null,
+        });
+      }
+    }
+
+    const payload = {};
+    if (nextType) payload.type = nextType;
+    if (value.icon !== undefined)
+      payload.icon = value.icon ? String(value.icon).trim() : null;
+    if (value.status) payload.status = value.status;
+
+    if (Object.keys(payload).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Nothing to update",
+        data: null,
+      });
+    }
+
+    await row.update(payload);
+
+    return res.json({
+      success: true,
+      message: "Category updated",
+      data: {
+        id: Number(row.id),
+        type: row.type,
+        icon: row.icon,
+        status: row.status,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      },
+    });
+  } catch (err) {
+    console.error("updateNotificationCategory error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update category",
+      data: null,
+    });
+  }
+}
+
+async function deleteNotificationCategory(req, res) {
+  try {
+    const session = await isAdminSessionValid(req, res);
+    if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin session invalid", data: null });
+    }
+
+    const adminId = Number(session.data);
+    const admin = await Admin.findByPk(adminId);
+    if (!admin) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Admin not found", data: null });
+    }
+
+    const canGo = await verifyAdminRole(admin, "sendNotifications");
+    if (!canGo) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Permission denied", data: null });
+    }
+
+    const schema = Joi.object({
+      id: Joi.number().integer().positive().required(),
+    });
+
+    const { error, value } = schema.validate(req.body, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message,
+        data: null,
+      });
+    }
+
+    const row = await NotificationCategory.findByPk(Number(value.id));
+    if (!row) {
+      return res.status(404).json({
+        success: false,
+        message: "Category not found",
+        data: null,
+      });
+    }
+
+    // already inactive => idempotent success
+    if (row.status === "inactive") {
+      return res.json({
+        success: true,
+        message: "Category already inactive",
+        data: {
+          id: Number(row.id),
+          status: row.status,
+        },
+      });
+    }
+
+    await row.update({ status: "inactive" });
+
+    return res.json({
+      success: true,
+      message: "Category deleted (status set to inactive)",
+      data: {
+        id: Number(row.id),
+        type: row.type,
+        icon: row.icon,
+        status: row.status,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      },
+    });
+  } catch (err) {
+    console.error("deleteNotificationCategory error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete category",
+      data: null,
+    });
+  }
+}
+
 module.exports = {
   adminSendToUser,
   adminSendGlobal,
   adminPreviewFiltered,
   adminSendFiltered,
   getSentNotifications,
+  addNotificationCategory,
+  getNotificationCategories,
+  updateNotificationCategory,
+  deleteNotificationCategory
 };

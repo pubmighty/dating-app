@@ -335,123 +335,6 @@ async function markCampaignClicked(campaignId) {
   return { success: true };
 }
 
-async function savePushInline(
-  senderId,
-  userIds,
-  type,
-  title,
-  content,
-  image,
-  data,
-  normalizedFilters,
-  opts = {},
-) {
-  const isAdmin =
-    typeof opts.is_admin === "boolean"
-      ? opts.is_admin
-      : await _isAdminSender(senderId);
-  const nopts = normalizeNotifOpts(opts, image);
-
-  let saved = 0;
-  const createdIds = [];
-
-  const t = await sequelize.transaction();
-  try {
-    const chunkSize = 5000;
-
-    for (let i = 0; i < userIds.length; i += chunkSize) {
-      const chunk = userIds.slice(i, i + chunkSize);
-
-      const bulk = chunk.map((uid) => ({
-        sender_id: senderId,
-        receiver_id: uid,
-        is_admin: isAdmin ? 1 : 0,
-        type,
-        title,
-        content,
-        landing_url: nopts.landing_url,
-        image_url: nopts.image_url,
-        priority: nopts.priority,
-        status: nopts.status,
-        scheduled_at: nopts.scheduled_at,
-        sent_at: nopts.status === "sent" ? new Date() : null,
-        is_read: false,
-        total_targeted: 0,
-        total_sent: 0,
-        total_delivered: 0,
-        total_clicked: 0,
-        total_failed: 0,
-        last_error: null,
-      }));
-
-      const created = await Notification.bulkCreate(bulk, { transaction: t });
-      saved += created.length;
-      for (const row of created) if (row?.id) createdIds.push(Number(row.id));
-    }
-
-    await t.commit();
-  } catch (e) {
-    await t.rollback();
-    throw e;
-  }
-
-  if (nopts.status === "scheduled") {
-    return {
-      matched_users: userIds.length,
-      saved,
-      push: { attempted: 0, success: 0, failed: 0, scheduled: true },
-      filters: normalizedFilters,
-    };
-  }
-
-  // collect tokens for matched users
-  const tokensSet = new Set();
-
-  for (let i = 0; i < userIds.length; i += 10000) {
-    const chunk = userIds.slice(i, i + 10000);
-
-    const rows = await NotificationToken.findAll({
-      where: { user_id: { [Op.in]: chunk }, is_active: true },
-      attributes: ["token"],
-    });
-
-    for (const r of rows) if (r?.token) tokensSet.add(r.token);
-  }
-
-  const tokens = Array.from(tokensSet);
-
-  const push = await sendMulticastToTokens(
-    tokens,
-    title,
-    content,
-    nopts.image_url,
-    {
-      event: "INLINE_BULK",
-      type: String(type),
-      landing_url: nopts.landing_url ? String(nopts.landing_url) : "",
-      ...toStringData(data),
-    },
-    { priority: nopts.priority },
-  );
-
-  await updateNotifAnalytics(createdIds, {
-    total_targeted: tokens.length,
-    total_sent: push.attempted || 0,
-    total_delivered: push.success || 0,
-    total_failed: push.failed || 0,
-    last_error: push.error || null,
-    sent_at: new Date(),
-    status: safeStatusForNotification(push.error ? "failed" : "sent"),
-  });
-
-  return {
-    matched_users: userIds.length,
-    saved,
-    push,
-    filters: normalizedFilters,
-  };
-}
-
 /**
  * Create DB notification + send push to ALL active tokens of receiver
  */
@@ -739,7 +622,7 @@ async function createAndSendGlobal(
         total_delivered: 0,
         total_failed: 0,
         sent_at: null,
-        status: "no_device", // <-- change to "failed" if enum doesn't allow
+        status: "no_device", //  change to "failed" if enum doesn't allow
       },
       { where: { id: campaign.id } }
     );
