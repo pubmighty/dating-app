@@ -145,6 +145,20 @@ const USER_TYPE = ["new", "existing", "all"];
 const USER_TIME = ["morning", "afternoon", "evening", "night", "all"];
 const BOT_GENDER = ["male", "female", "any"];
 const STATUS = ["active", "inactive"];
+const MASTER_COLUMNS = [
+  "id",
+  "name",
+  "prompt",
+  "user_type",
+  "user_time",
+  "bot_gender",
+  "personality_type",
+  "location_based",
+  "priority",
+  "status",
+  "created_at",
+  "updated_at",
+];
 
 module.exports = {
   publicFeedUserAttributes,
@@ -163,4 +177,5 @@ module.exports = {
   USER_TIME,
   BOT_GENDER,
   STATUS,
+  MASTER_COLUMNS
 };

@@ -4,7 +4,8 @@ const Chat = require("../../models/Chat");
 const { Op } = require("sequelize");
 const User = require("../../models/User");
 const CoinSpentTransaction = require("../../models/CoinSpentTransaction");
-const { generateBotReplyForChat } = require("../../utils/helpers/aiHelper");
+const { generateBotReplyForChat } = require("../../utils/helpers/FinalPrompt");
+const { finalPrompt } = require("../../utils/helpers/FinalPrompt");
 const {
   getOption,
   normalizeFiles,
@@ -525,23 +526,117 @@ async function sendMessage(req, res) {
 
     // BOT REPLY (after successful commit)
     // TODO: Remove this in production
-    const delayMs = 3000;
-    await new Promise((r) => setTimeout(r, delayMs));
+   // BOT REPLY (after successful commit)
+// TODO: Remove this in production
+const delayMs = 3000;
+await new Promise((r) => setTimeout(r, delayMs));
 
-    let botReplyText = null;
-    try {
-      botReplyText = await generateBotReplyForChat(
-        chatId,
-        captionOrText || "sent a file",
-      );
-    } catch (aiErr) {
-      console.error("[sendMessage] AI bot reply error:", aiErr);
-    }
+/**
+ * 1) Build FINAL PROMPT and print to console (for now)
+ * We need:
+ * - userId (sender)
+ * - botId (receiverId)
+ * - user_type (new/existing) => for now, decide using your own logic
+ * - user_time (morning/afternoon/evening/night) => for now pass manually or compute
+ * - bot_gender (male/female) => read from bot user row if you have it, else pass manually
+ * - personality_type (optional) => you can pass null
+ */
+try {
+  // 1) Load fresh user + bot
+  const [u, b] = await Promise.all([
+    User.findByPk(Number(userId)),
+    User.findByPk(Number(receiverId)),
+  ]);
 
-    if (!safeTrim(botReplyText)) {
-      botReplyText =
-        fallbackMessages[Math.floor(Math.random() * fallbackMessages.length)];
-    }
+  if (!u) throw new Error("User not found");
+  if (!b) throw new Error("Bot not found");
+
+  // 2) Compute user_type from user created_at (example logic)
+  const createdAt = u.created_at ? new Date(u.created_at) : null;
+  let user_type = "existing";
+  if (createdAt) {
+    const diffDays = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+    user_type = diffDays <= 7 ? "new" : "existing";
+  }
+
+  // 3) Compute user_time from current time
+  const h = new Date().getHours();
+  const user_time =
+    h >= 5 && h < 12 ? "morning" :
+    h >= 12 && h < 16 ? "afternoon" :
+    h >= 16 && h < 20 ? "evening" : "night";
+
+  // 4) bot_gender + personality_type from bot user row
+  // Adjust keys based on your User table columns
+  const g = String(b.gender || b.bot_gender || "").toLowerCase();
+  const bot_gender = g === "male" ? "male" : "female"; // fallback female
+  const personality_type = b.personality_type || null;
+
+  // 5) Build final paragraph prompt (from MasterPrompt row + history)
+  await finalPrompt(
+    userId,
+    receiverId,
+    user_type,
+    user_time,
+    bot_gender,
+    personality_type,
+    10
+  );
+} catch (e) {
+  console.error("[sendMessage] finalPrompt helper error:", e);
+}
+
+let botReplyText = null;
+try {
+  // 1) Load fresh user + bot (same logic you already used above)
+  const [u, b] = await Promise.all([
+    User.findByPk(Number(userId)),
+    User.findByPk(Number(receiverId)),
+  ]);
+
+  if (!u) throw new Error("User not found");
+  if (!b) throw new Error("Bot not found");
+
+  // 2) user_type
+  const createdAt = u.created_at ? new Date(u.created_at) : null;
+  let user_type = "existing";
+  if (createdAt) {
+    const diffDays = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+    user_type = diffDays <= 7 ? "new" : "existing";
+  }
+
+  // 3) user_time
+  const h = new Date().getHours();
+  const user_time =
+    h >= 5 && h < 12
+      ? "morning"
+      : h >= 12 && h < 16
+        ? "afternoon"
+        : h >= 16 && h < 20
+          ? "evening"
+          : "night";
+
+  // 4) bot_gender + personality_type
+  const g = String(b.gender || b.bot_gender || "").toLowerCase();
+  const bot_gender = g === "male" ? "male" : "female";
+  const personality_type = b.personality_type || null;
+
+  // Correct call order (NO chatId here)
+ botReplyText = await generateBotReplyForChat(
+  userId,
+  receiverId,                 // botId
+  user_type,
+  user_time,
+  bot_gender,
+  personality_type,
+  10,
+  captionOrText || "sent a file"
+);
+} catch (aiErr) {
+  console.error("[sendMessage] AI bot reply error:", aiErr);
+}
+
+    
 
     // Separate transaction for bot save
     let botSaved = null;

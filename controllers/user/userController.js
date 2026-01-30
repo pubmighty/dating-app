@@ -103,7 +103,7 @@ async function updateUserProfile(req, res) {
       address: Joi.string().trim().optional().allow(null, ""),
       dob: Joi.date().iso().optional().allow(null, ""),
       bio: Joi.string().trim().optional().allow(null, ""),
-
+      full_name: Joi.string().trim().max(100).required().allow(null, ""),
       looking_for: Joi.string()
         .valid(
           "Long Term",
@@ -165,6 +165,7 @@ async function updateUserProfile(req, res) {
       // Whitelist updates (never trust incoming keys)
       const updatableFields = [
         "gender",
+        "full_name",
         "city",
         "state",
         "country",
