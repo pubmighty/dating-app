@@ -695,23 +695,28 @@ async function resendOtpEmail(req, res) {
       });
 
       if (existingOtp && new Date(existingOtp.expiry) > now) {
-        await sendOtpMail(user, existingOtp, "Login OTP", "login_email");
-
         return res.status(200).json({
           success: true,
-          message: "OTP resent to email",
-          data: { mode: "login", is_exist: true, tempUserId: null },
+          message: "OTP already sent. Please wait before requesting again.",
+          data: {
+            mode: "login",
+            is_exist: true,
+            tempUserId: null,
+            otp_active: true,
+            expires_at: existingOtp.expiry,
+          },
         });
       }
 
-      const otp = generateOtp();
-      const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
-      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
-
+      // Expire any old active (expired) OTPs (safety)
       await UserOtp.update(
         { status: true },
         { where: { user_id: user.id, action: "login_email", status: false } }
       );
+
+      const otp = generateOtp();
+      const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
+      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
 
       const myOtp = await UserOtp.create({
         user_id: user.id,
@@ -759,23 +764,29 @@ async function resendOtpEmail(req, res) {
     });
 
     if (existingOtp && new Date(existingOtp.expiry) > now) {
-      await sendOtpMail(tempUser, existingOtp, "Verify Your Email", "signup_email");
-
       return res.status(200).json({
         success: true,
-        message: "OTP resent to email",
-        data: { mode: "signup", is_exist: false, tempUserId: tempUser.id },
+        message: "OTP already sent.",
+        data: {
+          mode: "signup",
+          is_exist: false,
+          tempUserId: tempUser.id,
+          otp_active: true,
+          expires_at: existingOtp.expiry,
+        },
       });
     }
 
-    const otp = generateOtp();
-    const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
-    const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
-
+    // Expire any old active (expired) OTPs (safety)
     await UserOtp.update(
       { status: true },
       { where: { user_id: tempUser.id, action: "signup_email", status: false } }
     );
+
+    // Create new OTP
+    const otp = generateOtp();
+    const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
+    const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
 
     const myOtp = await UserOtp.create({
       user_id: tempUser.id,

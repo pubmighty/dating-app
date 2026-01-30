@@ -351,7 +351,7 @@ async function initiateVideoCall(req, res) {
           await transaction.rollback();
           return res.status(400).json({
             success: false,
-            message: "This bot has no active call video, so call cannot be started.",
+            message: "Call connection failed.",
           });
         }
 
