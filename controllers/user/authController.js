@@ -644,7 +644,7 @@ async function loginVerifyEmail(req, res) {
 async function resendOtpEmail(req, res) {
   try {
     const schema = Joi.object({
-      type: Joi.string().valid("login", "signup").required(), 
+      type: Joi.string().valid("login", "signup").required(),
       email: Joi.string()
         .trim()
         .lowercase()
@@ -673,8 +673,8 @@ async function resendOtpEmail(req, res) {
 
     const email = String(value.email).toLowerCase().trim();
     const type = String(value.type);
+    const now = new Date();
 
-    // LOGIN: real user
     if (type === "login") {
       const user = await User.findOne({ where: { email } });
       if (!user) {
@@ -685,14 +685,38 @@ async function resendOtpEmail(req, res) {
         });
       }
 
-      const otp = generateOtp();
-      const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
-      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
+      const existingOtp = await UserOtp.findOne({
+        where: {
+          user_id: user.id,
+          action: "login_email",
+          status: false, // active
+        },
+        order: [["createdAt", "DESC"]],
+      });
 
+      if (existingOtp && new Date(existingOtp.expiry) > now) {
+        return res.status(200).json({
+          success: true,
+          message: "OTP already sent. Please wait before requesting again.",
+          data: {
+            mode: "login",
+            is_exist: true,
+            tempUserId: null,
+            otp_active: true,
+            expires_at: existingOtp.expiry,
+          },
+        });
+      }
+
+      // Expire any old active (expired) OTPs (safety)
       await UserOtp.update(
         { status: true },
         { where: { user_id: user.id, action: "login_email", status: false } }
       );
+
+      const otp = generateOtp();
+      const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
+      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
 
       const myOtp = await UserOtp.create({
         user_id: user.id,
@@ -710,7 +734,7 @@ async function resendOtpEmail(req, res) {
         data: { mode: "login", is_exist: true, tempUserId: null },
       });
     }
-    
+
     const tempUserId = Number(value.tempUserId);
 
     const tempUser = await TempUser.findOne({ where: { id: tempUserId } });
@@ -730,14 +754,39 @@ async function resendOtpEmail(req, res) {
       });
     }
 
-    const otp = generateOtp();
-    const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
-    const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
+    const existingOtp = await UserOtp.findOne({
+      where: {
+        user_id: tempUser.id,
+        action: "signup_email",
+        status: false, // active
+      },
+      order: [["createdAt", "DESC"]],
+    });
 
+    if (existingOtp && new Date(existingOtp.expiry) > now) {
+      return res.status(200).json({
+        success: true,
+        message: "OTP already sent.",
+        data: {
+          mode: "signup",
+          is_exist: false,
+          tempUserId: tempUser.id,
+          otp_active: true,
+          expires_at: existingOtp.expiry,
+        },
+      });
+    }
+
+    // Expire any old active (expired) OTPs (safety)
     await UserOtp.update(
       { status: true },
       { where: { user_id: tempUser.id, action: "signup_email", status: false } }
     );
+
+    // Create new OTP
+    const otp = generateOtp();
+    const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
+    const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
 
     const myOtp = await UserOtp.create({
       user_id: tempUser.id,
