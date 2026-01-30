@@ -874,14 +874,7 @@ async function getNotificationCategories(req, res) {
       success: true,
       message: "Categories fetched",
       data: {
-        categories: rows.map((r) => ({
-          id: Number(r.id),
-          type: r.type,
-          icon: r.icon,
-          status: r.status,
-          created_at: r.created_at,
-          updated_at: r.updated_at,
-        })),
+        categories: rows,
         pagination: {
           totalItems: count,
           totalPages,
