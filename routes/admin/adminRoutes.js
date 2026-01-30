@@ -370,11 +370,118 @@ router.post("/resend-send-otp", authController.sendOTPAgainForAdmin);
  * - Does not authenticate or identify the user.
  * - Used as an additional security layer only.
  */
-
-router.get("/settings", getSettings);
-router.patch("/settings", updateSettings);
-
 router.post("/altcha-captcha-challenge", authController.altchaCaptchaChallenge);
+
+/**
+ * GET /admin/settings
+ * ------------------------------------------------------------
+ * Fetches all application settings in a grouped and structured format.
+ *
+ * Purpose:
+ * - Provides a centralized configuration panel for administrators.
+ * - Allows frontend admin UI to dynamically render settings.
+ *
+ * Security & Authorization:
+ * - Requires a valid admin session.
+ * - Only authenticated admins can access this endpoint.
+ *
+ * Behavior:
+ * - Automatically ensures all default settings exist in DB.
+ * - Fetches all stored options.
+ * - Groups them by logical sections:
+ *   - auth
+ *   - pagination
+ *   - files
+ *   - chat
+ *   - ads
+ *   - video_call
+ *   - admin_pagination
+ *   - security
+ *   - app
+ *
+ * Security Handling:
+ * - Secret fields (captcha keys, secret keys, etc.) are masked.
+ * - Actual secret values are never exposed in API responses.
+ *
+ * Output:
+ * - Structured JSON grouped by section.
+ *
+ * Example Response:
+ * {
+ *   "auth": { ... },
+ *   "pagination": { ... },
+ *   "security": { ... },
+ *   "app": { ... }
+ * }
+ *
+ * Notes:
+ * - Default values are auto-created if missing.
+ * - Designed for dynamic admin configuration UI.
+ */
+router.get("/settings", getSettings);
+
+
+/**
+ * PATCH /admin/settings
+ * ------------------------------------------------------------
+ * Updates one or more application settings.
+ *
+ * Purpose:
+ * - Allows administrators to modify application behavior dynamically.
+ * - Centralized configuration control without redeploying backend.
+ *
+ * Security & Authorization:
+ * - Requires a valid admin session.
+ * - Only authenticated admins can update settings.
+ *
+ * Input Formats:
+ * 1) Flat format:
+ *    {
+ *      "max_pages_user": 100,
+ *      "verify_register_email": true
+ *    }
+ *
+ * 2) Grouped format:
+ *    {
+ *      "pagination": {
+ *        "max_pages_user": 100
+ *      },
+ *      "auth": {
+ *        "verify_register_email": true
+ *      }
+ *    }
+ *
+ * Validation:
+ * - Only allowlisted keys defined in OPTION_DEFS are accepted.
+ * - Enforces:
+ *   - Type validation (bool, int, string, enum)
+ *   - Range checks (min / max)
+ *   - Enum validation
+ *
+ * Behavior:
+ * - Automatically inserts missing default options.
+ * - Updates settings using atomic DB transaction.
+ * - Supports bulk update in a single query.
+ *
+ * Security Handling:
+ * - Secret fields are stored securely.
+ * - Response masks secret values.
+ *
+ * Output:
+ * - Returns the full updated grouped settings object.
+ *
+ * Example Response:
+ * {
+ *   "success": true,
+ *   "msg": "Settings updated successfully.",
+ *   "data": { ... }
+ * }
+ *
+ * Notes:
+ * - Prevents unknown or invalid configuration injection.
+ * - Ensures system consistency and safety.
+ */
+router.patch("/settings", updateSettings);
 
 /**
  * GET /users
