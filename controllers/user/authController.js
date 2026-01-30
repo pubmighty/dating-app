@@ -195,9 +195,9 @@ async function emailExist(req, res) {
 
     // flags
     const verifyLoginEmail =
-      String(await getOption("verify_login_email", "true")) === "true";
+      String(await getOption("verify_email", "true")) === "true";
     const verifySignupEmail =
-      String(await getOption("verify_signup_email", "true")) === "true";
+      String(await getOption("verify_email", "true")) === "true";
 
     // Check real user
     const user = await User.findOne({ where: { email } });
