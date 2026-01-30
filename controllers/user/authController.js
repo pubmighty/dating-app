@@ -13,15 +13,10 @@ const {
   isValidPhone,
   generateOtp,
   isUserSessionValid,
-  clearUserSessionByToken,
+  clearUserSessionByToken
 } = require("../../utils/helpers/authHelper");
-const {
-  downloadAndUploadGoogleAvatar,
-} = require("../../utils/helpers/fileUpload");
-const {
-  publicUserAttributes,
-  BCRYPT_ROUNDS,
-} = require("../../utils/staticValues");
+const { downloadAndUploadGoogleAvatar } = require("../../utils/helpers/fileUpload");
+const { publicUserAttributes, BCRYPT_ROUNDS } = require("../../utils/staticValues");
 const { sendOtpMail } = require("../../utils/helpers/mailHelper");
 const sequelize = require("../../config/db");
 const UserSession = require("../../models/UserSession");
@@ -107,14 +102,14 @@ async function registerWithGoogle(req, res) {
 
       const { token, expires_at } = await handleUserSessionCreation(
         req,
-        existingUser,
+        existingUser
       );
 
       await existingUser.reload({ attributes: publicUserAttributes });
       const files = await FileUpload.findAll({
         where: {
-          user_id: existingUser.id,
-        },
+          user_id: existingUser.id
+        }
       });
 
       return res.status(200).json({
@@ -124,7 +119,7 @@ async function registerWithGoogle(req, res) {
           user: existingUser,
           token,
           token_expires_at: expires_at,
-          files,
+          files
         },
       });
     }
@@ -134,7 +129,7 @@ async function registerWithGoogle(req, res) {
 
     const avatarName = await downloadAndUploadGoogleAvatar(
       avatar,
-      "uploads/avatar",
+      "uploads/avatar"
     );
 
     const user = await User.create({
@@ -169,12 +164,9 @@ async function registerWithGoogle(req, res) {
   }
 }
 
-// ==============================
-// 1) emailExist(req, res)
-// - If user exists => send login OTP ONLY if verify_login_email=true
-// - If user not exists => send signup OTP ONLY if verify_signup_email=true
-// - Adds: otp_required boolean in response
-// ==============================
+// signupWithEmail:
+// email exists => send OTP for login (action=login_email) => verifyLoginEmail
+// email not exists => TempUser + OTP for signup (action=signup_email) => verifySignupEmail
 async function emailExist(req, res) {
   try {
     const schema = Joi.object({
@@ -201,7 +193,7 @@ async function emailExist(req, res) {
 
     const email = String(value.email).toLowerCase().trim();
 
-    // Flags from options
+    // flags
     const verifyLoginEmail =
       String(await getOption("verify_login_email", "true")) === "true";
     const verifySignupEmail =
@@ -210,7 +202,7 @@ async function emailExist(req, res) {
     // Check real user
     const user = await User.findOne({ where: { email } });
     if (user) {
-      // If OTP disabled for login -> do not send mail
+      // OTP disabled -> don't send OTP, don't create otp record
       if (!verifyLoginEmail) {
         return res.status(200).json({
           success: true,
@@ -230,7 +222,7 @@ async function emailExist(req, res) {
       // Invalidate old OTPs
       await UserOtp.update(
         { status: true },
-        { where: { user_id: user.id, action: "login_email", status: false } },
+        { where: { user_id: user.id, action: "login_email", status: false } }
       );
 
       const myOtp = await UserOtp.create({
@@ -254,8 +246,9 @@ async function emailExist(req, res) {
       });
     }
 
-    // Not exist -> temp user for signup
+    // ====== USER NOT EXISTS -> KEEP YOUR TEMP USER LOGIC SAME ======
     let tempUser = await TempUser.findOne({ where: { email } });
+
     if (!tempUser) {
       tempUser = await TempUser.create({
         email,
@@ -264,7 +257,7 @@ async function emailExist(req, res) {
       });
     }
 
-    // If OTP disabled for signup -> do not send mail
+    // OTP disabled -> don't send OTP, don't create otp record
     if (!verifySignupEmail) {
       return res.status(200).json({
         success: true,
@@ -284,9 +277,7 @@ async function emailExist(req, res) {
     // Invalidate old OTPs
     await UserOtp.update(
       { status: true },
-      {
-        where: { user_id: tempUser.id, action: "signup_email", status: false },
-      },
+      { where: { user_id: tempUser.id, action: "signup_email", status: false } }
     );
 
     const myOtp = await UserOtp.create({
@@ -318,21 +309,17 @@ async function emailExist(req, res) {
   }
 }
 
+/**
+ * If User exists (by email) => verify login OTP (action=login_email) and login
+ * If User NOT exists => verify signup OTP (action=signup_email) using tempUserId, create User from TempUser, login
+ */
 async function signupVerifyEmail(req, res) {
   const t = await sequelize.transaction();
   try {
     const schema = Joi.object({
-      email: Joi.string()
-        .trim()
-        .lowercase()
-        .email({ tlds: { allow: false } })
-        .required(),
+      email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required(),
       tempUserId: Joi.number().integer().positive().required(),
-      otp: Joi.string()
-        .trim()
-        .pattern(/^[0-9]{6}$/)
-        .optional()
-        .allow(null, ""),
+      otp: Joi.string().trim().pattern(/^[0-9]{6}$/).required(),
       password: Joi.string().min(8).max(128).required(),
     });
 
@@ -353,15 +340,11 @@ async function signupVerifyEmail(req, res) {
 
     const email = String(value.email).toLowerCase().trim();
     const tempUserId = Number(value.tempUserId);
-    const otp = value.otp ? String(value.otp).trim() : "";
+    const otp = String(value.otp).trim();
     const password = String(value.password);
 
     // Must not already exist
-    const already = await User.findOne({
-      where: { email },
-      transaction: t,
-      lock: t.LOCK.UPDATE,
-    });
+    const already = await User.findOne({ where: { email }, transaction: t, lock: t.LOCK.UPDATE });
     if (already) {
       await t.rollback();
       return res.status(409).json({
@@ -386,11 +369,7 @@ async function signupVerifyEmail(req, res) {
       });
     }
 
-    if (
-      String(tempUser.email || "")
-        .toLowerCase()
-        .trim() !== email
-    ) {
+    if (String(tempUser.email || "").toLowerCase().trim() !== email) {
       await t.rollback();
       return res.status(400).json({
         success: false,
@@ -399,23 +378,13 @@ async function signupVerifyEmail(req, res) {
       });
     }
 
-    const verifySignupEmail =
-      String(await getOption("verify_signup_email", "true")) === "true";
+    const verifySignupEmail = String(await getOption("verify_signup_email", "true")) === "true";
 
-    // OTP required ONLY if enabled
+    // If admin enabled OTP, we ensure OTP record exists (send if not exists / expired)
     if (verifySignupEmail) {
-      if (!otp || otp.length === 0) {
-        await t.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "OTP is required.",
-          data: null,
-        });
-      }
-
       const now = new Date();
 
-      // Ensure a valid OTP exists (send if not exists/expired)
+      // If there is no valid OTP, generate and send (but still require otp in request as per your flow)
       const validOtp = await UserOtp.findOne({
         where: {
           user_id: tempUser.id,
@@ -430,22 +399,12 @@ async function signupVerifyEmail(req, res) {
 
       if (!validOtp) {
         const newOtp = generateOtp();
-        const otpMinutes = parseInt(
-          await getOption("signup_otp_time_min", 5),
-          10,
-        );
+        const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
         const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
 
         await UserOtp.update(
           { status: true },
-          {
-            where: {
-              user_id: tempUser.id,
-              action: "signup_email",
-              status: false,
-            },
-            transaction: t,
-          },
+          { where: { user_id: tempUser.id, action: "signup_email", status: false }, transaction: t }
         );
 
         const myOtp = await UserOtp.create(
@@ -456,13 +415,13 @@ async function signupVerifyEmail(req, res) {
             action: "signup_email",
             status: false,
           },
-          { transaction: t },
+          { transaction: t }
         );
 
         await sendOtpMail(tempUser, myOtp, "Verify Your Email", "signup_email");
       }
 
-      // Verify OTP
+      // verify OTP
       const otpRecord = await UserOtp.findOne({
         where: { user_id: tempUser.id, action: "signup_email", status: false },
         order: [["createdAt", "DESC"]],
@@ -470,11 +429,7 @@ async function signupVerifyEmail(req, res) {
         lock: t.LOCK.UPDATE,
       });
 
-      if (
-        !otpRecord ||
-        (otpRecord.expiry && now > otpRecord.expiry) ||
-        String(otpRecord.otp) !== otp
-      ) {
+      if (!otpRecord || (otpRecord.expiry && now > otpRecord.expiry) || String(otpRecord.otp) !== otp) {
         await t.rollback();
         return res.status(400).json({
           success: false,
@@ -483,28 +438,18 @@ async function signupVerifyEmail(req, res) {
         });
       }
 
-      // Mark used
+      // mark used
       await UserOtp.update(
         { status: true },
-        {
-          where: {
-            user_id: tempUser.id,
-            action: "signup_email",
-            status: false,
-          },
-          transaction: t,
-        },
+        { where: { user_id: tempUser.id, action: "signup_email", status: false }, transaction: t }
       );
     }
 
-    // Set password into temp user (hashed)
+    // set password into temp user (hashed)
     const hashedPass = await bcrypt.hash(password, BCRYPT_ROUNDS);
-    await TempUser.update(
-      { password: hashedPass },
-      { where: { id: tempUser.id }, transaction: t },
-    );
+    await TempUser.update({ password: hashedPass }, { where: { id: tempUser.id }, transaction: t });
 
-    // Create actual user from TempUser
+    // Create actual user from TempUser (NO username)
     const newUser = await User.create(
       {
         email: tempUser.email,
@@ -515,9 +460,10 @@ async function signupVerifyEmail(req, res) {
         is_verified: true,
         is_active: true,
       },
-      { transaction: t },
+      { transaction: t }
     );
 
+    // cleanup temp
     await TempUser.destroy({ where: { id: tempUser.id }, transaction: t });
 
     await t.commit();
@@ -552,17 +498,9 @@ async function loginVerifyEmail(req, res) {
   const t = await sequelize.transaction();
   try {
     const schema = Joi.object({
-      email: Joi.string()
-        .trim()
-        .lowercase()
-        .email({ tlds: { allow: false } })
-        .required(),
+      email: Joi.string().trim().lowercase().email({ tlds: { allow: false } }).required(),
       password: Joi.string().min(8).max(128).required(),
-      otp: Joi.string()
-        .trim()
-        .pattern(/^[0-9]{6}$/)
-        .optional()
-        .allow(null, ""),
+      otp: Joi.string().trim().pattern(/^[0-9]{6}$/).required(),
     });
 
     const { error, value } = schema.validate(req.body || {}, {
@@ -582,7 +520,7 @@ async function loginVerifyEmail(req, res) {
 
     const email = String(value.email).toLowerCase().trim();
     const password = String(value.password);
-    const otp = value.otp ? String(value.otp).trim() : "";
+    const otp = String(value.otp).trim();
 
     const user = await User.findOne({
       where: { email },
@@ -618,99 +556,67 @@ async function loginVerifyEmail(req, res) {
       });
     }
 
-    const verifyLoginEmail =
-      String(await getOption("verify_login_email", "true")) === "true";
+    const now = new Date();
 
-    // OTP required ONLY if enabled
-    if (verifyLoginEmail) {
-      if (!otp || otp.length === 0) {
-        await t.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "OTP is required.",
-          data: null,
-        });
-      }
+    // ensure OTP exists (send if not)
+    const validOtp = await UserOtp.findOne({
+      where: {
+        user_id: user.id,
+        action: "login_email",
+        status: false,
+        expiry: { [Op.gt]: now },
+      },
+      order: [["createdAt", "DESC"]],
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
 
-      const now = new Date();
+    if (!validOtp) {
+      const newOtp = generateOtp();
+      const otpMinutes = parseInt(await getOption("login_otp_time_min", 5), 10);
+      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
 
-      // Ensure OTP exists (send if not)
-      const validOtp = await UserOtp.findOne({
-        where: {
-          user_id: user.id,
-          action: "login_email",
-          status: false,
-          expiry: { [Op.gt]: now },
-        },
-        order: [["createdAt", "DESC"]],
-        transaction: t,
-        lock: t.LOCK.UPDATE,
-      });
-
-      if (!validOtp) {
-        const newOtp = generateOtp();
-        const otpMinutes = parseInt(
-          await getOption("login_otp_time_min", 5),
-          10,
-        );
-        const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
-
-        await UserOtp.update(
-          { status: true },
-          {
-            where: {
-              user_id: user.id,
-              action: "login_email",
-              status: false,
-            },
-            transaction: t,
-          },
-        );
-
-        const myOtp = await UserOtp.create(
-          {
-            user_id: user.id,
-            otp: newOtp,
-            expiry: otpExpiresAt,
-            action: "login_email",
-            status: false,
-          },
-          { transaction: t },
-        );
-
-        await sendOtpMail(user, myOtp, "Login OTP", "login_email");
-      }
-
-      // Verify OTP
-      const otpRecord = await UserOtp.findOne({
-        where: { user_id: user.id, action: "login_email", status: false },
-        order: [["createdAt", "DESC"]],
-        transaction: t,
-        lock: t.LOCK.UPDATE,
-      });
-
-      if (
-        !otpRecord ||
-        (otpRecord.expiry && now > otpRecord.expiry) ||
-        String(otpRecord.otp) !== otp
-      ) {
-        await t.rollback();
-        return res.status(400).json({
-          success: false,
-          message: "Invalid or expired OTP.",
-          data: null,
-        });
-      }
-
-      // Mark used
       await UserOtp.update(
         { status: true },
-        {
-          where: { user_id: user.id, action: "login_email", status: false },
-          transaction: t,
-        },
+        { where: { user_id: user.id, action: "login_email", status: false }, transaction: t }
       );
+
+      const myOtp = await UserOtp.create(
+        {
+          user_id: user.id,
+          otp: newOtp,
+          expiry: otpExpiresAt,
+          action: "login_email",
+          status: false,
+        },
+        { transaction: t }
+      );
+
+      await sendOtpMail(user, myOtp, "Login OTP", "login_email");
     }
+
+    // verify OTP
+    const otpRecord = await UserOtp.findOne({
+      where: { user_id: user.id, action: "login_email", status: false },
+      order: [["createdAt", "DESC"]],
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (!otpRecord || (otpRecord.expiry && now > otpRecord.expiry) || String(otpRecord.otp) !== otp) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired OTP.",
+        data: null,
+      });
+    }
+
+    // mark used
+    await UserOtp.update(
+      { status: true },
+      { where: { user_id: user.id, action: "login_email", status: false }, transaction: t }
+    );
 
     await t.commit();
 
@@ -738,20 +644,17 @@ async function loginVerifyEmail(req, res) {
 async function resendOtpEmail(req, res) {
   try {
     const schema = Joi.object({
-      type: Joi.string().valid("login", "signup").required(),
+      type: Joi.string().valid("login", "signup").required(), 
       email: Joi.string()
         .trim()
         .lowercase()
         .email({ tlds: { allow: false } })
         .required(),
-      tempUserId: Joi.number()
-        .integer()
-        .positive()
-        .when("type", {
-          is: "signup",
-          then: Joi.required(),
-          otherwise: Joi.optional().allow(null),
-        }),
+      tempUserId: Joi.number().integer().positive().when("type", {
+        is: "signup",
+        then: Joi.required(),
+        otherwise: Joi.optional().allow(null),
+      }),
     });
 
     const { error, value } = schema.validate(req.body || {}, {
@@ -788,7 +691,7 @@ async function resendOtpEmail(req, res) {
 
       await UserOtp.update(
         { status: true },
-        { where: { user_id: user.id, action: "login_email", status: false } },
+        { where: { user_id: user.id, action: "login_email", status: false } }
       );
 
       const myOtp = await UserOtp.create({
@@ -807,7 +710,7 @@ async function resendOtpEmail(req, res) {
         data: { mode: "login", is_exist: true, tempUserId: null },
       });
     }
-
+    
     const tempUserId = Number(value.tempUserId);
 
     const tempUser = await TempUser.findOne({ where: { id: tempUserId } });
@@ -819,11 +722,7 @@ async function resendOtpEmail(req, res) {
       });
     }
 
-    if (
-      String(tempUser.email || "")
-        .toLowerCase()
-        .trim() !== email
-    ) {
+    if (String(tempUser.email || "").toLowerCase().trim() !== email) {
       return res.status(400).json({
         success: false,
         message: "Email does not match signup request.",
@@ -837,9 +736,7 @@ async function resendOtpEmail(req, res) {
 
     await UserOtp.update(
       { status: true },
-      {
-        where: { user_id: tempUser.id, action: "signup_email", status: false },
-      },
+      { where: { user_id: tempUser.id, action: "signup_email", status: false } }
     );
 
     const myOtp = await UserOtp.create({
@@ -877,10 +774,7 @@ async function resendOtpEmail(req, res) {
 async function phoneExist(req, res) {
   try {
     const schema = Joi.object({
-      phone_number: Joi.string()
-        .trim()
-        .pattern(/^\+?[0-9]{7,15}$/)
-        .required(),
+      phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
     });
 
     const { error, value } = schema.validate(req.body || {}, {
@@ -924,10 +818,7 @@ async function phoneExist(req, res) {
 async function signupPhone(req, res) {
   try {
     const schema = Joi.object({
-      phone_number: Joi.string()
-        .trim()
-        .pattern(/^\+?[0-9]{7,15}$/)
-        .required(),
+      phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
       password: Joi.string().min(8).max(128).required(),
     });
 
@@ -949,10 +840,7 @@ async function signupPhone(req, res) {
     const password = String(value.password);
 
     // must not exist
-    const already = await User.findOne({
-      where: { phone },
-      attributes: ["id"],
-    });
+    const already = await User.findOne({ where: { phone }, attributes: ["id"] });
     if (already) {
       return res.status(409).json({
         success: false,
@@ -1001,10 +889,7 @@ async function signupPhone(req, res) {
 async function loginPhone(req, res) {
   try {
     const schema = Joi.object({
-      phone_number: Joi.string()
-        .trim()
-        .pattern(/^\+?[0-9]{7,15}$/)
-        .required(),
+      phone_number: Joi.string().trim().pattern(/^\+?[0-9]{7,15}$/).required(),
       password: Joi.string().min(8).max(128).required(),
     });
 
@@ -1076,6 +961,7 @@ async function loginPhone(req, res) {
     });
   }
 }
+
 
 async function forgotPassword(req, res) {
   try {
@@ -1150,10 +1036,7 @@ async function forgotPassword(req, res) {
 
     const otp = require("../../utils/helpers/authHelper").generateOtp();
 
-    const otpValidMinutes = parseInt(
-      await getOption("forgot_otp_time_min", 10),
-      10,
-    );
+    const otpValidMinutes = parseInt(await getOption("forgot_otp_time_min", 10), 10);
     const otpExpiresAt = new Date(Date.now() + otpValidMinutes * 60 * 1000);
 
     await UserOtp.update(
@@ -1164,7 +1047,7 @@ async function forgotPassword(req, res) {
           action: "forgot_password",
           status: false,
         },
-      },
+      }
     );
 
     const myOtp = await UserOtp.create({
@@ -1207,10 +1090,7 @@ async function forgotPasswordVerify(req, res) {
         .pattern(/[a-z]/)
         .pattern(/[0-9]/)
         .required(),
-      otp: Joi.string()
-        .trim()
-        .pattern(/^[0-9]{6}$/)
-        .required(),
+      otp: Joi.string().trim().pattern(/^[0-9]{6}$/).required(),
     });
 
     const { error, value } = schema.validate(req.body, {
@@ -1281,29 +1161,23 @@ async function forgotPasswordVerify(req, res) {
 
     const hashed = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-    await User.update(
-      { password: hashed },
-      { where: { id: user.id }, transaction: t },
-    );
+    await User.update({ password: hashed }, { where: { id: user.id }, transaction: t });
 
-    await UserOtp.update(
-      { status: true },
-      { where: { id: otpRecord.id }, transaction: t },
-    );
+    await UserOtp.update({ status: true }, { where: { id: otpRecord.id }, transaction: t });
 
     await UserOtp.update(
       { status: true },
       {
         where: { user_id: user.id, action: "forgot_password", status: false },
         transaction: t,
-      },
+      }
     );
 
     await t.commit();
 
     await UserSession.update(
       { status: 2 },
-      { where: { user_id: user.id, status: 1 } },
+      { where: { user_id: user.id, status: 1 } }
     );
 
     return res.status(200).json({
@@ -1360,7 +1234,7 @@ async function logoutUser(req, res) {
           session_token: sessionToken,
           status: 1,
         },
-      },
+      }
     );
 
     if (!updated) {
