@@ -21,14 +21,9 @@ const NotificationGlobal = sequelize.define(
       defaultValue: null,
     },
 
-    type: {
-      type: DataTypes.STRING(50),
-      allowNull: false,
-    },
-    
     category_id: {
       type: DataTypes.BIGINT.UNSIGNED,
-      allowNull: true,
+      allowNull: true, // set false if mandatory
     },
 
     title: {
@@ -61,7 +56,7 @@ const NotificationGlobal = sequelize.define(
         "sending",
         "sent",
         "failed",
-        "canceled"
+        "canceled",
       ),
       allowNull: false,
       defaultValue: "draft",
@@ -125,26 +120,16 @@ const NotificationGlobal = sequelize.define(
     timestamps: true,
     underscored: true,
     indexes: [
-      {
-        name: "idx_sender_created_at",
-        fields: ["sender_id", "created_at"],
-      },
-      
+      { name: "idx_sender_created_at", fields: ["sender_id", "created_at"] },
       {
         name: "idx_receiver_created_at",
         fields: ["receiver_id", "created_at"],
       },
-
-      {
-        name: "idx_status_scheduled_at",
-        fields: ["status", "scheduled_at"],
-      },
-      {
-        name: "idx_sent_at",
-        fields: ["sent_at"],
-      },
+      { name: "idx_category_id", fields: ["category_id"] },
+      { name: "idx_status_scheduled_at", fields: ["status", "scheduled_at"] },
+      { name: "idx_sent_at", fields: ["sent_at"] },
     ],
-  }
+  },
 );
 
 module.exports = NotificationGlobal;

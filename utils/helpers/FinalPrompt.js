@@ -246,17 +246,13 @@ if (!bot) throw new Error("Bot not found");
   return finalParagraph;
 }
 
-// ======================================================
-// ✅ ADD BOT REPLY FUNCTION HERE (Gemini call)
-// ======================================================
-
 async function callGeminiText(prompt) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is missing in env");
 
   const genAI = new GoogleGenerativeAI(apiKey);
 
-  // ✅ safest default for most keys
+
   const modelName = process.env.GEMINI_MODEL || "gemini-pro";
 
   const model = genAI.getGenerativeModel({
@@ -338,5 +334,5 @@ module.exports = {
   replaceData,
   fetchLastMessages,
   finalPrompt,
-  generateBotReplyForChat, // ✅ exported
+  generateBotReplyForChat,
 };

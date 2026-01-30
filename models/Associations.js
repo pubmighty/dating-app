@@ -162,9 +162,9 @@ function setupAssociations() {
   });
 
   NotificationCategory.hasMany(NotificationGlobal, {
-  foreignKey: "category_id",
-  as: "notifications",
-});
+    foreignKey: "category_id",
+    as: "notifications",
+  });
 
   NotificationGlobal.belongsTo(NotificationCategory, {
     foreignKey: "category_id",

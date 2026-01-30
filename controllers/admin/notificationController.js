@@ -3,7 +3,7 @@ const { Op } = require("sequelize");
 const Admin = require("../../models/Admin/Admin");
 const User = require("../../models/User");
 const NotificationGlobal = require("../../models/Admin/GlobalNotification");
-const NotificationCategory=require("../../models/Admin/NotificationCategory")
+const NotificationCategory = require("../../models/Admin/NotificationCategory");
 const {
   isAdminSessionValid,
   verifyAdminRole,
@@ -52,7 +52,15 @@ async function adminSendToUser(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .valid(
+          "draft",
+          "scheduled",
+          "queued",
+          "sending",
+          "sent",
+          "failed",
+          "canceled",
+        )
         .allow(null),
       data: Joi.object().unknown(true).default({}),
     });
@@ -116,7 +124,7 @@ async function adminSendToUser(req, res) {
         sender_admin_id: String(adminId),
         notification_category_id: String(cat.id),
       },
-      opts
+      opts,
     );
 
     try {
@@ -127,6 +135,7 @@ async function adminSendToUser(req, res) {
         sender_id: adminId,
         receiver_id: Number(value.receiverId),
         type: value.type,
+        category_id: value.category_id,
         title: value.title,
         content: value.content,
         landing_url: normalizedOpts.landing_url || null,
@@ -134,7 +143,8 @@ async function adminSendToUser(req, res) {
         priority: normalizedOpts.priority || "normal",
         status: normalizedOpts.status || "draft",
         scheduled_at: normalizedOpts.scheduled_at || null,
-        sent_at: (normalizedOpts.status || "draft") === "sent" ? new Date() : null,
+        sent_at:
+          (normalizedOpts.status || "draft") === "sent" ? new Date() : null,
         total_targeted: push.attempted || 0,
         total_sent: push.attempted || 0,
         total_delivered: push.success || 0,
@@ -194,7 +204,15 @@ async function adminSendGlobal(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .valid(
+          "draft",
+          "scheduled",
+          "queued",
+          "sending",
+          "sent",
+          "failed",
+          "canceled",
+        )
         .allow(null),
       data: Joi.object().unknown(true).default({}),
     });
@@ -243,7 +261,7 @@ async function adminSendGlobal(req, res) {
         sender_admin_id: String(adminId),
         notification_category_id: String(cat.id),
       },
-      opts
+      opts,
     );
 
     return res.json({
@@ -368,7 +386,15 @@ async function adminSendFiltered(req, res) {
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
-        .valid("draft", "scheduled", "queued", "sending", "sent", "failed", "canceled")
+        .valid(
+          "draft",
+          "scheduled",
+          "queued",
+          "sending",
+          "sent",
+          "failed",
+          "canceled",
+        )
         .allow(null),
       data: Joi.object().unknown(true).default({}),
       max_users: Joi.number().integer().min(1).max(500000).default(100000),
@@ -439,7 +465,8 @@ async function adminSendFiltered(req, res) {
     }
 
     filters.days = Number.parseInt(filters.days, 10) || 1;
-    filters.require_balance_gt = Number.parseInt(filters.require_balance_gt, 10) || 0;
+    filters.require_balance_gt =
+      Number.parseInt(filters.require_balance_gt, 10) || 0;
 
     if (!filters.type) filters.type = null;
     if (!filters.gender) filters.gender = null;
@@ -467,7 +494,7 @@ async function adminSendFiltered(req, res) {
       },
       filters,
       payload.max_users,
-      opts
+      opts,
     );
 
     return res.json({
@@ -530,8 +557,8 @@ async function getSentNotifications(req, res) {
         .allow("", null),
       title: Joi.string().trim().max(200).allow("", null),
       content: Joi.string().trim().max(500).allow("", null),
-      created_from: Joi.string().trim().allow("", null), // YYYY-MM-DD
-      created_to: Joi.string().trim().allow("", null), // YYYY-MM-DD
+      created_from: Joi.string().trim().allow("", null),
+      created_to: Joi.string().trim().allow("", null),
       sortBy: Joi.string()
         .valid(
           "id",
@@ -544,7 +571,6 @@ async function getSentNotifications(req, res) {
           "updated_at",
         )
         .default("created_at"),
-
       order: Joi.string().valid("ASC", "DESC").default("DESC"),
     });
 
@@ -571,7 +597,6 @@ async function getSentNotifications(req, res) {
     if (value.id) where.id = Number(value.id);
     if (value.sender_id) where.sender_id = Number(value.sender_id);
     if (value.receiver_id) where.receiver_id = Number(value.receiver_id);
-    if (value.type) where.type = value.type;
     if (value.status) where.status = value.status;
     if (value.title) where.title = { [Op.like]: `%${value.title}%` };
     if (value.content) where.content = { [Op.like]: `%${value.content}%` };
@@ -598,18 +623,30 @@ async function getSentNotifications(req, res) {
     const sortCol = sortMap[value.sortBy] || "created_at";
     const sortOrder = value.order || "DESC";
 
+    const categoryInclude = {
+      model: NotificationCategory,
+      as: "category",
+      attributes: ["id", "type", "icon", "status"],
+      required: false,
+    };
+
+    if (value.type) {
+      categoryInclude.where = { type: value.type };
+      categoryInclude.required = true;
+    }
+
     const { rows, count } = await NotificationGlobal.findAndCountAll({
       where,
       attributes: [
         "id",
         "sender_id",
         "receiver_id",
-        "type",
+        "category_id",
         "title",
         "content",
         "landing_url",
         "image_url",
-        "meta_filters", 
+        "meta_filters",
         "status",
         "scheduled_at",
         "sent_at",
@@ -635,6 +672,7 @@ async function getSentNotifications(req, res) {
           attributes: ["id", "username", "email", "avatar", "role"],
           required: false,
         },
+        categoryInclude,
       ],
       order: [[sortCol, sortOrder]],
       limit,
@@ -696,7 +734,7 @@ async function addNotificationCategory(req, res) {
         .required()
         .pattern(/^[A-Z0-9_]+$/),
 
-      icon: Joi.string().trim().max(255).allow("", null), 
+      icon: Joi.string().trim().max(255).allow("", null),
 
       status: Joi.string().valid("active", "inactive").default("active"),
     });
@@ -886,11 +924,7 @@ async function updateNotificationCategory(req, res) {
 
     const schema = Joi.object({
       id: Joi.number().integer().positive().required(),
-      type: Joi.string()
-        .trim()
-        .min(1)
-        .max(50)
-        .allow(null, ""),
+      type: Joi.string().trim().min(1).max(50).allow(null, ""),
 
       icon: Joi.string().trim().max(255).allow("", null),
 
@@ -1078,5 +1112,5 @@ module.exports = {
   addNotificationCategory,
   getNotificationCategories,
   updateNotificationCategory,
-  deleteNotificationCategory
+  deleteNotificationCategory,
 };
