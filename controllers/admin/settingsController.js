@@ -7,7 +7,7 @@ const {
   buildGroupedResponse,
   prepareUpdatesFromBody,
   upsertOptions,
-} = require("../../script/optionInsert"); 
+} = require("../../utils/helpers/optionHelper"); 
 
 async function getSettings(req, res) {
   try {

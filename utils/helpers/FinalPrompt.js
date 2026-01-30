@@ -134,7 +134,7 @@ function replaceData(template, user, bot, masterPrompt) {
 
     if (!key) return match;
 
-    if (key === "history") return "{history}";
+    if (key === "history") return "this is last message history:";
     if (key === "now") return new Date().toISOString();
 
     let val;
@@ -245,7 +245,7 @@ if (!bot) throw new Error("Bot not found");
   const historyText = await fetchLastMessages(userId, botId, historyLimit);
 
   // 4) Build SINGLE FINAL PARAGRAPH
-  const finalParagraph = `${instructionText} this is last message history: ${historyText || "No previous conversation."}"`;
+  const finalParagraph = `${instructionText} ${historyText || "No previous conversation."}"`;
   console.log("\n===== FINAL AI PROMPT =====\n");
   console.log(finalParagraph);
   console.log("\n===========================\n");
