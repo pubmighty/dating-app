@@ -1539,6 +1539,48 @@ router.post("/verify/twofa/email", securityController.verifyTwofaEmail);
 router.post("/disable/twofa/email", securityController.disableTwofaEmail);
 
 /**
+ * POST /disable/twofa
+ * ------------------------------------------------------------
+ * Disables **Two-Factor Authentication (2FA)** for the
+ * authenticated admin using a unified two-step flow.
+ *
+ * Purpose:
+ * - Allows an admin to disable 2FA regardless of the
+ *   configured method (Email or Authenticator App).
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin account must be active.
+ * - 2FA must currently be enabled on the account.
+ *
+ * Payload:
+ * - otp: string (optional)
+ *   6-digit OTP from email or authenticator app.
+ *
+ * Behavior:
+ * - Step 1 (OTP not provided):
+ *   - If method = email:
+ *       Sends OTP to admin email.
+ *   - If method = auth_app:
+ *       Prompts admin to enter authenticator OTP.
+ *
+ * - Step 2 (OTP provided):
+ *   - Validates OTP based on configured 2FA method.
+ *   - Disables 2FA on the admin account.
+ *   - Clears 2FA method and secret.
+ *
+ * Failure Cases:
+ * - Invalid or expired OTP.
+ * - 2FA not enabled on account.
+ * - Invalid 2FA method configuration.
+ *
+ * Side Effects:
+ * - Marks OTP as used (email method).
+ * - Clears all 2FA-related fields on admin record.
+ */
+router.post("/disable/twofa", securityController.disableTwoFA);
+
+/**
  * POST /change/email/request
  * ------------------------------------------------------------
  * Initiates admin email change process using dual OTP verification.
