@@ -1,4 +1,4 @@
-const Option = require("../models/Option");
+const Option = require("../../models/Option");
 
 const OPTION_DEFS = {
   // ---------------- Admin Pagination ----------------

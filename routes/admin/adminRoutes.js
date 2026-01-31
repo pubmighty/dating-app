@@ -9,6 +9,7 @@ const coinPackageController = require("../../controllers/admin/coinPackageContro
 const chatController = require("../../controllers/admin/chatController");
 const adminNotificationController = require("../../controllers/admin/notificationController");
 const adminGetMasterPrompts = require("../../controllers/admin/masterPromptController");
+const securityController =require("../../controllers/admin/securityController")
 /**
  *  GET /chats
  * ------------------------------------------------------------
@@ -1509,6 +1510,198 @@ router.post(
   "/update-profile",
   fileUploader.single("avatar"),
   adminController.updateAdminProfile,
+);
+
+/**
+ * POST /enable/twofa/email
+ * ------------------------------------------------------------
+ * Initiates Email-based Two-Factor Authentication (2FA) setup
+ * for the authenticated admin.
+ *
+ * Purpose:
+ * - Starts the email 2FA enablement process.
+ * - Sends a One-Time Password (OTP) to the admin's registered email.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin account must be active (status = 1).
+ * - Feature must be enabled via system option.
+ *
+ * Behavior:
+ * - If an active OTP already exists, does not send a new one.
+ * - Generates a new OTP and stores it with an expiry time.
+ * - Sends OTP to admin email for verification.
+ *
+ * Next Step:
+ * - Call `/verify/twofa/email` with the received OTP to complete setup.
+ */
+router.post(
+  "/enable/twofa/email",
+  securityController.enableTwofaEmail
+);
+
+/**
+ * POST /verify/twofa/email
+ * ------------------------------------------------------------
+ * Verifies the OTP sent to admin email and enables
+ * Email-based Two-Factor Authentication (2FA).
+ *
+ * Purpose:
+ * - Completes the email 2FA setup process.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin account must be active.
+ *
+ * Payload:
+ * - otp: string (required)
+ *   6-digit numeric OTP received via email.
+ *
+ * Behavior:
+ * - Validates OTP existence, correctness, and expiry.
+ * - Marks OTP as used after successful verification.
+ * - Enables email-based 2FA for the admin account.
+ *
+ * Failure Cases:
+ * - OTP missing, invalid, or expired.
+ * - Feature disabled via system settings.
+ */
+router.post(
+  "/verify/twofa/email",
+  securityController.verifyTwofaEmail
+);
+
+/**
+ * POST /disable/twofa/email
+ * ------------------------------------------------------------
+ * Disables Email-based Two-Factor Authentication (2FA)
+ * for the authenticated admin using a two-step process.
+ *
+ * Purpose:
+ * - Allows admin to securely disable email-based 2FA.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin account must be active.
+ * - Email-based 2FA must be currently enabled.
+ *
+ * Payload:
+ * - otp: string (optional)
+ *   6-digit OTP received via email.
+ *
+ * Behavior:
+ * - Step 1 (no OTP provided):
+ *   - Sends OTP to admin email.
+ *   - Returns instruction to verify OTP.
+ * - Step 2 (OTP provided):
+ *   - Validates OTP and expiry.
+ *   - Disables email-based 2FA and clears related data.
+ *
+ * Failure Cases:
+ * - OTP invalid or expired.
+ * - 2FA not enabled on account.
+ */
+router.post(
+  "/disable/twofa/email",
+  securityController.disableTwofaEmail
+);
+
+/**
+ * POST /change/email/request
+ * ------------------------------------------------------------
+ * Initiates admin email change process using dual OTP verification.
+ *
+ * Purpose:
+ * - Securely request a change to the admin's email address.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin account must be active.
+ * - Feature must be enabled via system settings.
+ *
+ * Payload:
+ * - old_email: string (required)
+ *   Current email address of the admin.
+ * - new_email: string (required)
+ *   New email address to be set.
+ *
+ * Behavior:
+ * - Sends OTP to the old email for ownership verification.
+ * - Sends OTP to the new email for confirmation.
+ * - Prevents duplicate OTP generation if valid OTPs already exist.
+ *
+ * Next Step:
+ * - Call `/change/email/verify` with both OTPs.
+ */
+router.post(
+  "/change/email/request",
+  securityController.changeEmailRequest
+);
+
+/**
+ * POST /change/email/verify
+ * ------------------------------------------------------------
+ * Verifies both OTPs and completes admin email change.
+ *
+ * Purpose:
+ * - Finalizes admin email change after dual verification.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin account must be active.
+ *
+ * Payload:
+ * - old_email_otp: string (required)
+ *   OTP received on the current email.
+ * - new_email_otp: string (required)
+ *   OTP received on the new email.
+ *
+ * Behavior:
+ * - Validates both OTPs for correctness and expiry.
+ * - Updates admin email to the new verified address.
+ * - Marks OTPs as used.
+ *
+ * Failure Cases:
+ * - Either OTP invalid or expired.
+ * - Email already taken by another admin.
+ */
+router.post(
+  "/change/email/verify",
+  securityController.changeEmailVerify
+);
+
+/**
+ * POST /update/password
+ * ------------------------------------------------------------
+ * Updates the authenticated admin's account password.
+ *
+ * Purpose:
+ * - Allows admin to change password securely.
+ *
+ * Security & Authorization:
+ * - Requires a valid authenticated admin session.
+ * - Admin account must be active.
+ *
+ * Payload:
+ * - current_password: string (required)
+ *   Existing password.
+ * - new_password: string (required)
+ *   New password (must contain letters and numbers).
+ * - confirm_password: string (required)
+ *   Must match new_password.
+ *
+ * Behavior:
+ * - Verifies current password correctness.
+ * - Prevents reuse of the existing password.
+ * - Hashes and updates the new password.
+ *
+ * Side Effects:
+ * - Does not invalidate existing sessions automatically
+ *   (unless handled elsewhere).
+ */
+router.post(
+  "/update/password",
+  securityController.updatePassword
 );
 
 /**
