@@ -166,10 +166,11 @@ function setupAssociations() {
     as: "notifications",
   });
 
-  NotificationGlobal.belongsTo(NotificationCategory, {
-    foreignKey: "category_id",
-    as: "category",
-  });
+ NotificationGlobal.belongsTo(NotificationCategory, {
+  as: "category",
+  foreignKey: "category_id",
+  targetKey: "id",
+});
 
   UserBlock.belongsTo(User, {
     foreignKey: "user_id",
