@@ -7,13 +7,9 @@ const { OAuth2Client } = require("google-auth-library");
 const { getRealIp, getOption } = require("../../utils/helper");
 const {
   handleUserSessionCreation,
-  generateUniqueUsername,
   generateRandomPassword,
-  isValidEmail,
-  isValidPhone,
   generateOtp,
   isUserSessionValid,
-  clearUserSessionByToken
 } = require("../../utils/helpers/authHelper");
 const { downloadAndUploadGoogleAvatar } = require("../../utils/helpers/fileUpload");
 const { publicUserAttributes, BCRYPT_ROUNDS } = require("../../utils/staticValues");
