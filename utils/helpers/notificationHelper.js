@@ -43,6 +43,7 @@ function pickNotifOpts(value) {
   return {
     landing_url: value?.landing_url || null,
     image_url: value?.image_url || null,
+    icon_url: value?.icon_url || null,
     priority: value?.priority || "normal",
     scheduled_at: value?.scheduled_at || null,
     status: value?.status || null,
@@ -152,6 +153,8 @@ function normalizeNotifOpts(opts = {}, image = null) {
   out.image_url =
     typeof out.image_url === "string" ? out.image_url.trim() || null : null;
 
+  out.icon_url =
+    typeof out.icon_url === "string" ? out.icon_url.trim() || null : null;
   out.priority = out.priority === "high" ? "high" : "normal";
 
   const now = Date.now();
@@ -368,6 +371,7 @@ async function createAndSend(
     content,
     landing_url: nopts.landing_url,
     image_url: nopts.image_url,
+    icon_url: nopts.icon_url,
     priority: nopts.priority,
     status: nopts.status,
     scheduled_at: nopts.scheduled_at,
@@ -468,6 +472,7 @@ async function createAndSendAdminToUser(
     content,
     landing_url: nopts.landing_url,
     image_url: nopts.image_url,
+    icon_url: nopts.icon_url,
     priority: nopts.priority,
     status: nopts.status,
     scheduled_at: nopts.scheduled_at,
@@ -571,13 +576,12 @@ async function createAndSendGlobal(
   title,
   content,
   data = {},
-  opts = {}
+  opts = {},
 ) {
   if (!type) throw new Error("type is required");
   if (!title) throw new Error("title is required");
   if (!content) throw new Error("content is required");
 
- 
   const nopts = normalizeNotifOpts(opts, null);
 
   const campaign = await NotificationGlobal.create({
@@ -587,6 +591,8 @@ async function createAndSendGlobal(
     content,
     landing_url: nopts.landing_url,
     image_url: nopts.image_url,
+
+    icon_url: nopts.icon_url,
     priority: nopts.priority,
     status: nopts.status || (nopts.scheduled_at ? "scheduled" : "queued"),
     scheduled_at: nopts.scheduled_at,
@@ -624,7 +630,7 @@ async function createAndSendGlobal(
         sent_at: null,
         status: "no_device", //  change to "failed" if enum doesn't allow
       },
-      { where: { id: campaign.id } }
+      { where: { id: campaign.id } },
     );
 
     const updatedCampaign = await NotificationGlobal.findByPk(campaign.id);
@@ -641,7 +647,7 @@ async function createAndSendGlobal(
       // For global: total_targeted = TOKENS targeted
       total_targeted: tokens.length,
     },
-    { where: { id: campaign.id } }
+    { where: { id: campaign.id } },
   );
 
   const push = await sendMulticastToTokens(
@@ -656,17 +662,17 @@ async function createAndSendGlobal(
       landing_url: nopts.landing_url ? String(nopts.landing_url) : "",
       ...toStringData(data),
     },
-    { priority: nopts.priority }
+    { priority: nopts.priority },
   );
 
   const finalStatus =
     push.success > 0 && push.failed > 0
       ? "partial"
       : push.success > 0
-      ? "sent"
-      : push.attempted > 0 && push.failed > 0
-      ? "failed"
-      : "no_device";
+        ? "sent"
+        : push.attempted > 0 && push.failed > 0
+          ? "failed"
+          : "no_device";
 
   await NotificationGlobal.update(
     {
@@ -676,7 +682,7 @@ async function createAndSendGlobal(
       sent_at: (push.attempted || 0) > 0 ? new Date() : null,
       status: push.error ? "failed" : finalStatus,
     },
-    { where: { id: campaign.id } }
+    { where: { id: campaign.id } },
   );
 
   const updatedCampaign = await NotificationGlobal.findByPk(campaign.id);
@@ -929,24 +935,28 @@ async function createAndSendFiltered(
   data = {},
   filters = {},
   max_users = 100000,
-  opts = {}
+  opts = {},
 ) {
   if (!type) throw new Error("type is required");
   if (!title) throw new Error("title is required");
   if (!content) throw new Error("content is required");
 
   const isAdmin =
-    typeof opts.is_admin === "boolean" ? opts.is_admin : await _isAdminSender(senderId);
+    typeof opts.is_admin === "boolean"
+      ? opts.is_admin
+      : await _isAdminSender(senderId);
 
   const maxUsers = clampInt(max_users, 1, 500000) || 100000;
 
   const safeFilters = filters || {};
-  const { where: baseWhere, filters: normalizedFilters } = buildUserWhere(safeFilters);
+  const { where: baseWhere, filters: normalizedFilters } =
+    buildUserWhere(safeFilters);
 
   const days = Number.parseInt(safeFilters.days, 10) || 0;
   const requireRecentPurchase = safeFilters.require_recent_purchase === true;
 
-  const balanceRaw = safeFilters.require_balance_gte ?? safeFilters.require_balance_gt ?? 0;
+  const balanceRaw =
+    safeFilters.require_balance_gte ?? safeFilters.require_balance_gt ?? 0;
   const requireBalanceGte = Number.parseInt(balanceRaw, 10) || 0;
 
   const nopts = normalizeNotifOpts(opts, image);
@@ -1025,6 +1035,7 @@ async function createAndSendFiltered(
     content,
     landing_url: nopts.landing_url,
     image_url: nopts.image_url,
+    icon_url: nopts.icon_url,
     priority: nopts.priority,
     status: nopts.status || (nopts.scheduled_at ? "scheduled" : "queued"),
     scheduled_at: nopts.scheduled_at,
@@ -1035,7 +1046,7 @@ async function createAndSendFiltered(
       days,
       require_recent_purchase: requireRecentPurchase,
       require_balance_gte: requireBalanceGte,
-      require_balance_gt: requireBalanceGte, 
+      require_balance_gt: requireBalanceGte,
     }),
     total_targeted: userIds.length,
     total_sent: 0,
@@ -1047,7 +1058,7 @@ async function createAndSendFiltered(
   if (!userIds.length) {
     await NotificationGlobal.update(
       { status: "failed", sent_at: new Date() },
-      { where: { id: campaign.id } }
+      { where: { id: campaign.id } },
     );
 
     return {
@@ -1104,9 +1115,9 @@ async function createAndSendFiltered(
         total_delivered: 0,
         total_failed: 0,
         sent_at: null,
-        status: "no_device", 
+        status: "no_device",
       },
-      { where: { id: campaign.id } }
+      { where: { id: campaign.id } },
     );
 
     const updatedCampaign = await NotificationGlobal.findByPk(campaign.id);
@@ -1133,7 +1144,7 @@ async function createAndSendFiltered(
 
   await NotificationGlobal.update(
     { status: "sending" },
-    { where: { id: campaign.id } }
+    { where: { id: campaign.id } },
   );
 
   const push = await sendMulticastToTokens(
@@ -1148,17 +1159,17 @@ async function createAndSendFiltered(
       landing_url: nopts.landing_url ? String(nopts.landing_url) : "",
       ...toStringData(data),
     },
-    { priority: nopts.priority }
+    { priority: nopts.priority },
   );
 
   const finalStatus =
     push.success > 0 && push.failed > 0
       ? "partial"
       : push.success > 0
-      ? "sent"
-      : push.attempted > 0 && push.failed > 0
-      ? "failed"
-      : "no_device";
+        ? "sent"
+        : push.attempted > 0 && push.failed > 0
+          ? "failed"
+          : "no_device";
 
   await NotificationGlobal.update(
     {
@@ -1168,7 +1179,7 @@ async function createAndSendFiltered(
       sent_at: (push.attempted || 0) > 0 ? new Date() : null,
       status: push.error ? "failed" : finalStatus,
     },
-    { where: { id: campaign.id } }
+    { where: { id: campaign.id } },
   );
 
   const updatedCampaign = await NotificationGlobal.findByPk(campaign.id);

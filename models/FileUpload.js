@@ -45,6 +45,12 @@ const FileUpload = sequelize.define(
       allowNull: false,
     },
 
+    importance: {
+      type: DataTypes.ENUM("important", "normal"),
+      defaultValue: "normal",
+      allowNull: false,
+    },
+
     user_id: {
       type: DataTypes.BIGINT.UNSIGNED,
       allowNull: true,
@@ -78,7 +84,7 @@ const FileUpload = sequelize.define(
         fields: ["user_id"],
       },
     ],
-  }
+  },
 );
 
 module.exports = FileUpload;

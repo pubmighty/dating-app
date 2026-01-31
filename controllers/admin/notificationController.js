@@ -50,6 +50,7 @@ async function adminSendToUser(req, res) {
       image: Joi.string().trim().uri().allow("", null),
       landing_url: Joi.string().trim().uri().allow("", null),
       image_url: Joi.string().trim().uri().allow("", null),
+      icon_url: Joi.string().trim().uri().allow("", null),
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
@@ -141,6 +142,7 @@ async function adminSendToUser(req, res) {
         content: value.content,
         landing_url: normalizedOpts.landing_url || null,
         image_url: normalizedOpts.image_url || null,
+        icon_url: normalizedOpts.icon_url || null,
         priority: normalizedOpts.priority || "normal",
         status: normalizedOpts.status || "draft",
         scheduled_at: normalizedOpts.scheduled_at || null,
@@ -202,10 +204,12 @@ async function adminSendGlobal(req, res) {
       image: Joi.string().trim().uri().allow("", null),
       landing_url: Joi.string().trim().uri().allow("", null),
       image_url: Joi.string().trim().uri().allow("", null),
+      icon_url: Joi.string().trim().uri().allow("", null),
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
         .valid(
+          "draft",
           "draft",
           "scheduled",
           "queued",
@@ -284,9 +288,11 @@ async function adminPreviewFiltered(req, res) {
   try {
     const session = await isAdminSessionValid(req, res);
     if (!session?.success || !session?.data) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Admin session invalid", data: null });
+      return res.status(401).json({
+        success: false,
+        message: "Admin session invalid ",
+        data: null,
+      });
     }
 
     const adminId = Number(session.data);
@@ -384,6 +390,7 @@ async function adminSendFiltered(req, res) {
       image: Joi.string().trim().uri().allow("", null),
       landing_url: Joi.string().trim().uri().allow("", null),
       image_url: Joi.string().trim().uri().allow("", null),
+      icon_url: Joi.string().trim().uri().allow("", null),
       priority: Joi.string().valid("normal", "high").default("normal"),
       scheduled_at: Joi.date().iso().allow(null),
       status: Joi.string()
@@ -643,10 +650,12 @@ async function getSentNotifications(req, res) {
         "sender_id",
         "receiver_id",
         "category_id",
+        "type",
         "title",
         "content",
         "landing_url",
         "image_url",
+        "icon_url",
         "meta_filters",
         "status",
         "scheduled_at",
@@ -871,20 +880,12 @@ async function getNotificationCategories(req, res) {
     });
 
     const totalPages = Math.ceil(count / limit);
-    console.warn(rows);
 
     return res.json({
       success: true,
       message: "Categories fetched",
       data: {
-        categories: rows.map((r) => ({
-          id: Number(r.id),
-          type: r.type,
-          icon: r.icon,
-          status: r.status,
-          created_at: r.created_at,
-          updated_at: r.updated_at,
-        })),
+        categories: rows,
         pagination: {
           totalItems: count,
           totalPages,

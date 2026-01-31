@@ -19,7 +19,7 @@ async function handleUserSessionCreation(req, user, transaction = null) {
 
   const maxSessionDays = parseInt(
     await getOption("max_user_session_duration_days", 7),
-    10
+    10,
   );
   const maxSessionSeconds = maxSessionDays * 24 * 3600;
 
@@ -37,7 +37,7 @@ async function handleUserSessionCreation(req, user, transaction = null) {
         expires_at: { [Op.lt]: now },
       },
       transaction,
-    }
+    },
   );
 
   // count active sessions
@@ -272,7 +272,7 @@ async function handleAdminSessionCreation(user, req, transaction = null) {
   // options (your getOption currently always returns default, but that's fine)
   const maxSessionDays = parseInt(
     await getOption("max_admin_session_duration_days", 7),
-    10
+    10,
   );
   const maxSessionSeconds = maxSessionDays * 24 * 3600;
 
@@ -290,7 +290,7 @@ async function handleAdminSessionCreation(user, req, transaction = null) {
         expires_at: { [Op.lt]: now },
       },
       transaction,
-    }
+    },
   );
 
   // 3. count current sessions for this admin
@@ -301,7 +301,7 @@ async function handleAdminSessionCreation(user, req, transaction = null) {
 
   const maxUserSessions = parseInt(
     await getOption("max_admin_sessions", 4),
-    10
+    10,
   );
 
   // common payload for create/update
@@ -441,7 +441,10 @@ async function clearUserSessionByToken(req) {
     });
 
     if (!deleted) {
-      return { success: false, message: "Session not found or already removed" };
+      return {
+        success: false,
+        message: "Session not found or already removed",
+      };
     }
 
     return { success: true, message: "Session destroyed" };
@@ -464,5 +467,5 @@ module.exports = {
   detectSuspiciousAdminLogin,
   verifyTwoFAToken,
   verifyAdminRole,
-  clearUserSessionByToken
+  clearUserSessionByToken,
 };

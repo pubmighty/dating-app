@@ -44,6 +44,10 @@ const Notification = sequelize.define(
       type: DataTypes.STRING(500),
       allowNull: true,
     },
+    icon_url: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+    },
 
     is_read: {
       type: DataTypes.BOOLEAN,
@@ -59,7 +63,7 @@ const Notification = sequelize.define(
         "sending",
         "sent",
         "failed",
-        "canceled"
+        "canceled",
       ),
       allowNull: false,
       defaultValue: "draft",
@@ -98,7 +102,7 @@ const Notification = sequelize.define(
         fields: ["sent_at"],
       },
     ],
-  }
+  },
 );
 
 module.exports = Notification;

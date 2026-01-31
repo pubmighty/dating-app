@@ -47,7 +47,11 @@ const NotificationGlobal = sequelize.define(
       allowNull: true,
       comment: "Notification image",
     },
-
+    icon_url: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+      comment: "Notification image",
+    },
     status: {
       type: DataTypes.ENUM(
         "draft",

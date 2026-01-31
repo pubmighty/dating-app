@@ -125,6 +125,62 @@ router.post("/auth/phone/signup", authController.signupPhone);
 router.post("/auth/phone/login", authController.loginPhone);
 
 /**
+ * POST /user/email/update
+ * ------------------------------------------------------------
+ * Initiates the email update process for a logged-in user.
+ *
+ * Accepts:
+ * - { email }
+ *
+ * Behavior:
+ * - Validates user session.
+ * - Checks if the new email is already in use.
+ * - If verify_email = false:
+ *     - Updates email directly in pb_users.
+ *     - Returns updated user profile.
+ * - If verify_email = true:
+ *     - Generates and sends OTP to the new email.
+ *     - Stores OTP in pb_user_otps with action: "update_email:<email>".
+ *     - Prevents OTP resend while a valid OTP already exists.
+ *
+ * Security:
+ * - Requires valid user session (Bearer token).
+ * - Prevents duplicate email usage.
+ * - Binds OTP to the requested email using action field.
+ *
+ * Used For:
+ * - Secure email update flow from user profile settings.
+ */
+router.post("/auth/email/update", userController.updateUserEmail);
+
+/**
+ * POST /user/email/update/verify
+ * ------------------------------------------------------------
+ * Verifies OTP and finalizes the email update.
+ *
+ * Accepts:
+ * - { email, otp }
+ *
+ * Behavior:
+ * - Validates user session.
+ * - Checks verify_email option is enabled.
+ * - Matches OTP + email using pb_user_otps.action binding.
+ * - Validates OTP correctness and expiry.
+ * - Updates user's email in pb_users.
+ * - Marks OTP as used and expires any pending update_email OTPs.
+ *
+ * Security:
+ * - Requires valid user session (Bearer token).
+ * - Ensures OTP is bound to the same email.
+ * - Prevents OTP reuse.
+ *
+ * Used For:
+ * - Completing secure email update verification flow.
+ */
+router.post("/auth/email/update/verify", userController.verifyUpdateUserEmail);
+
+
+/**
  *  /logout
  *    - Clears user credentials.
  *    - Issues session tokens on success.

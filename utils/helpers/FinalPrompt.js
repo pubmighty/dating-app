@@ -109,10 +109,6 @@ async function selectMasterPromptRow(
   return MasterPrompt.findOne({ where, order });
 }
 
-// ======================================================
-// =================== MAIN FUNCTIONS ===================
-// ======================================================
-
 /**
  * replaceData(template, user, bot, masterPrompt)
  * Replaces {bot.full_name}, {user.location}, {master.user_time}, etc.
@@ -127,20 +123,38 @@ function replaceData(template, user, bot, masterPrompt) {
     master: masterPrompt?.toJSON ? masterPrompt.toJSON() : masterPrompt || {},
   };
 
-  const re = /{{\s*([^{}]+?)\s*}}|{\s*([^{}]+?)\s*}/g;
+  // ONLY single-curly placeholder support: {key.path}
+  const re = /{\s*([^{}]+?)\s*}/g;
 
-  return String(template).replace(re, (match, g1, g2) => {
-    const key = (g1 || g2 || "").trim();
+  return String(template).replace(re, (match, rawKey) => {
+    const key = String(rawKey || "")
+      .replace(/\u00A0/g, " ")   // non-breaking space
+      .replace(/\s+/g, " ")
+      .trim();
+
     if (!key) return match;
 
-    if (key === "history") return "{history}";
+    if (key === "history") return "this is last message history:";
     if (key === "now") return new Date().toISOString();
 
-    const val =
-      getByPath(ctx, key) ??
-      getByPath(ctx.user, key) ??
-      getByPath(ctx.bot, key) ??
-      getByPath(ctx.master, key);
+    let val;
+
+    // ✅ Route by prefix
+    if (key.startsWith("user.")) {
+      val = getByPath(ctx.user, key.slice(5));
+    } else if (key.startsWith("bot.")) {
+      val = getByPath(ctx.bot, key.slice(4));
+    } else if (key.startsWith("master.")) {
+      val = getByPath(ctx.master, key.slice(7));
+    } else {
+      // fallback: try ctx root
+      val = getByPath(ctx, key);
+    }
+
+    if (val === undefined) {
+      console.log("[replaceData] unresolved:", JSON.stringify(rawKey), "->", JSON.stringify(key));
+      return match;
+    }
 
     return toStr(val);
   });
@@ -231,14 +245,7 @@ if (!bot) throw new Error("Bot not found");
   const historyText = await fetchLastMessages(userId, botId, historyLimit);
 
   // 4) Build SINGLE FINAL PARAGRAPH
-  const finalParagraph = `You are an AI chat assistant acting as a ${bot_gender} character named ${
-    bot.full_name || bot.username || "the bot"
-  } with a ${personality_type || "friendly"} personality. The user is a ${
-    user_type
-  } user and the current time context is ${user_time}. Follow this behavior and tone strictly: "${instructionText}". Here is the recent conversation history between the user and you to understand context and flow: "${
-    historyText || "No previous conversation."
-  }". Based on all this information, generate a natural, engaging, emotionally appropriate, human-like reply to the user's latest message.`;
-
+  const finalParagraph = `${instructionText} ${historyText || "No previous conversation."}"`;
   console.log("\n===== FINAL AI PROMPT =====\n");
   console.log(finalParagraph);
   console.log("\n===========================\n");

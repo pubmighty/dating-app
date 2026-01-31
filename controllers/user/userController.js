@@ -15,11 +15,16 @@ const {
   cleanupTempFiles,
   uploadFile,
 } = require("../../utils/helpers/fileUpload");
+const { Op } = require("sequelize");
 const { logActivity } = require("../../utils/helpers/activityLogHelper");
 const { isUserSessionValid } = require("../../utils/helpers/authHelper");
 const { publicUserAttributes } = require("../../utils/staticValues");
 const FileUpload = require("../../models/FileUpload");
 const UserSession = require("../../models/UserSession");
+const bcrypt = require("bcryptjs");
+const { sendOtpMail } = require("../../utils/helpers/mailHelper");
+const { generateOtp } = require("../../utils/helpers/authHelper");
+const UserOtp = require("../../models/UserOTP");
 
 async function getUserProfile(req, res) {
   try {
@@ -689,9 +694,316 @@ async function changePassword(req, res) {
   }
 }
 
+async function updateUserEmail(req, res) {
+  try {
+    const sessionResult = await isUserSessionValid(req);
+    if (!sessionResult.success) return res.status(401).json(sessionResult);
+    const userId = Number(sessionResult.data);
+
+    const schema = Joi.object({
+      email: Joi.string()
+        .trim()
+        .lowercase()
+        .email({ tlds: { allow: false } })
+        .required(),
+    });
+
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid request",
+        data: null,
+      });
+    }
+
+    const newEmail = String(value.email).toLowerCase().trim();
+    const verifyEmail = String(await getOption("verify_email", "true")) === "true";
+
+    const result = await sequelize.transaction(async (transaction) => {
+      const user = await User.findByPk(userId, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (!user) {
+        const err = new Error("User not found.");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const currentEmail = String(user.email || "").toLowerCase().trim();
+      if (currentEmail && currentEmail === newEmail) {
+        return { mode: "same", user };
+      }
+
+      // email already used by another user
+      const alreadyUsed = await User.findOne({
+        where: { email: newEmail, id: { [Op.ne]: user.id } },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (alreadyUsed) {
+        const err = new Error("This email is already in use.");
+        err.statusCode = 409;
+        throw err;
+      }
+
+      // if verify_email OFF -> update directly
+      if (!verifyEmail) {
+        await user.update({ email: newEmail }, { transaction });
+        return { mode: "direct", user };
+      }
+
+      // verify_email ON -> OTP flow (bind email using action)
+      const now = new Date();
+      const action = `update_email:${newEmail}`.slice(0, 50); // inline, no helper
+
+      // don't resend if there is already active OTP for same email
+      const activeOtp = await UserOtp.findOne({
+        where: {
+          user_id: user.id,
+          action,
+          status: false,
+          expiry: { [Op.gt]: now },
+        },
+        order: [["createdAt", "DESC"]],
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (activeOtp) {
+        return { mode: "otp_active", expires_at: activeOtp.expiry };
+      }
+
+      // expire old OTPs for update-email (for safety: expire ALL update_email:* OTPs)
+      await UserOtp.update(
+        { status: true },
+        {
+          where: {
+            user_id: user.id,
+            action: { [Op.like]: "update_email:%" },
+            status: false,
+          },
+          transaction,
+        }
+      );
+
+      const otp = generateOtp();
+      const otpMinutes = parseInt(await getOption("signup_otp_time_min", 5), 10);
+      const otpExpiresAt = new Date(Date.now() + otpMinutes * 60 * 1000);
+
+      const otpRow = await UserOtp.create(
+        {
+          user_id: user.id,
+          otp,
+          expiry: otpExpiresAt,
+          action,
+          status: false,
+        },
+        { transaction }
+      );
+
+      // Send OTP to NEW email
+      await sendOtpMail(
+        { id: user.id, email: newEmail },
+        otpRow,
+        "Verify New Email",
+        "update_email"
+      );
+
+      return { mode: "otp_sent", expires_at: otpExpiresAt };
+    });
+
+    if (result.mode === "same") {
+      await result.user.reload({ attributes: publicUserAttributes });
+      return res.status(200).json({
+        success: true,
+        message: "Email is already the same.",
+        data: { user: result.user, otp_required: false },
+      });
+    }
+
+    if (result.mode === "direct") {
+      await result.user.reload({ attributes: publicUserAttributes });
+      return res.status(200).json({
+        success: true,
+        message: "Email updated successfully.",
+        data: { user: result.user, otp_required: false },
+      });
+    }
+
+    if (result.mode === "otp_active") {
+      return res.status(200).json({
+        success: true,
+        message: "OTP already sent. Please wait before requesting again.",
+        data: {
+          otp_required: true,
+          otp_active: true,
+          expires_at: result.expires_at,
+        },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "OTP sent to new email.",
+      data: { otp_required: true, otp_active: false, expires_at: result.expires_at },
+    });
+  } catch (err) {
+    console.error("Error during [updateUserEmail]:", err);
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      message: err.message || "Internal server error",
+      data: null,
+    });
+  }
+}
+
+async function verifyUpdateUserEmail(req, res) {
+  const t = await sequelize.transaction();
+  try {
+    const sessionResult = await isUserSessionValid(req);
+    if (!sessionResult.success) {
+      await t.rollback();
+      return res.status(401).json(sessionResult);
+    }
+    const userId = Number(sessionResult.data);
+
+    const verifyEmail = String(await getOption("verify_email", "true")) === "true";
+    if (!verifyEmail) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Email verification is disabled by admin.",
+        data: null,
+      });
+    }
+
+    const schema = Joi.object({
+      email: Joi.string()
+        .trim()
+        .lowercase()
+        .email({ tlds: { allow: false } })
+        .required(),
+      otp: Joi.string().trim().pattern(/^[0-9]{6}$/).required(),
+    });
+
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+      convert: true,
+    });
+
+    if (error) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: error.details?.[0]?.message || "Invalid request",
+        data: null,
+      });
+    }
+
+    const newEmail = String(value.email).toLowerCase().trim();
+    const otp = String(value.otp).trim();
+    const action = `update_email:${newEmail}`.slice(0, 50); 
+
+    const user = await User.findByPk(userId, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!user) {
+      await t.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+        data: null,
+      });
+    }
+    const alreadyUsed = await User.findOne({
+      where: { email: newEmail, id: { [Op.ne]: user.id } },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (alreadyUsed) {
+      await t.rollback();
+      return res.status(409).json({
+        success: false,
+        message: "This email is already in use.",
+        data: null,
+      });
+    }
+
+    const now = new Date();
+    const otpRow = await UserOtp.findOne({
+      where: {
+        user_id: user.id,
+        action,
+        status: false,
+      },
+      order: [["createdAt", "DESC"]],
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (!otpRow || (otpRow.expiry && now > otpRow.expiry) || String(otpRow.otp) !== otp) {
+      await t.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired OTP.",
+        data: null,
+      });
+    }
+
+    // mark used
+    await otpRow.update({ status: true }, { transaction: t });
+
+    // update email
+    await user.update({ email: newEmail }, { transaction: t });
+
+    // optional: expire any other update_email OTPs
+    await UserOtp.update(
+      { status: true },
+      {
+        where: {
+          user_id: user.id,
+          action: { [Op.like]: "update_email:%" },
+          status: false,
+        },
+        transaction: t,
+      }
+    );
+
+    await t.commit();
+
+    await user.reload({ attributes: publicUserAttributes });
+    const files = await FileUpload.findAll({ where: { user_id: user.id } });
+
+    return res.status(200).json({
+      success: true,
+      message: "Email updated successfully.",
+      data: { user, files },
+    });
+  } catch (err) {
+    try { await t.rollback(); } catch (_) {}
+    console.error("Error during [verifyUpdateUserEmail]:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      data: null,
+    });
+  }
+}
+
 module.exports = {
   getUserProfile,
   updateUserProfile,
+  updateUserEmail,
+  verifyUpdateUserEmail,
   uploadProfileMedia,
   getUserSettings,
   updateUserSettings,

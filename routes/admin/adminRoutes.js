@@ -1,9 +1,6 @@
 const router = require("express").Router();
 const adminController = require("../../controllers/admin/adminController");
-const {
-  getSettings,
-  updateSettings,
-} = require("../../controllers/admin/settingsController");
+const settingController = require("../../controllers/admin/settingsController");
 const { fileUploader } = require("../../utils/helpers/fileUpload");
 const authController = require("../../controllers/admin/authController");
 const userController = require("../../controllers/admin/userController");
@@ -12,6 +9,7 @@ const coinPackageController = require("../../controllers/admin/coinPackageContro
 const chatController = require("../../controllers/admin/chatController");
 const adminNotificationController = require("../../controllers/admin/notificationController");
 const adminGetMasterPrompts = require("../../controllers/admin/masterPromptController");
+const fileUploadController = require("../../controllers/admin/fileUploadController");
 /**
  *  GET /chats
  * ------------------------------------------------------------
@@ -374,10 +372,57 @@ router.post("/resend-send-otp", authController.sendOTPAgainForAdmin);
  * - Used as an additional security layer only.
  */
 
-router.get("/settings", getSettings);
-router.post("/settings", updateSettings);
-
+router.get("/settings", settingController.getSettings);
+router.post("/settings", settingController.updateSettings);
+router.get("/stats", settingController.getDashboardStats);
 router.post("/altcha-captcha-challenge", authController.altchaCaptchaChallenge);
+
+/**
+ * GET /admin/settings
+ * ------------------------------------------------------------
+ * Fetches all application settings in a grouped and structured format.
+ *
+ * Purpose:
+ * - Provides a centralized configuration panel for administrators.
+ * - Allows frontend admin UI to dynamically render settings.
+ *
+ * Security & Authorization:
+ * - Requires a valid admin session.
+ * - Only authenticated admins can access this endpoint.
+ *
+ * Behavior:
+ * - Automatically ensures all default settings exist in DB.
+ * - Fetches all stored options.
+ * - Groups them by logical sections:
+ *   - auth
+ *   - pagination
+ *   - files
+ *   - chat
+ *   - ads
+ *   - video_call
+ *   - admin_pagination
+ *   - security
+ *   - app
+ *
+ * Security Handling:
+ * - Secret fields (captcha keys, secret keys, etc.) are masked.
+ * - Actual secret values are never exposed in API responses.
+ *
+ * Output:
+ * - Structured JSON grouped by section.
+ *
+ * Example Response:
+ * {
+ *   "auth": { ... },
+ *   "pagination": { ... },
+ *   "security": { ... },
+ *   "app": { ... }
+ * }
+ *
+ * Notes:
+ * - Default values are auto-created if missing.
+ * - Designed for dynamic admin configuration UI.
+ */
 
 /**
  * GET /users
@@ -2211,5 +2256,13 @@ router.post(
   "/master-prompts/delete/:id",
   adminGetMasterPrompts.adminDeleteMasterPrompt,
 );
+router.get("/files", fileUploadController.getFiles);
+router.post(
+  "/files/upload",
+  fileUploader.single("file"),
+  fileUploadController.addFile,
+);
+router.post("/files/:id/importance", fileUploadController.updateFileImportance);
+router.post("/files/:id/delete", fileUploadController.deleteFile);
 
 module.exports = router;
