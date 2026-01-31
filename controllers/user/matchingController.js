@@ -472,35 +472,55 @@ async function getUserMatches(req, res) {
     }
 
     const where =
-      action === "like"
-        ? { user_id: currentUserId, action: "like", is_mutual: 0 }
-        : { user_id: currentUserId, action: "match", is_mutual: 1 };
+  action === "like"
+    ? { user_id: currentUserId, action: "like", is_mutual: 0 }
+    : {
+        user_id: currentUserId,
+        [Op.or]: [
+          { action: "match", is_mutual: 1 },
+          { action: "like", is_mutual: 0 }, 
+        ],
+      };
 
     const result = await UserInteraction.findAndCountAll({
       where,
+      distinct: true,
       include: [
         {
           model: User,
           as: "targetUser",
           required: true,
           where: { is_active: true, status: 1 },
-          attributes: [
-            "id",
-            "full_name",
-            "full_name",
-            "avatar",
-            "gender",
-            "bio",
-            "looking_for",
-          ],
+          attributes: ["id", "full_name", "avatar", "gender", "bio", "looking_for"],
         },
       ],
       order: [[sort_by, order]],
       limit,
       offset,
     });
-    
-    let items = result.rows;
+   let items = await Promise.all(
+        result.rows.map(async (row) => {
+          const plain = row.toJSON();
+          const targetUserId = plain?.targetUser?.id;
+          const isMatched = Number(plain?.is_mutual) === 1;
+          let chatId = null;
+          if (isMatched && targetUserId) {
+            const chat = await getOrCreateChatBetweenUsers(
+              currentUserId,
+              targetUserId,
+              null
+            );
+            chatId = chat?.id || null;
+          }
+
+          return {
+            ...plain,
+            is_matched: isMatched, 
+            chat_id: chatId,       
+          };
+        })
+      );
+
 
     if (action !== "like") {
       items = await Promise.all(
