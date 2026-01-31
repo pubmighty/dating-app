@@ -324,6 +324,204 @@ async function disableTwofaEmail(req, res) {
       .json({ success: false, msg: "Internal server error" });
   }
 }
+async function disableTwoFA(req, res) {
+  try {
+    // 1) Validate body (otp optional)
+    const schema = Joi.object({
+      otp: Joi.string()
+        .length(6)
+        .pattern(/^[0-9]{6}$/)
+        .optional()
+        .allow("", null)
+        .messages({
+          "string.length": "OTP must be 6 digits",
+          "string.pattern.base": "OTP must be 6 numeric digits",
+        }),
+    }).unknown(false);
+
+    const { error, value } = schema.validate(req.body || {}, {
+      abortEarly: true,
+      stripUnknown: true,
+    });
+
+    if (error) {
+      return res
+        .status(400)
+        .json({ success: false, msg: error.details[0].message });
+    }
+
+    // 2) Auth
+    const session = await isAdminSessionValid(req);
+    if (!session?.success || !session?.data) {
+      return res
+        .status(401)
+        .json({ success: false, msg: session?.msg || "Unauthorized" });
+    }
+
+    const admin = await Admin.findByPk(Number(session.data));
+    if (!admin) {
+      return res.status(404).json({ success: false, msg: "Admin not found" });
+    }
+
+    if (Number(admin.status) !== 1) {
+      return res.status(403).json({ success: false, msg: "Forbidden" });
+    }
+
+    // 3) Must have 2FA enabled
+    if (Number(admin.two_fa) !== 1 || !admin.two_fa_method) {
+      return res.status(400).json({
+        success: false,
+        msg: "Two-Factor Authentication is not enabled.",
+      });
+    }
+
+    const incomingOtp = String(value.otp || "").trim();
+    const method = String(admin.two_fa_method || "").toLowerCase();
+
+    // -------------------------
+    // METHOD: EMAIL (2-step)
+    // -------------------------
+    if (method === "email") {
+      // STEP 1: Send OTP (if otp missing)
+      if (!incomingOtp) {
+        const existing = await AdminOTP.findOne({
+          where: {
+            admin_id: admin.id,
+            action: "disable_two_fa_email",
+            status: 0,
+            expiry: { [Op.gt]: new Date() },
+          },
+          order: [["created_at", "DESC"]],
+        });
+
+        if (existing) {
+          return res.status(200).json({
+            success: true,
+            msg: "OTP already sent to your email",
+            data: { step: "verify_otp" },
+          });
+        }
+
+        const otpMinutes = parseInt(
+          await getOption("admin_otp_valid_minutes", 5),
+          10
+        );
+
+        const otp = generateOtp();
+        const expiry = new Date(Date.now() + otpMinutes * 60 * 1000);
+
+        await AdminOTP.destroy({
+          where: { admin_id: admin.id, action: "disable_two_fa_email" },
+        });
+
+        await AdminOTP.create({
+          admin_id: admin.id,
+          otp,
+          expiry,
+          action: "disable_two_fa_email",
+          status: 0,
+        });
+
+        await transporter.sendMail({
+          from: process.env.NO_REPLY_MAIL,
+          to: admin.email,
+          subject: `Your OTP to Disable Two-Factor Authentication on ${process.env.APP_NAME}`,
+          html: removeTwoFA(otp, admin),
+        });
+
+        return res.status(200).json({
+          success: true,
+          msg: "OTP sent to your email",
+          data: { step: "verify_otp", expiresInMinutes: otpMinutes },
+        });
+      }
+
+      // STEP 2: Verify OTP + Disable
+      const otpRecord = await AdminOTP.findOne({
+        where: {
+          admin_id: admin.id,
+          action: "disable_two_fa_email",
+          status: 0,
+          expiry: { [Op.gt]: new Date() },
+        },
+        order: [["created_at", "DESC"]],
+      });
+
+      if (!otpRecord) {
+        return res
+          .status(400)
+          .json({ success: false, msg: "Invalid OTP or expired." });
+      }
+
+      if (String(otpRecord.otp) !== String(incomingOtp)) {
+        return res.status(400).json({ success: false, msg: "Invalid OTP" });
+      }
+
+      await otpRecord.update({ status: 1 });
+
+      await admin.update({
+        two_fa: 0,
+        two_fa_method: null,
+        two_fa_secret: null,
+      });
+
+      return res.status(200).json({
+        success: true,
+        msg: "Two-Factor Authentication has been disabled.",
+      });
+    }
+
+    // -------------------------
+    // METHOD: AUTH APP (2-step)
+    // -------------------------
+    if (method === "auth_app") {
+      // STEP 1: ask for otp (if missing)
+      if (!incomingOtp) {
+        return res.status(200).json({
+          success: true,
+          msg: "Enter OTP from your authenticator app to disable 2FA.",
+          data: { step: "verify_otp" },
+        });
+      }
+
+      // STEP 2: verify app otp
+      if (!admin.two_fa_secret) {
+        return res.status(400).json({
+          success: false,
+          msg: "2FA secret is missing. Please contact support.",
+        });
+      }
+
+      const ok = await verifyTwoFAToken(admin, incomingOtp);
+      if (!ok) {
+        return res.status(400).json({ success: false, msg: "Invalid OTP" });
+      }
+
+      await admin.update({
+        two_fa: 0,
+        two_fa_method: null,
+        two_fa_secret: null,
+      });
+
+      return res.status(200).json({
+        success: true,
+        msg: "Two-Factor Authentication has been disabled.",
+      });
+    }
+
+    // Unknown method
+    return res.status(400).json({
+      success: false,
+      msg: "Invalid 2FA method configured. Please contact support.",
+    });
+  } catch (err) {
+    console.error("disableTwoFA error:", err);
+    return res
+      .status(500)
+      .json({ success: false, msg: "Internal server error" });
+  }
+}
+
 
 async function changeEmailRequest(req, res) {
   try {
@@ -689,6 +887,7 @@ module.exports = {
   enableTwofaEmail,
   verifyTwofaEmail,
   disableTwofaEmail,
+  disableTwoFA,
   changeEmailRequest,
   changeEmailVerify,
   updatePassword,
